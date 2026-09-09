@@ -1,0 +1,23 @@
+   Compiling bit-consensus-probe v0.1.0 (D:\others\BIT\feasibility\consensus-probe)
+warning: function `proportional` is never used
+  --> src\economics.rs:19:8
+   |
+19 | pub fn proportional(a:u128,b:u128,d:u128)->Result<u128>{
+   |        ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `total` and `burn` are never used
+  --> src\economics.rs:38:12
+   |
+32 | impl Supply {
+   | ----------- methods in this implementation
+...
+38 |     pub fn total(&self)->u128{self.issued()-self.burned}
+   |            ^^^^^
+...
+55 |     pub fn burn(&mut self,amount:u128)->Result<()>{
+   |            ^^^^
+
+warning: `bit-consensus-probe` (bin "bit-consensus-probe") generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 5.73s

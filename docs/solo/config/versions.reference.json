@@ -1,0 +1,24 @@
+{
+  "status": "REFERENCE_NOT_A_COMPILED_LOCKFILE",
+  "checked_on": "2026-09-07",
+  "baseline": {
+    "rust": "1.98.1",
+    "rust_edition": "2021",
+    "cometbft": "0.38.23",
+    "tendermint_rs": "0.40.4",
+    "penumbra_primitives": "v2.1.1",
+    "flutter": "3.47.2",
+    "flutter_rust_bridge_major": 2,
+    "postgresql_major": 17
+  },
+  "must_generate": [
+    "exact_source_commits",
+    "Cargo.lock",
+    "pubspec.lock",
+    "pnpm-lock.yaml",
+    "platform_support_matrix",
+    "crypto_manifest_with_content_hashes",
+    "SBOM"
+  ],
+  "whole_stack_build_verified": false
+}

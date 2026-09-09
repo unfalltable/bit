@@ -1,0 +1,18 @@
+[
+  {
+    "name": "spend_pk",
+    "url": "https://media.githubusercontent.com/media/penumbra-zone/penumbra/3a87ce786373113f9b82d3b6df9504998b7f44a7/crates/crypto/proof-params/src/gen/spend_pk.bin",
+    "sha256": "87eca85bef562803fb9684c56c0a6db84aa6d0791b1c00b909e6f2a5c2cff452",
+    "expected_sha256": "87eca85bef562803fb9684c56c0a6db84aa6d0791b1c00b909e6f2a5c2cff452",
+    "size": 21673392,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\spend_pk.bin"
+  },
+  {
+    "name": "output_pk",
+    "url": "https://media.githubusercontent.com/media/penumbra-zone/penumbra/3a87ce786373113f9b82d3b6df9504998b7f44a7/crates/crypto/proof-params/src/gen/output_pk.bin",
+    "sha256": "c9e97866edd6c815a7bcb2f3b5493713794369692bb96e5a2e682613c330e4a8",
+    "expected_sha256": "c9e97866edd6c815a7bcb2f3b5493713794369692bb96e5a2e682613c330e4a8",
+    "size": 7257360,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\output_pk.bin"
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mainnet external evidence gate",
+  "type": "object",
+  "required": [
+    "mainnet_ready"
+  ],
+  "properties": {
+    "mainnet_ready": {
+      "const": false
+    }
+  },
+  "description": "模板阶段必须false。真实mainnet manifest另由D-028生成严谨schema与独立证据，不通过改此布尔值放行。"
+}

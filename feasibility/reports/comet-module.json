@@ -1,0 +1,16 @@
+{
+	"Path": "github.com/cometbft/cometbft",
+	"Version": "v0.38.23",
+	"Info": "D:\\others\\BIT\\feasibility\\.tools\\go-home\\pkg\\mod\\cache\\download\\github.com\\cometbft\\cometbft\\@v\\v0.38.23.info",
+	"GoMod": "D:\\others\\BIT\\feasibility\\.tools\\go-home\\pkg\\mod\\cache\\download\\github.com\\cometbft\\cometbft\\@v\\v0.38.23.mod",
+	"Zip": "D:\\others\\BIT\\feasibility\\.tools\\go-home\\pkg\\mod\\cache\\download\\github.com\\cometbft\\cometbft\\@v\\v0.38.23.zip",
+	"Dir": "D:\\others\\BIT\\feasibility\\.tools\\go-home\\pkg\\mod\\github.com\\cometbft\\cometbft@v0.38.23",
+	"Sum": "h1:jtCe5Do4EcHVf/FCyZMvkBm+AmsRGGyvswImXYAabdM=",
+	"GoModSum": "h1:jtH//cs5e2U5dNiaYIPMBwWXZsedXJfIie77gVhuRaA=",
+	"Origin": {
+		"VCS": "git",
+		"URL": "https://github.com/cometbft/cometbft",
+		"Hash": "feb2aea4dc271d612129afc958cb844713ec792b",
+		"Ref": "refs/tags/v0.38.23"
+	}
+}

@@ -1,0 +1,54 @@
+{
+  "unit": "logical_px",
+  "spacing": [
+    4,
+    8,
+    12,
+    16,
+    24,
+    32,
+    48
+  ],
+  "corner_radius": 12,
+  "min_touch_target": 44,
+  "content_max_width": 720,
+  "typography": {
+    "body": 16,
+    "caption": 13,
+    "heading": 24,
+    "amount": 32,
+    "monospace_for": [
+      "addresses",
+      "hashes"
+    ]
+  },
+  "behavior": {
+    "default_primary_tabs": [
+      "钱包",
+      "质押",
+      "记录",
+      "设置"
+    ],
+    "amounts_never_float": true,
+    "large_font_scale": 2.0,
+    "status_never_color_only": true,
+    "hide_sensitive_background_snapshot": true
+  },
+  "colors": {
+    "light": {
+      "background": "#F7F8FA",
+      "surface": "#FFFFFF",
+      "text": "#17212B",
+      "primary": "#185B44",
+      "error": "#B42318"
+    },
+    "dark": {
+      "background": "#111820",
+      "surface": "#1B2530",
+      "text": "#F4F7FA",
+      "primary": "#8AD0B4",
+      "error": "#FFAAA1"
+    }
+  },
+  "note": "设计建议；须在正式UI实现中实测对比度与放大布局，不代表已视觉验收。"
+}

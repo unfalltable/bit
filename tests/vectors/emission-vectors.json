@@ -1,0 +1,30 @@
+{
+  "scope": "Golden arithmetic and encoding fixtures; not consensus or security evidence.",
+  "reference_policy": {
+    "max_supply_atomic": "10240000000000000000",
+    "genesis_atomic": "10000000000000000",
+    "halving_epochs": 35040,
+    "epoch_blocks": 720,
+    "canonical_cbor_hex": "89774255444745545f48414c56494e475f45504f43485f56315000000000000000008e1bc9bf0400000008500000000000000000002386f26fc100001902d01988e0781b464f52464549545f554e4953535545445f4e4f5f43415443485550f4f4",
+    "monetary_policy_hash": "1f30a6e87b17cfafdf8e3265beb24cf1fc366307f62ac9475e5a558fdeddddcc",
+    "approval": "TEST_FIXTURE_NOT_MAINNET_APPROVAL"
+  },
+  "manual_small_vector": {
+    "budget_atomic": "15",
+    "halving_epochs": 2,
+    "quotas_atomic": ["4", "4", "2", "2", "1", "1", "0", "1", "0", "0"]
+  },
+  "reference_points": [
+    {"completed_epochs": "0", "scheduled_to_date": "0", "next_epoch_quota": "145976027397260"},
+    {"completed_epochs": "1", "scheduled_to_date": "145976027397260", "next_epoch_quota": "145976027397260"},
+    {"completed_epochs": "2", "scheduled_to_date": "291952054794520", "next_epoch_quota": "145976027397260"},
+    {"completed_epochs": "35039", "scheduled_to_date": "5114854023972602739", "next_epoch_quota": "145976027397261"},
+    {"completed_epochs": "35040", "scheduled_to_date": "5115000000000000000", "next_epoch_quota": "72988013698630"},
+    {"completed_epochs": "35041", "scheduled_to_date": "5115072988013698630", "next_epoch_quota": "72988013698630"},
+    {"completed_epochs": "70080", "scheduled_to_date": "7672500000000000000", "next_epoch_quota": "36494006849315"},
+    {"completed_epochs": "140160", "scheduled_to_date": "9590625000000000000", "next_epoch_quota": "9123501712328"},
+    {"completed_epochs": "2242559", "scheduled_to_date": "10229999999999999999", "next_epoch_quota": "1"},
+    {"completed_epochs": "2242560", "scheduled_to_date": "10230000000000000000", "next_epoch_quota": "0"},
+    {"completed_epochs": "2242561", "scheduled_to_date": "10230000000000000000", "next_epoch_quota": "0"}
+  ]
+}

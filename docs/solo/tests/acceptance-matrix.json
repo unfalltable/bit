@@ -1,0 +1,2086 @@
+{
+  "spec_version": "1.0",
+  "notice": "计划，不是执行结果；参考Python模型的实际测试另见VALIDATION_REPORT.md。",
+  "tests": [
+    {
+      "id": "T-SEC-001",
+      "title": "无身份离线创建",
+      "requirements": [
+        "PR-001"
+      ],
+      "task_id": "D-014",
+      "kind": "INTEGRATION",
+      "expected": "禁用所有网络仍可生成本地钱包且不上传身份",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-SEC-002",
+      "title": "没有生物识别入口",
+      "requirements": [
+        "PR-002"
+      ],
+      "task_id": "D-014",
+      "kind": "INTEGRATION",
+      "expected": "依赖、平台权限与全部页面没有生物识别调用",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-SEC-003",
+      "title": "错误密码与离线加密",
+      "requirements": [
+        "PR-003"
+      ],
+      "task_id": "D-011",
+      "kind": "INTEGRATION",
+      "expected": "错误密码拒绝；磁盘/WAL扫描不出现种子",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-SEC-004",
+      "title": "后台锁定与旧计划失效",
+      "requirements": [
+        "PR-003"
+      ],
+      "task_id": "D-014",
+      "kind": "INTEGRATION",
+      "expected": "锁定后旧会话不可再次签名",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-SEC-005",
+      "title": "修改密码掉电",
+      "requirements": [
+        "PR-003"
+      ],
+      "task_id": "D-011",
+      "kind": "INTEGRATION",
+      "expected": "原子重包裹中断后至少一个已确认密码仍能恢复",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-SEC-006",
+      "title": "节点无法签付款",
+      "requirements": [
+        "PR-011"
+      ],
+      "task_id": "D-020",
+      "kind": "INTEGRATION",
+      "expected": "节点仅持共识密钥，未知签名类型拒绝",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-SEC-007",
+      "title": "网关不能篡改收款",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-006",
+      "kind": "INTEGRATION",
+      "expected": "修改输出密文/费用/业务动作后授权或binding失败",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-CRY-001",
+      "title": "有效Spend和Output向量",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-003",
+      "kind": "INTEGRATION",
+      "expected": "固定参数真实证明跨正式平台验证一致",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-CRY-002",
+      "title": "错误证明与错误子群",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-003",
+      "kind": "INTEGRATION",
+      "expected": "畸形编码、子群、见证、验证键全部拒绝",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-CRY-003",
+      "title": "假公开释放额",
+      "requirements": [
+        "PR-006"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "Claim正额必须来自同高度状态与权限",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-CRY-004",
+      "title": "第二种非零资产输出",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-006",
+      "kind": "INTEGRATION",
+      "expected": "没有合法输入的非本币正输出不能通过绑定",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-CRY-005",
+      "title": "memo签名完整性",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-006",
+      "kind": "INTEGRATION",
+      "expected": "第10项密文与每个wrapped key被签，改动即拒绝",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-CRY-006",
+      "title": "memo恢复与发票ID",
+      "requirements": [
+        "PR-012"
+      ],
+      "task_id": "D-012",
+      "kind": "INTEGRATION",
+      "expected": "新设备可解密相同memo和发票关联，不公开地址索引",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ENC-001",
+      "title": "非规范Protobuf",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-002",
+      "kind": "INTEGRATION",
+      "expected": "未知字段、重复单值、非最短varint、额外签名均拒绝",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ENC-002",
+      "title": "CBOR长度与数值边界",
+      "requirements": [
+        "PR-005"
+      ],
+      "task_id": "D-002",
+      "kind": "INTEGRATION",
+      "expected": "map/float/不定长/amount>=2^120/负值拒绝",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ENC-003",
+      "title": "跨语言金额精度",
+      "requirements": [
+        "PR-005"
+      ],
+      "task_id": "D-002",
+      "kind": "INTEGRATION",
+      "expected": "大于2^53金额不会被JS/Dart double截断",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ENC-004",
+      "title": "角色与链重放",
+      "requirements": [
+        "PR-011"
+      ],
+      "task_id": "D-002",
+      "kind": "INTEGRATION",
+      "expected": "chain_context、role_domain或sequence不符即拒绝",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-001",
+      "title": "委托与延后激活",
+      "requirements": [
+        "PR-006"
+      ],
+      "task_id": "D-007",
+      "kind": "INTEGRATION",
+      "expected": "pending不投票不领取旧周期奖励；每激活epoch最多1000个pending，满额拒绝无扣款",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-002",
+      "title": "份额滑点拒绝",
+      "requirements": [
+        "PR-006"
+      ],
+      "task_id": "D-007",
+      "kind": "INTEGRATION",
+      "expected": "激活达不到min_shares不静默更低份额成交",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-003",
+      "title": "小额份额零值",
+      "requirements": [
+        "PR-006"
+      ],
+      "task_id": "D-007",
+      "kind": "INTEGRATION",
+      "expected": "零份额拒绝；不能转币给池而无权利",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-004",
+      "title": "候选不虚报出块奖励",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-007",
+      "kind": "INTEGRATION",
+      "expected": "未进实际集合不因开机发币；最后合格运营者不得主动清空集合，普通委托者仍可退出",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-005",
+      "title": "自质押双授权",
+      "requirements": [
+        "PR-011"
+      ],
+      "task_id": "D-007",
+      "kind": "INTEGRATION",
+      "expected": "self_bond需owner与operator对最终效果授权",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-006",
+      "title": "新持仓恢复无计数器",
+      "requirements": [
+        "PR-012"
+      ],
+      "task_id": "D-012",
+      "kind": "INTEGRATION",
+      "expected": "只用恢复种子全扫收据找回随机nonce和持仓",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-007",
+      "title": "持仓控制键不可修改",
+      "requirements": [
+        "PR-011"
+      ],
+      "task_id": "D-007",
+      "kind": "INTEGRATION",
+      "expected": "未知转让/改owner交易拒绝",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-008",
+      "title": "部分退出与本周期收益",
+      "requirements": [
+        "PR-008"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "按比例减P/S，停止该部分收益，未结算取舍明确",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-009",
+      "title": "全部质押仍可退出",
+      "requirements": [
+        "PR-009"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "Unbond/Claim均能从释放值支付费用，无后台补币",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-010",
+      "title": "双重到期边界",
+      "requirements": [
+        "PR-008"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "仅时间或仅高度达到仍拒绝，严格大于才可取回",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-011",
+      "title": "集合H+2偏移",
+      "requirements": [
+        "PR-008"
+      ],
+      "task_id": "D-005",
+      "kind": "INTEGRATION",
+      "expected": "exit exposure含H+1旧集合末块而非只到epoch末",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-012",
+      "title": "重复领取",
+      "requirements": [
+        "PR-008"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "同一ticket第二次领取不改变任何容器",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-013",
+      "title": "最后份额余量",
+      "requirements": [
+        "PR-008"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "最后pool/cohort全退取得剩余，不留无主原子币",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-014",
+      "title": "成熟粉尘额外付费",
+      "requirements": [
+        "PR-009"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "释放不足费允许私密输入补费，未假装免费",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-015",
+      "title": "持续离线不罚本金",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "满足窗口后jail，漏签无贡献，本金不做离线罚没",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-016",
+      "title": "双签罚没与冻结",
+      "requirements": [
+        "PR-008"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "按证据有效性处罚并冻结有关领取",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-017",
+      "title": "处罚队列崩溃重启",
+      "requirements": [
+        "PR-015"
+      ],
+      "task_id": "D-008",
+      "kind": "INTEGRATION",
+      "expected": "有界游标恢复不漏扣不重复扣",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-018",
+      "title": "轮换不清旧键责任",
+      "requirements": [
+        "PR-011"
+      ],
+      "task_id": "D-007",
+      "kind": "INTEGRATION",
+      "expected": "历史集合旧键有效证据仍可核验",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-POS-019",
+      "title": "佣金提高双条件公告",
+      "requirements": [
+        "PR-007"
+      ],
+      "task_id": "D-009",
+      "kind": "INTEGRATION",
+      "expected": "未满公告时间/高度不提高已结算佣金",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ACC-001",
+      "title": "全局总供给守恒",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-009",
+      "kind": "INTEGRATION",
+      "expected": "T=Q+P+D+X+C+F+G=genesis+minted-burned",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ACC-002",
+      "title": "奖励停止墙钟补发",
+      "requirements": [
+        "PR-007"
+      ],
+      "task_id": "D-009",
+      "kind": "INTEGRATION",
+      "expected": "停链后不按真实时间补巨量收益",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ACC-003",
+      "title": "无合格池不凭空铸币",
+      "requirements": [
+        "PR-007"
+      ],
+      "task_id": "D-009",
+      "kind": "INTEGRATION",
+      "expected": "空分母/零池/已处罚资格按统一规则过滤",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ACC-004",
+      "title": "发行技术上限",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-009",
+      "kind": "INTEGRATION",
+      "expected": "临近cap只铸剩余额，投票权无int64溢出",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ACC-005",
+      "title": "原子交易失败无扣费",
+      "requirements": [
+        "PR-005"
+      ],
+      "task_id": "D-006",
+      "kind": "INTEGRATION",
+      "expected": "资金与nullifier/位置序号一起回滚",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-ACC-006",
+      "title": "重复创世领取",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-025",
+      "kind": "INTEGRATION",
+      "expected": "分配权只消耗一次，初始selfbond不与G重复",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-BFT-001",
+      "title": "真实四进程网络",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-005",
+      "kind": "INTEGRATION",
+      "expected": "多个CometBFT/app/signer不是内存模拟对象；非自愿无安全集合时进入预定义停签状态，不返回非法空集合",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-BFT-002",
+      "title": "提案冲突拒绝",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-005",
+      "kind": "INTEGRATION",
+      "expected": "同块重复nullifier/越资源交易不能被Accept",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-BFT-003",
+      "title": "崩溃重放相同根",
+      "requirements": [
+        "PR-015"
+      ],
+      "task_id": "D-004",
+      "kind": "INTEGRATION",
+      "expected": "Finalize后Commit前崩溃不二次发币",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-BFT-004",
+      "title": "超过三分之一故障",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-005",
+      "kind": "INTEGRATION",
+      "expected": "出现真实停滞，不通过调低阈值恢复",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-BFT-005",
+      "title": "不同CPU相同根",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-005",
+      "kind": "INTEGRATION",
+      "expected": "x64/arm64执行同块得到一致状态根",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-BFT-006",
+      "title": "签名状态回滚",
+      "requirements": [
+        "PR-011"
+      ],
+      "task_id": "D-019",
+      "kind": "INTEGRATION",
+      "expected": "检测本地水位回退即停签，不自动删库",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-BFT-007",
+      "title": "同键双实例与迁移",
+      "requirements": [
+        "PR-015"
+      ],
+      "task_id": "D-019",
+      "kind": "INTEGRATION",
+      "expected": "本地锁与停旧机规则生效，不宣称能探测所有克隆",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-NET-001",
+      "title": "Tor失败无直连",
+      "requirements": [
+        "PR-013"
+      ],
+      "task_id": "D-017",
+      "kind": "INTEGRATION",
+      "expected": "抓包显示钱包链HTTP/DNS无静默绕过",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-NET-002",
+      "title": "服务器遗漏output",
+      "requirements": [
+        "PR-013"
+      ],
+      "task_id": "D-010",
+      "kind": "INTEGRATION",
+      "expected": "compact摘要/树连续性失败，余额未标已同步",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-NET-003",
+      "title": "错误state高度证明",
+      "requirements": [
+        "PR-013"
+      ],
+      "task_id": "D-010",
+      "kind": "INTEGRATION",
+      "expected": "h与h+1关联错误不可加可用余额",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-NET-004",
+      "title": "信任过期",
+      "requirements": [
+        "PR-013"
+      ],
+      "task_id": "D-010",
+      "kind": "INTEGRATION",
+      "expected": "过期需重新建立信任，不相信多数HTTP一致",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-NET-005",
+      "title": "冲突已验证头",
+      "requirements": [
+        "PR-013"
+      ],
+      "task_id": "D-010",
+      "kind": "INTEGRATION",
+      "expected": "冻结本地资金操作并显示警报",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-NET-006",
+      "title": "网关超时不重付",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-012",
+      "kind": "INTEGRATION",
+      "expected": "保留原envelope，逐字节重播不新签同款",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-NET-007",
+      "title": "所有历史服务离线",
+      "requirements": [
+        "PR-012"
+      ],
+      "task_id": "D-010",
+      "kind": "INTEGRATION",
+      "expected": "可显示缓存高度但不得伪造完成恢复",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-PAY-001",
+      "title": "迟到少付多付重复",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-015",
+      "kind": "INTEGRATION",
+      "expected": "每笔真到账都入账，发票状态准确",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-PAY-002",
+      "title": "退款不可撤销旧款",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-015",
+      "kind": "INTEGRATION",
+      "expected": "新交易明确金额与新收款地址，无后台撤销",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-PAY-003",
+      "title": "二维码不能自动付款",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-015",
+      "kind": "INTEGRATION",
+      "expected": "扫描只解析，不自动访问任意URL或签名",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-PAY-004",
+      "title": "初始资金与备份",
+      "requirements": [
+        "PR-012"
+      ],
+      "task_id": "D-014",
+      "kind": "INTEGRATION",
+      "expected": "重要收款前验证备份，测试水龙头常驻标识",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-001",
+      "title": "快照状态根",
+      "requirements": [
+        "PR-015"
+      ],
+      "task_id": "D-004",
+      "kind": "INTEGRATION",
+      "expected": "篡改chunk不能启动签名",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-002",
+      "title": "索引可重建",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-023",
+      "kind": "INTEGRATION",
+      "expected": "删除索引不丢链资产，从cursor重建无重复行",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-003",
+      "title": "升级签名与高度",
+      "requirements": [
+        "PR-015"
+      ],
+      "task_id": "D-026",
+      "kind": "INTEGRATION",
+      "expected": "未批准包不静默运行；迁移根可独立复演",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-004",
+      "title": "公开RPC隔离",
+      "requirements": [
+        "PR-011"
+      ],
+      "task_id": "D-020",
+      "kind": "INTEGRATION",
+      "expected": "ABCI/signer/localagent不对公网监听",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-005",
+      "title": "主网假材料阻断",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-030",
+      "kind": "INTEGRATION",
+      "expected": "缺真实签署/审查即失败；改boolean不放行",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-006",
+      "title": "正式平台构建",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-026",
+      "kind": "INTEGRATION",
+      "expected": "逐平台记录真实安装包和安装/卸载结果",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-007",
+      "title": "手机数据预算",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-029",
+      "kind": "INTEGRATION",
+      "expected": "以实测负载报告流量/扫描/恢复，不假造无限轻量",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-008",
+      "title": "供应链与参数篡改",
+      "requirements": [
+        "PR-015"
+      ],
+      "task_id": "D-001",
+      "kind": "INTEGRATION",
+      "expected": "源码锁/参数校验哈希失败阻断启动",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-OPS-009",
+      "title": "隐私日志泄露",
+      "requirements": [
+        "PR-013"
+      ],
+      "task_id": "D-028",
+      "kind": "INTEGRATION",
+      "expected": "敏感字段扫描及外发抓包不能发现私钥/FVK",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W01",
+      "title": "W01 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "本地钱包说明、隐私边界、创建/恢复；进入创建或恢复，不要求账号；断网可进入；无身份 SDK",
+      "pages": [
+        "W01"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W02",
+      "title": "W02 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "密码、重复密码、非托管说明；至少 10 字符；一致后创建；RNG 失败不得继续；不打印密码",
+      "pages": [
+        "W02"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W03",
+      "title": "W03 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "恢复词、保存说明；本地密码再验证、逐步展示；后台立即遮挡；禁止默认复制全部",
+      "pages": [
+        "W03"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W04",
+      "title": "W04 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "随机位置的恢复词验证；验证通过后标记本地已备份；错误不销毁钱包；能返回重看",
+      "pages": [
+        "W04"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W05",
+      "title": "W05 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "恢复词、网络、可选生日高度；校验 checksum；创建新密码；不上传恢复词；生日只是优化，不限制全扫描",
+      "pages": [
+        "W05"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W06",
+      "title": "W06 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "钱包本地名称、密码；解锁会话；错误限流；无指纹、面容、验证码",
+      "pages": [
+        "W06"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W07",
+      "title": "W07 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "可信高度、已扫高度、数据量；暂停/继续、检查点验证；未验证资产不显示为可花费",
+      "pages": [
+        "W07"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W08",
+      "title": "W08 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "旧密码、新密码、重复；原子重包裹 DEK；中断不能使旧新密码都无法打开",
+      "pages": [
+        "W08"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W09",
+      "title": "W09 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "恢复词/加密备份两种明确选择；重新输本地密码；不默认分享给云盘或客服",
+      "pages": [
+        "W09"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W10",
+      "title": "W10 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-014",
+      "kind": "UI_E2E",
+      "expected": "本地删除影响说明；二次确认并验证已知备份；不声称清除云端所有历史或销毁链上币",
+      "pages": [
+        "W10"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W11",
+      "title": "W11 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "可用、质押、解锁、待确认、链同步；收款/转账/质押；余额眼睛图标；过期状态显示“截至高度…”而非实时",
+      "pages": [
+        "W11"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W12",
+      "title": "W12 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "新地址二维码、可选金额/订单/有效期；保存/分享收款请求；新建地址；收款不索取发送权限；地址已绑定本链",
+      "pages": [
+        "W12"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W13",
+      "title": "W13 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "摄像头取景、手动粘贴；解析 URI；拒绝错链、脚本、过长或多义参数",
+      "pages": [
+        "W13"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W14",
+      "title": "W14 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "地址/联系人、金额、加密备注；本地计划、余额与费检查；金额小数最多 8 位；不使用浮点",
+      "pages": [
+        "W14"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W15",
+      "title": "W15 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "收款信息、金额、费、总扣款、隐私提示；点击确认；大额重新输本地密码；修改任一字段必须重新计划确认",
+      "pages": [
+        "W15"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W16",
+      "title": "W16 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "生成证明/签名/广播/验证状态；允许取消尚未广播工作；不能把广播成功显示为已到账",
+      "pages": [
+        "W16"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W17",
+      "title": "W17 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "金额、方向、费、时间、高度、状态；重播同一交易、导出选择性凭证；未知状态不允许“一键再付一笔”",
+      "pages": [
+        "W17"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W18",
+      "title": "W18 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "本地转入转出、质押、退出、费用过滤；查详情、加密导出；未恢复备注显示缺失，不自行编造",
+      "pages": [
+        "W18"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W19",
+      "title": "W19 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "本地收款请求与匹配收款；已付/少付/多付/过期/重复；付款金额隐藏于公开链，商家本地可知",
+      "pages": [
+        "W19"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W20",
+      "title": "W20 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "请求内容、匹配记录、退款状态；新建退款交易；退款地址另行核对，无自动撤销",
+      "pages": [
+        "W20"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W21",
+      "title": "W21 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "本地别名、地址、上次使用；新增/编辑/删除；不请求系统通讯录权限",
+      "pages": [
+        "W21"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W22",
+      "title": "W22 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-015",
+      "kind": "UI_E2E",
+      "expected": "别名、链地址、本地备注；校验错链和名称冲突；不以同名昵称判定同一收款人",
+      "pages": [
+        "W22"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W23",
+      "title": "W23 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "质押价值、净奖励、退出中、风险；开始质押、查看持仓；没有“每日领取赚收益”的诱导按钮",
+      "pages": [
+        "W23"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W24",
+      "title": "W24 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "状态、佣金、实际权重、签名率；过滤、排序、自主选择；不把项目自营节点静默设为唯一默认",
+      "pages": [
+        "W24"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W25",
+      "title": "W25 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "公钥、佣金变更、历史处罚、集中度；委托、查看公开节点资料；外链仅经确认打开，不加载跟踪图片",
+      "pages": [
+        "W25"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W26",
+      "title": "W26 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "验证者、金额、预留费、公开信息说明；生成 position、min_shares；默认不质押全部费余额",
+      "pages": [
+        "W26"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W27",
+      "title": "W27 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "本金、费、激活、14天双条件、罚没；本地确认并签名；风险确认不等于接受未知签名",
+      "pages": [
+        "W27"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W28",
+      "title": "W28 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "独立持仓列表、pending/active/refundable；查看、退款、解除；不显示“可交易质押币”",
+      "pages": [
+        "W28"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W29",
+      "title": "W29 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "当前份额价值、公开关联范围、sequence；部分/全部退出；最新状态验证失败不得签过时计划",
+      "pages": [
+        "W29"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W30",
+      "title": "W30 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "份额/全部、预计金额、手续费来源；支持退出价值付费；全部余额已锁定场景必须通过",
+      "pages": [
+        "W30"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W31",
+      "title": "W31 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "停奖规则、预计到期、风险、净额；确认真实退出动作；时间与高度两者都显示；链停则到期延后",
+      "pages": [
+        "W31"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W32",
+      "title": "W32 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "等待/处罚结算/可取回；合并选择有限数量领取；“可取回”不提前加进可用余额",
+      "pages": [
+        "W32"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W33",
+      "title": "W33 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "当前可取价值、扣罚事件、双截止；ClaimExit；重复领取明确拒绝且不二次扣费",
+      "pages": [
+        "W33"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W34",
+      "title": "W34 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "自营验证者佣金余额、历史领取；ClaimCommission；仅 operator 授权，不碰委托者余额",
+      "pages": [
+        "W34"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W35",
+      "title": "W35 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-016",
+      "kind": "UI_E2E",
+      "expected": "节点公钥、指纹、链、动作、有效期；批准注册/修改/轮换，回传签名；高风险再次输本地密码；无任意 sign bytes",
+      "pages": [
+        "W35"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W36",
+      "title": "W36 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-017",
+      "kind": "UI_E2E",
+      "expected": "安全、隐私、网络、语言、主题、版本；本地修改；不新增账户注册入口",
+      "pages": [
+        "W36"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W37",
+      "title": "W37 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-017",
+      "kind": "UI_E2E",
+      "expected": "Tor 状态、公开边界、日志说明；重连、查看匿名性边界；没有静默直连开关；不保证绝对匿名",
+      "pages": [
+        "W37"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W38",
+      "title": "W38 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-017",
+      "kind": "UI_E2E",
+      "expected": "节点来源、可信高度、证人、延迟；切换合格独立端点；不能仅凭 HTTPS 就标链状态可信",
+      "pages": [
+        "W38"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W39",
+      "title": "W39 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-017",
+      "kind": "UI_E2E",
+      "expected": "信任过期原因、检查点签名与哈希；核对后导入可信检查点；禁止自动“信任所有 RPC”",
+      "pages": [
+        "W39"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W40",
+      "title": "W40 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-017",
+      "kind": "UI_E2E",
+      "expected": "同步、缓存、存储、脱敏报告预览；用户主动导出；预览无种子/私钥/查看密钥/完整个人流水",
+      "pages": [
+        "W40"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-W41",
+      "title": "W41 页面全状态",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-017",
+      "kind": "UI_E2E",
+      "expected": "版本、源码摘要、许可、协议版本；检查官方发布信息；无第三方广告分析或收益宣传",
+      "pages": [
+        "W41"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N01",
+      "title": "N01 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "安装、导入既有节点路径、角色说明；明确运行节点不自动获得奖励；明确运行节点不自动获得奖励",
+      "pages": [
+        "N01"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N02",
+      "title": "N02 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "CPU、RAM、SSD、剩余磁盘、网络、时钟；显示实测不足，不能永远绿色；显示实测不足，不能永远绿色",
+      "pages": [
+        "N02"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N03",
+      "title": "N03 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "Linux/macOS 本机服务，Windows WSL2 状态；权限请求有解释；错误有恢复方法；权限请求有解释；错误有恢复方法",
+      "pages": [
+        "N03"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N04",
+      "title": "N04 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "数据位置、预估占用、快照选择；不自动覆盖已有签名目录；不自动覆盖已有签名目录",
+      "pages": [
+        "N04"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N05",
+      "title": "N05 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "区块/状态/检查点进度与根验证；错快照不得启动签名；错快照不得启动签名",
+      "pages": [
+        "N05"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N06",
+      "title": "N06 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "共识公钥、签名状态、单写者保护；无“导入资金助记词”按钮；无“导入资金助记词”按钮",
+      "pages": [
+        "N06"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N07",
+      "title": "N07 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "手机授权 QR、节点指纹与请求到期；离线核对，全请求已签名绑定；离线核对，全请求已签名绑定",
+      "pages": [
+        "N07"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N08",
+      "title": "N08 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "候选/活跃/暂停、实际权重、错签警报；候选不伪装成活跃挖矿；候选不伪装成活跃挖矿",
+      "pages": [
+        "N08"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N09",
+      "title": "N09 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "CPU、内存、磁盘、网络、验证耗时；指标来自本机，无资金敏感标签；指标来自本机，无资金敏感标签",
+      "pages": [
+        "N09"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N10",
+      "title": "N10 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "已连 peer、独立哨兵、连接异常；公网 RPC 默认关闭；公网 RPC 默认关闭",
+      "pages": [
+        "N10"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N11",
+      "title": "N11 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "自质押与公开委托池、佣金；资金操作必须手机或离线 operator 签名；资金操作必须手机或离线 operator 签名",
+      "pages": [
+        "N11"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N12",
+      "title": "N12 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "漏签窗口、空间不足、时钟偏移、证据；能触发本机安全停签，不任意冻结链；能触发本机安全停签，不任意冻结链",
+      "pages": [
+        "N12"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N13",
+      "title": "N13 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "脱敏日志、筛选和导出；默认不含密钥或签名字节秘密；默认不含密钥或签名字节秘密",
+      "pages": [
+        "N13"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N14",
+      "title": "N14 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "软件签名、兼容性、升级高度与迁移；用户批准，不能后台静默替换共识；用户批准，不能后台静默替换共识",
+      "pages": [
+        "N14"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N15",
+      "title": "N15 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "停旧机、验证 signer 状态、轮换/迁移；同密钥双机测试不得被标“安全迁移”；同密钥双机测试不得被标“安全迁移”",
+      "pages": [
+        "N15"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-N16",
+      "title": "N16 页面全状态",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-021",
+      "kind": "UI_E2E",
+      "expected": "停止服务、备份说明、保留或删除数据；不自动清除尚需恢复的密钥与状态；不自动清除尚需恢复的密钥与状态",
+      "pages": [
+        "N16"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-E01",
+      "title": "E01 页面全状态",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-024",
+      "kind": "UI_E2E",
+      "expected": "最新验证高度、公开总供给、活跃权重、服务同步高度；索引落后明确标注；无个人余额；索引落后明确标注；无个人余额",
+      "pages": [
+        "E01"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-E02",
+      "title": "E02 页面全状态",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-024",
+      "kind": "UI_E2E",
+      "expected": "高度、时间、交易数、出块者，游标翻页；空链、分页到头、服务不可用；空链、分页到头、服务不可用",
+      "pages": [
+        "E02"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-E03",
+      "title": "E03 页面全状态",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-024",
+      "kind": "UI_E2E",
+      "expected": "头哈希、验证集合、公开交易ID、compact摘要；不存在与尚未索引区分；不存在与尚未索引区分",
+      "pages": [
+        "E03"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-E04",
+      "title": "E04 页面全状态",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-024",
+      "kind": "UI_E2E",
+      "expected": "tx/position/ticket三类公开详情；错误ID、未知交易、proof待验证；不显示私密金额；错误ID、未知交易、proof待验证；不显示私密金额",
+      "pages": [
+        "E04"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-E05",
+      "title": "E05 页面全状态",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-024",
+      "kind": "UI_E2E",
+      "expected": "状态、权重、自质押、佣金、筛选排序；非活跃不写成正在出块；非活跃不写成正在出块",
+      "pages": [
+        "E05"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-E06",
+      "title": "E06 页面全状态",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-024",
+      "kind": "UI_E2E",
+      "expected": "当前与历史共识键、公开事件、处罚/佣金时间线；证据加载失败不写成无处罚；证据加载失败不写成无处罚",
+      "pages": [
+        "E06"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-E07",
+      "title": "E07 页面全状态",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-024",
+      "kind": "UI_E2E",
+      "expected": "T/Q/P/D/X/C/F/G、发行/罚没历史；不同高度不得混合计算；不以图表代替守恒；不同高度不得混合计算；不以图表代替守恒",
+      "pages": [
+        "E07"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-UI-E08",
+      "title": "E08 页面全状态",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-024",
+      "kind": "UI_E2E",
+      "expected": "版本、参数摘要、发布签名、升级公告；公告未验证、不兼容、未达到升级高度；公告未验证、不兼容、未达到升级高度",
+      "pages": [
+        "E08"
+      ],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-001",
+      "title": "无身份注册创建钱包",
+      "requirements": [
+        "PR-001"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "断网可创建，抓包无身份上报",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-002",
+      "title": "不使用生物识别",
+      "requirements": [
+        "PR-002"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "无 FaceID/指纹授权流程、依赖和替代强制提示",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-003",
+      "title": "本地密码、锁定与恢复",
+      "requirements": [
+        "PR-003"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "密码不上链不上传；错误密码拒绝；种子恢复资产",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-004",
+      "title": "隐私扫码支付",
+      "requirements": [
+        "PR-004"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "真证明、真广播、收方本地扫描与验证到账",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-005",
+      "title": "本币手续费自动计算",
+      "requirements": [
+        "PR-005"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "金额字符串精确，确认前显示总扣款",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-006",
+      "title": "委托质押",
+      "requirements": [
+        "PR-006"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "真实扣除私密池资金，创建原生持仓，不转给运营者钱包",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-007",
+      "title": "自动奖励",
+      "requirements": [
+        "PR-007"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "由确定性发行与分配更新池净值，手机离线不影响规则",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-008",
+      "title": "部分/全部退出",
+      "requirements": [
+        "PR-008"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "正确扣份额、生成退出票据、等待、再回到可花费余额",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-009",
+      "title": "全部余额锁定仍能退出",
+      "requirements": [
+        "PR-009"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "支持退出金额承担手续费；极小粉尘另有明示处理",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-010",
+      "title": "家庭节点",
+      "requirements": [
+        "PR-010"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "安装、诊断、同步、绑定、候选/活跃状态与处罚监测",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-011",
+      "title": "权限隔离",
+      "requirements": [
+        "PR-011"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "在线节点无法签署普通支付或任意取走委托者资产",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-012",
+      "title": "换机恢复",
+      "requirements": [
+        "PR-012"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "仅恢复凭证能重建支付与持仓密钥并找回链上权益",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-013",
+      "title": "多服务容错",
+      "requirements": [
+        "PR-013"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "网关伪造、遗漏或停机不能伪造确认，不静默泄露 IP",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-014",
+      "title": "公开发行与验证",
+      "requirements": [
+        "PR-014"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "公开总量、已发行、罚没、费用和验证者数据",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-015",
+      "title": "运维与升级闭环",
+      "requirements": [
+        "PR-015"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "快照验证、版本迁移、防双签、签名发布和故障恢复",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    },
+    {
+      "id": "T-REQ-016",
+      "title": "全量交付",
+      "requirements": [
+        "PR-016"
+      ],
+      "task_id": "D-030",
+      "kind": "RELEASE_ACCEPTANCE",
+      "expected": "所有正式页面、错误状态、测试与安装包同时完成",
+      "pages": [],
+      "status": "PLANNED_NOT_EXECUTED",
+      "evidence": []
+    }
+  ]
+}

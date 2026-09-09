@@ -1,0 +1,86 @@
+{
+  "generated_at": "2026-09-08T11:53:26.855750+00:00",
+  "overall_scope": "PARTIAL_FEASIBILITY_ONLY",
+  "proof_primitives": "PASS",
+  "empty_block_consensus": "PASS",
+  "integer_unit_tests": {
+    "status": "PASS",
+    "passed": 18,
+    "failed": 0
+  },
+  "mobile": "SKIPPED_BY_USER",
+  "metrics": {
+    "two_spend_two_output_proving_ms": {
+      "samples": 5,
+      "min": 4017.089,
+      "median": 4388.6964,
+      "max": 4471.090999999999
+    },
+    "strict_verification_ms": {
+      "samples": 5,
+      "min": 19.9159,
+      "median": 26.3151,
+      "max": 35.2515
+    },
+    "parameter_load_ms": 205.83270000000002,
+    "observed_peak_working_set_mib": 121.01953125,
+    "scan": {
+      "elapsed_ms": 136.6392,
+      "owned": 10,
+      "payloads": 1000,
+      "protobuf_bytes_total": 252000,
+      "average_payload_bytes": 252.0
+    },
+    "conditional_payload_volume": {
+      "assumptions": "20 transactions/s, 2 outputs/transaction, measured NotePayload bytes only",
+      "decimal_gb_per_day": 0.870912,
+      "not_measured_network_traffic": true
+    },
+    "complete_transfer": {
+      "bad_binding_signature_rejected": true,
+      "bad_spend_authorization_rejected": true,
+      "binding_signature_verified": true,
+      "canonical_envelope_bytes": 2762,
+      "duplicate_nullifiers_in_distinct_envelope_rejected": true,
+      "duplicate_transaction_rejected": true,
+      "effect_hash": "9acbca963e66ff68e18ca03b7f2d79b9fe42619c72f33788083ef3cd62d9d5e1048c3f7904a9d3fef9320262da19d228147a8e0e72e209fa909ca9528a85ce50",
+      "failed_transaction_left_state_unchanged": true,
+      "memo_ciphertext_bytes": 528,
+      "native_asset_id_hex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "native_asset_scope": "reference test fixture; mainnet undecided",
+      "outputs": 2,
+      "proofs": 4,
+      "spend_authorizations": 2,
+      "spend_authorizations_verified": true,
+      "spends": 2,
+      "tx_id": "37ef1d3978cdcdd4834391648928a671053b329dbf0fd69806ed895e94cefdae"
+    }
+  },
+  "unverified": [
+    "non-Transfer action authorization and execution",
+    "single-asset closure across all actions",
+    "JMT/RocksDB and state proofs",
+    "separate durable signer",
+    "staking/slashing/fees",
+    "Tor and mobile",
+    "production acceptance"
+  ],
+  "inputs": [
+    {
+      "path": "proof-result.json",
+      "sha256": "a7a1ba3b5b959002c82b220267fba8a8ab070d307602e988571cf3121004280b"
+    },
+    {
+      "path": "network-result.json",
+      "sha256": "3567703b6f07335429c9628be5906ef9bd2beaaf91522ed8d53fb74956206815"
+    },
+    {
+      "path": "consensus-unit.log",
+      "sha256": "01814f5540f6d1d5aeb00eb005684436d478656efd32d85c53943ca1f7d9d326"
+    },
+    {
+      "path": "proof-parameter-downloads.json",
+      "sha256": "25f9a0c57ca829181e3fbf327dca90d64a039eb1a22dc5fedd4c71b804c805ed"
+    }
+  ]
+}

@@ -1,0 +1,541 @@
+{
+  "spec_version": "1.0",
+  "pages": [
+    {
+      "id": "W01",
+      "route": "/welcome",
+      "surface": "wallet",
+      "fields": "本地钱包说明、隐私边界、创建/恢复",
+      "actions_and_validation": "进入创建或恢复，不要求账号",
+      "states_and_acceptance": "断网可进入；无身份 SDK"
+    },
+    {
+      "id": "W02",
+      "route": "/create/password",
+      "surface": "wallet",
+      "fields": "密码、重复密码、非托管说明",
+      "actions_and_validation": "至少 10 字符；一致后创建",
+      "states_and_acceptance": "RNG 失败不得继续；不打印密码"
+    },
+    {
+      "id": "W03",
+      "route": "/backup",
+      "surface": "wallet",
+      "fields": "恢复词、保存说明",
+      "actions_and_validation": "本地密码再验证、逐步展示",
+      "states_and_acceptance": "后台立即遮挡；禁止默认复制全部"
+    },
+    {
+      "id": "W04",
+      "route": "/backup/verify",
+      "surface": "wallet",
+      "fields": "随机位置的恢复词验证",
+      "actions_and_validation": "验证通过后标记本地已备份",
+      "states_and_acceptance": "错误不销毁钱包；能返回重看"
+    },
+    {
+      "id": "W05",
+      "route": "/restore",
+      "surface": "wallet",
+      "fields": "恢复词、网络、可选生日高度",
+      "actions_and_validation": "校验 checksum；创建新密码",
+      "states_and_acceptance": "不上传恢复词；生日只是优化，不限制全扫描"
+    },
+    {
+      "id": "W06",
+      "route": "/unlock",
+      "surface": "wallet",
+      "fields": "钱包本地名称、密码",
+      "actions_and_validation": "解锁会话",
+      "states_and_acceptance": "错误限流；无指纹、面容、验证码"
+    },
+    {
+      "id": "W07",
+      "route": "/restore/progress",
+      "surface": "wallet",
+      "fields": "可信高度、已扫高度、数据量",
+      "actions_and_validation": "暂停/继续、检查点验证",
+      "states_and_acceptance": "未验证资产不显示为可花费"
+    },
+    {
+      "id": "W08",
+      "route": "/security/password",
+      "surface": "wallet",
+      "fields": "旧密码、新密码、重复",
+      "actions_and_validation": "原子重包裹 DEK",
+      "states_and_acceptance": "中断不能使旧新密码都无法打开"
+    },
+    {
+      "id": "W09",
+      "route": "/security/export",
+      "surface": "wallet",
+      "fields": "恢复词/加密备份两种明确选择",
+      "actions_and_validation": "重新输本地密码",
+      "states_and_acceptance": "不默认分享给云盘或客服"
+    },
+    {
+      "id": "W10",
+      "route": "/security/delete",
+      "surface": "wallet",
+      "fields": "本地删除影响说明",
+      "actions_and_validation": "二次确认并验证已知备份",
+      "states_and_acceptance": "不声称清除云端所有历史或销毁链上币"
+    },
+    {
+      "id": "W11",
+      "route": "/wallet",
+      "surface": "wallet",
+      "fields": "可用、质押、解锁、待确认、链同步",
+      "actions_and_validation": "收款/转账/质押；余额眼睛图标",
+      "states_and_acceptance": "过期状态显示“截至高度…”而非实时"
+    },
+    {
+      "id": "W12",
+      "route": "/receive",
+      "surface": "wallet",
+      "fields": "新地址二维码、可选金额/订单/有效期",
+      "actions_and_validation": "保存/分享收款请求；新建地址",
+      "states_and_acceptance": "收款不索取发送权限；地址已绑定本链"
+    },
+    {
+      "id": "W13",
+      "route": "/scan",
+      "surface": "wallet",
+      "fields": "摄像头取景、手动粘贴",
+      "actions_and_validation": "解析 URI",
+      "states_and_acceptance": "拒绝错链、脚本、过长或多义参数"
+    },
+    {
+      "id": "W14",
+      "route": "/send",
+      "surface": "wallet",
+      "fields": "地址/联系人、金额、加密备注",
+      "actions_and_validation": "本地计划、余额与费检查",
+      "states_and_acceptance": "金额小数最多 8 位；不使用浮点"
+    },
+    {
+      "id": "W15",
+      "route": "/send/confirm",
+      "surface": "wallet",
+      "fields": "收款信息、金额、费、总扣款、隐私提示",
+      "actions_and_validation": "点击确认；大额重新输本地密码",
+      "states_and_acceptance": "修改任一字段必须重新计划确认"
+    },
+    {
+      "id": "W16",
+      "route": "/send/progress",
+      "surface": "wallet",
+      "fields": "生成证明/签名/广播/验证状态",
+      "actions_and_validation": "允许取消尚未广播工作",
+      "states_and_acceptance": "不能把广播成功显示为已到账"
+    },
+    {
+      "id": "W17",
+      "route": "/transaction/:id",
+      "surface": "wallet",
+      "fields": "金额、方向、费、时间、高度、状态",
+      "actions_and_validation": "重播同一交易、导出选择性凭证",
+      "states_and_acceptance": "未知状态不允许“一键再付一笔”"
+    },
+    {
+      "id": "W18",
+      "route": "/history",
+      "surface": "wallet",
+      "fields": "本地转入转出、质押、退出、费用过滤",
+      "actions_and_validation": "查详情、加密导出",
+      "states_and_acceptance": "未恢复备注显示缺失，不自行编造"
+    },
+    {
+      "id": "W19",
+      "route": "/invoices",
+      "surface": "wallet",
+      "fields": "本地收款请求与匹配收款",
+      "actions_and_validation": "已付/少付/多付/过期/重复",
+      "states_and_acceptance": "付款金额隐藏于公开链，商家本地可知"
+    },
+    {
+      "id": "W20",
+      "route": "/invoice/:id",
+      "surface": "wallet",
+      "fields": "请求内容、匹配记录、退款状态",
+      "actions_and_validation": "新建退款交易",
+      "states_and_acceptance": "退款地址另行核对，无自动撤销"
+    },
+    {
+      "id": "W21",
+      "route": "/contacts",
+      "surface": "wallet",
+      "fields": "本地别名、地址、上次使用",
+      "actions_and_validation": "新增/编辑/删除",
+      "states_and_acceptance": "不请求系统通讯录权限"
+    },
+    {
+      "id": "W22",
+      "route": "/contacts/edit",
+      "surface": "wallet",
+      "fields": "别名、链地址、本地备注",
+      "actions_and_validation": "校验错链和名称冲突",
+      "states_and_acceptance": "不以同名昵称判定同一收款人"
+    },
+    {
+      "id": "W23",
+      "route": "/stake",
+      "surface": "wallet",
+      "fields": "质押价值、净奖励、退出中、风险",
+      "actions_and_validation": "开始质押、查看持仓",
+      "states_and_acceptance": "没有“每日领取赚收益”的诱导按钮"
+    },
+    {
+      "id": "W24",
+      "route": "/validators",
+      "surface": "wallet",
+      "fields": "状态、佣金、实际权重、签名率",
+      "actions_and_validation": "过滤、排序、自主选择",
+      "states_and_acceptance": "不把项目自营节点静默设为唯一默认"
+    },
+    {
+      "id": "W25",
+      "route": "/validators/:id",
+      "surface": "wallet",
+      "fields": "公钥、佣金变更、历史处罚、集中度",
+      "actions_and_validation": "委托、查看公开节点资料",
+      "states_and_acceptance": "外链仅经确认打开，不加载跟踪图片"
+    },
+    {
+      "id": "W26",
+      "route": "/stake/new",
+      "surface": "wallet",
+      "fields": "验证者、金额、预留费、公开信息说明",
+      "actions_and_validation": "生成 position、min_shares",
+      "states_and_acceptance": "默认不质押全部费余额"
+    },
+    {
+      "id": "W27",
+      "route": "/stake/confirm",
+      "surface": "wallet",
+      "fields": "本金、费、激活、14天双条件、罚没",
+      "actions_and_validation": "本地确认并签名",
+      "states_and_acceptance": "风险确认不等于接受未知签名"
+    },
+    {
+      "id": "W28",
+      "route": "/positions",
+      "surface": "wallet",
+      "fields": "独立持仓列表、pending/active/refundable",
+      "actions_and_validation": "查看、退款、解除",
+      "states_and_acceptance": "不显示“可交易质押币”"
+    },
+    {
+      "id": "W29",
+      "route": "/positions/:id",
+      "surface": "wallet",
+      "fields": "当前份额价值、公开关联范围、sequence",
+      "actions_and_validation": "部分/全部退出",
+      "states_and_acceptance": "最新状态验证失败不得签过时计划"
+    },
+    {
+      "id": "W30",
+      "route": "/unbond",
+      "surface": "wallet",
+      "fields": "份额/全部、预计金额、手续费来源",
+      "actions_and_validation": "支持退出价值付费",
+      "states_and_acceptance": "全部余额已锁定场景必须通过"
+    },
+    {
+      "id": "W31",
+      "route": "/unbond/confirm",
+      "surface": "wallet",
+      "fields": "停奖规则、预计到期、风险、净额",
+      "actions_and_validation": "确认真实退出动作",
+      "states_and_acceptance": "时间与高度两者都显示；链停则到期延后"
+    },
+    {
+      "id": "W32",
+      "route": "/exit-tickets",
+      "surface": "wallet",
+      "fields": "等待/处罚结算/可取回",
+      "actions_and_validation": "合并选择有限数量领取",
+      "states_and_acceptance": "“可取回”不提前加进可用余额"
+    },
+    {
+      "id": "W33",
+      "route": "/exit-tickets/:id",
+      "surface": "wallet",
+      "fields": "当前可取价值、扣罚事件、双截止",
+      "actions_and_validation": "ClaimExit",
+      "states_and_acceptance": "重复领取明确拒绝且不二次扣费"
+    },
+    {
+      "id": "W34",
+      "route": "/commission",
+      "surface": "wallet",
+      "fields": "自营验证者佣金余额、历史领取",
+      "actions_and_validation": "ClaimCommission",
+      "states_and_acceptance": "仅 operator 授权，不碰委托者余额"
+    },
+    {
+      "id": "W35",
+      "route": "/node-request",
+      "surface": "wallet",
+      "fields": "节点公钥、指纹、链、动作、有效期",
+      "actions_and_validation": "批准注册/修改/轮换，回传签名",
+      "states_and_acceptance": "高风险再次输本地密码；无任意 sign bytes"
+    },
+    {
+      "id": "W36",
+      "route": "/settings",
+      "surface": "wallet",
+      "fields": "安全、隐私、网络、语言、主题、版本",
+      "actions_and_validation": "本地修改",
+      "states_and_acceptance": "不新增账户注册入口"
+    },
+    {
+      "id": "W37",
+      "route": "/privacy",
+      "surface": "wallet",
+      "fields": "Tor 状态、公开边界、日志说明",
+      "actions_and_validation": "重连、查看匿名性边界",
+      "states_and_acceptance": "没有静默直连开关；不保证绝对匿名"
+    },
+    {
+      "id": "W38",
+      "route": "/network",
+      "surface": "wallet",
+      "fields": "节点来源、可信高度、证人、延迟",
+      "actions_and_validation": "切换合格独立端点",
+      "states_and_acceptance": "不能仅凭 HTTPS 就标链状态可信"
+    },
+    {
+      "id": "W39",
+      "route": "/checkpoint",
+      "surface": "wallet",
+      "fields": "信任过期原因、检查点签名与哈希",
+      "actions_and_validation": "核对后导入可信检查点",
+      "states_and_acceptance": "禁止自动“信任所有 RPC”"
+    },
+    {
+      "id": "W40",
+      "route": "/diagnostics",
+      "surface": "wallet",
+      "fields": "同步、缓存、存储、脱敏报告预览",
+      "actions_and_validation": "用户主动导出",
+      "states_and_acceptance": "预览无种子/私钥/查看密钥/完整个人流水"
+    },
+    {
+      "id": "W41",
+      "route": "/about",
+      "surface": "wallet",
+      "fields": "版本、源码摘要、许可、协议版本",
+      "actions_and_validation": "检查官方发布信息",
+      "states_and_acceptance": "无第三方广告分析或收益宣传"
+    },
+    {
+      "id": "N01",
+      "route": "/welcome",
+      "surface": "node_manager",
+      "fields": "安装、导入既有节点路径、角色说明",
+      "actions_and_validation": "明确运行节点不自动获得奖励",
+      "states_and_acceptance": "明确运行节点不自动获得奖励"
+    },
+    {
+      "id": "N02",
+      "route": "/preflight",
+      "surface": "node_manager",
+      "fields": "CPU、RAM、SSD、剩余磁盘、网络、时钟",
+      "actions_and_validation": "显示实测不足，不能永远绿色",
+      "states_and_acceptance": "显示实测不足，不能永远绿色"
+    },
+    {
+      "id": "N03",
+      "route": "/runtime",
+      "surface": "node_manager",
+      "fields": "Linux/macOS 本机服务，Windows WSL2 状态",
+      "actions_and_validation": "权限请求有解释；错误有恢复方法",
+      "states_and_acceptance": "权限请求有解释；错误有恢复方法"
+    },
+    {
+      "id": "N04",
+      "route": "/storage",
+      "surface": "node_manager",
+      "fields": "数据位置、预估占用、快照选择",
+      "actions_and_validation": "不自动覆盖已有签名目录",
+      "states_and_acceptance": "不自动覆盖已有签名目录"
+    },
+    {
+      "id": "N05",
+      "route": "/sync",
+      "surface": "node_manager",
+      "fields": "区块/状态/检查点进度与根验证",
+      "actions_and_validation": "错快照不得启动签名",
+      "states_and_acceptance": "错快照不得启动签名"
+    },
+    {
+      "id": "N06",
+      "route": "/keys",
+      "surface": "node_manager",
+      "fields": "共识公钥、签名状态、单写者保护",
+      "actions_and_validation": "无“导入资金助记词”按钮",
+      "states_and_acceptance": "无“导入资金助记词”按钮"
+    },
+    {
+      "id": "N07",
+      "route": "/register",
+      "surface": "node_manager",
+      "fields": "手机授权 QR、节点指纹与请求到期",
+      "actions_and_validation": "离线核对，全请求已签名绑定",
+      "states_and_acceptance": "离线核对，全请求已签名绑定"
+    },
+    {
+      "id": "N08",
+      "route": "/dashboard",
+      "surface": "node_manager",
+      "fields": "候选/活跃/暂停、实际权重、错签警报",
+      "actions_and_validation": "候选不伪装成活跃挖矿",
+      "states_and_acceptance": "候选不伪装成活跃挖矿"
+    },
+    {
+      "id": "N09",
+      "route": "/performance",
+      "surface": "node_manager",
+      "fields": "CPU、内存、磁盘、网络、验证耗时",
+      "actions_and_validation": "指标来自本机，无资金敏感标签",
+      "states_and_acceptance": "指标来自本机，无资金敏感标签"
+    },
+    {
+      "id": "N10",
+      "route": "/peers",
+      "surface": "node_manager",
+      "fields": "已连 peer、独立哨兵、连接异常",
+      "actions_and_validation": "公网 RPC 默认关闭",
+      "states_and_acceptance": "公网 RPC 默认关闭"
+    },
+    {
+      "id": "N11",
+      "route": "/staking",
+      "surface": "node_manager",
+      "fields": "自质押与公开委托池、佣金",
+      "actions_and_validation": "资金操作必须手机或离线 operator 签名",
+      "states_and_acceptance": "资金操作必须手机或离线 operator 签名"
+    },
+    {
+      "id": "N12",
+      "route": "/alerts",
+      "surface": "node_manager",
+      "fields": "漏签窗口、空间不足、时钟偏移、证据",
+      "actions_and_validation": "能触发本机安全停签，不任意冻结链",
+      "states_and_acceptance": "能触发本机安全停签，不任意冻结链"
+    },
+    {
+      "id": "N13",
+      "route": "/logs",
+      "surface": "node_manager",
+      "fields": "脱敏日志、筛选和导出",
+      "actions_and_validation": "默认不含密钥或签名字节秘密",
+      "states_and_acceptance": "默认不含密钥或签名字节秘密"
+    },
+    {
+      "id": "N14",
+      "route": "/updates",
+      "surface": "node_manager",
+      "fields": "软件签名、兼容性、升级高度与迁移",
+      "actions_and_validation": "用户批准，不能后台静默替换共识",
+      "states_and_acceptance": "用户批准，不能后台静默替换共识"
+    },
+    {
+      "id": "N15",
+      "route": "/migration",
+      "surface": "node_manager",
+      "fields": "停旧机、验证 signer 状态、轮换/迁移",
+      "actions_and_validation": "同密钥双机测试不得被标“安全迁移”",
+      "states_and_acceptance": "同密钥双机测试不得被标“安全迁移”"
+    },
+    {
+      "id": "N16",
+      "route": "/uninstall",
+      "surface": "node_manager",
+      "fields": "停止服务、备份说明、保留或删除数据",
+      "actions_and_validation": "不自动清除尚需恢复的密钥与状态",
+      "states_and_acceptance": "不自动清除尚需恢复的密钥与状态"
+    },
+    {
+      "id": "E01",
+      "route": "/",
+      "surface": "explorer",
+      "fields": "最新验证高度、公开总供给、活跃权重、服务同步高度",
+      "actions_and_validation": "索引落后明确标注；无个人余额",
+      "states_and_acceptance": "索引落后明确标注；无个人余额"
+    },
+    {
+      "id": "E02",
+      "route": "/blocks",
+      "surface": "explorer",
+      "fields": "高度、时间、交易数、出块者，游标翻页",
+      "actions_and_validation": "空链、分页到头、服务不可用",
+      "states_and_acceptance": "空链、分页到头、服务不可用"
+    },
+    {
+      "id": "E03",
+      "route": "/blocks/:height",
+      "surface": "explorer",
+      "fields": "头哈希、验证集合、公开交易ID、compact摘要",
+      "actions_and_validation": "不存在与尚未索引区分",
+      "states_and_acceptance": "不存在与尚未索引区分"
+    },
+    {
+      "id": "E04",
+      "route": "/inspect/:kind/:id",
+      "surface": "explorer",
+      "fields": "tx/position/ticket三类公开详情",
+      "actions_and_validation": "错误ID、未知交易、proof待验证；不显示私密金额",
+      "states_and_acceptance": "错误ID、未知交易、proof待验证；不显示私密金额"
+    },
+    {
+      "id": "E05",
+      "route": "/validators",
+      "surface": "explorer",
+      "fields": "状态、权重、自质押、佣金、筛选排序",
+      "actions_and_validation": "非活跃不写成正在出块",
+      "states_and_acceptance": "非活跃不写成正在出块"
+    },
+    {
+      "id": "E06",
+      "route": "/validators/:id",
+      "surface": "explorer",
+      "fields": "当前与历史共识键、公开事件、处罚/佣金时间线",
+      "actions_and_validation": "证据加载失败不写成无处罚",
+      "states_and_acceptance": "证据加载失败不写成无处罚"
+    },
+    {
+      "id": "E07",
+      "route": "/supply",
+      "surface": "explorer",
+      "fields": "T/Q/P/D/X/C/F/G、发行/罚没历史",
+      "actions_and_validation": "不同高度不得混合计算；不以图表代替守恒",
+      "states_and_acceptance": "不同高度不得混合计算；不以图表代替守恒"
+    },
+    {
+      "id": "E08",
+      "route": "/protocol",
+      "surface": "explorer",
+      "fields": "版本、参数摘要、发布签名、升级公告",
+      "actions_and_validation": "公告未验证、不兼容、未达到升级高度",
+      "states_and_acceptance": "公告未验证、不兼容、未达到升级高度"
+    }
+  ],
+  "global_states": [
+    "LOADING",
+    "EMPTY",
+    "ERROR",
+    "OFFLINE",
+    "LOCKED"
+  ],
+  "locales": [
+    "zh-CN",
+    "en"
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "text_scale_test": 2.0
+}

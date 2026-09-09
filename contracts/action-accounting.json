@@ -1,0 +1,17 @@
+{
+  "scope": "normative public boundary accounting, not a replacement for upstream binding signature",
+  "conservation": "private_inputs + authorized_public_release = private_outputs + public_lock + fee",
+  "actions": [
+    {"tag": 0, "name": "Transfer", "required_auth": "spend", "public_release": "0", "public_lock": "0", "state_delta": "Q -= fee; F += fee"},
+    {"tag": 1, "name": "Delegate", "required_auth": "spend + owner + operator_when_selfbond", "public_release": "0", "public_lock": "deposit", "state_delta": "Q -= deposit+fee; D += deposit; F += fee"},
+    {"tag": 2, "name": "CancelPending", "required_auth": "owner", "public_release": "verified_pending", "public_lock": "0", "state_delta": "D -= release; Q += release-fee; F += fee"},
+    {"tag": 3, "name": "Unbond", "required_auth": "owner", "public_release": "fee only if RELEASED_VALUE", "public_lock": "0", "state_delta": "P -= gross; X += gross-(released?fee:0); Q -= released?0:fee; F += fee"},
+    {"tag": 4, "name": "ClaimExit", "required_auth": "ticket_owner", "public_release": "verified_cohort_quote", "public_lock": "0", "state_delta": "X -= release; Q += release-fee; F += fee"},
+    {"tag": 5, "name": "RegisterValidator", "required_auth": "operator + consensus_pop + fee_inputs", "public_release": "0", "public_lock": "0", "state_delta": "Q -= fee; F += fee"},
+    {"tag": 6, "name": "UpdateValidator", "required_auth": "operator + fee_inputs", "public_release": "0", "public_lock": "0", "state_delta": "Q -= fee; F += fee"},
+    {"tag": 7, "name": "UnjailValidator", "required_auth": "operator + fee_inputs", "public_release": "0", "public_lock": "0", "state_delta": "Q -= fee; F += fee"},
+    {"tag": 8, "name": "RotateConsensusKey", "required_auth": "operator + new_consensus_pop + fee_inputs", "public_release": "0", "public_lock": "0", "state_delta": "Q -= fee; F += fee"},
+    {"tag": 9, "name": "ClaimCommission", "required_auth": "operator", "public_release": "requested <= commission_state", "public_lock": "0", "state_delta": "C -= release; Q += release-fee; F += fee"},
+    {"tag": 10, "name": "ClaimGenesis", "required_auth": "genesis_claim_key", "public_release": "verified_unclaimed_genesis", "public_lock": "0", "state_delta": "G -= release; Q += release-fee; F += fee"}
+  ]
+}

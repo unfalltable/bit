@@ -1,0 +1,361 @@
+{
+  "scope": "documentation structure + independent integer oracle only",
+  "checks": [
+    {
+      "check": "all_json_parse",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "all_yaml_parse",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "json_schema_structure_and_local_refs",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "mainnet_template_not_marked_ready",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getNetwork",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getNetwork",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getHeaders",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getHeaders",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getCompactBlocks",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getCompactBlocks",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:broadcastTransaction",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:broadcastTransaction",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getTransaction",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getTransaction",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getStateProof",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getStateProof",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:listValidators",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:listValidators",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getValidator",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getValidator",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getPosition",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getPosition",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getExitTicket",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getExitTicket",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getSupply",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getSupply",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getFees",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getFees",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getCheckpoints",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getCheckpoints",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getLiveness",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getLiveness",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getReadiness",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getReadiness",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:listBlocks",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:listBlocks",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:getBlock",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:getBlock",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:listValidatorEvents",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:listValidatorEvents",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "path_parameters:listUpgrades",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "response_present:listUpgrades",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "api_operation_ids_unique",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "api_refs_resolve",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "30_unique_tasks",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "task_dependency_DAG",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "65_pages_complete_and_unique",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "150_planned_tests_unique",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "acceptance_links_valid",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "all_requirements_covered",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "all_pages_covered",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "planned_tests_not_claimed_executed",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "exit_evidence_time_relationship",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "exit_evidence_height_relationship",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "weak_subjectivity_trust_period",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "supply_voting_power_bound",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "tx_block_resource_limits",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "no_biometrics_or_telemetry",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "reference_not_mainnet",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "source_ids_resolve",
+      "passed": true,
+      "details": "set()"
+    },
+    {
+      "check": "24_unique_sources",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "20_core_chapters",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "signing_body_memo_explicit",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "effect_hash_width_consistent",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "validator_activation_delay_explicit",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "check": "integer_oracle_tests",
+      "passed": true,
+      "details": "20 actual tests"
+    }
+  ],
+  "model_tests": 20,
+  "model_tests_passed": true,
+  "not_executed": [
+    "actual Rust implementation/build",
+    "actual cryptographic proofs or parameter audit",
+    "actual multi-node consensus",
+    "wallet/node/explorer UI execution",
+    "full OpenAPI generator/semantic validator",
+    "protoc/buf compilation",
+    "CDDL parser compilation",
+    "PostgreSQL migration execution",
+    "network privacy packet capture",
+    "platform installers",
+    "external security audit",
+    "mainnet launch"
+  ],
+  "counts": {
+    "chapters": 20,
+    "pages": 65,
+    "api_operations": 19,
+    "local_sdk_methods": 41,
+    "tasks": 30,
+    "planned_acceptance_tests": 150,
+    "requirements": 16,
+    "sources": 24
+  }
+}

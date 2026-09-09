@@ -1,0 +1,1824 @@
+openapi: 3.0.3
+info:
+  title: Solo Public API — implementation contract
+  version: 1.0.0
+  description: 无注册/上传私钥/远端签名接口。金额及高度为十进制字符串；钱包验证证明，不信任JSON余额。
+servers:
+- url: https://node.example.invalid
+  description: 占位域名；不是真实服务。
+paths:
+  /v1/network:
+    get:
+      operationId: getNetwork
+      summary: 网络和固定参数
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Network'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/headers:
+    get:
+      operationId: getHeaders
+      summary: 验证头区间
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Headers'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: from_height
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/UIntString'
+      - &id001
+        name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+  /v1/compact-blocks:
+    get:
+      operationId: getCompactBlocks
+      summary: 完整性可验证通用扫描数据
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompactBlocks'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: from_height
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/UIntString'
+      - name: max_bytes
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1024
+          maximum: 8388608
+          default: 8388608
+      - *id001
+  /v1/transactions:
+    post:
+      operationId: broadcastTransaction
+      summary: 广播已签交易；不是到账回执
+      tags:
+      - public-query
+      responses:
+        '202':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BroadcastReceipt'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BroadcastRequest'
+  /v1/transactions/{tx_id}:
+    get:
+      operationId: getTransaction
+      summary: 获取状态及入块执行证明
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionStatus'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: tx_id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Hash'
+  /v1/state/proof:
+    get:
+      operationId: getStateProof
+      summary: 固定高度存在或不存在证明
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateProofResponse'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: key_base64
+        in: query
+        required: true
+        schema:
+          type: string
+          format: byte
+          maxLength: 2048
+      - name: state_height
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/UIntString'
+  /v1/validators:
+    get:
+      operationId: listValidators
+      summary: 公开验证者目录，结果自带状态高度
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Validators'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - *id001
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: state_height
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UIntString'
+  /v1/validators/{id}:
+    get:
+      operationId: getValidator
+      summary: 公开状态及可验证证明
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidatorResponse'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Hash'
+      - name: state_height
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UIntString'
+  /v1/positions/{id}:
+    get:
+      operationId: getPosition
+      summary: 公开状态及可验证证明
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PositionResponse'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Hash'
+      - name: state_height
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UIntString'
+  /v1/exit-tickets/{id}:
+    get:
+      operationId: getExitTicket
+      summary: 公开状态及可验证证明
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExitTicketResponse'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Hash'
+      - name: state_height
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UIntString'
+  /v1/supply:
+    get:
+      operationId: getSupply
+      summary: 容器总账与总供给证明
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Supply'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/fees:
+    get:
+      operationId: getFees
+      summary: 固定费用公式输入
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fees'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/checkpoints:
+    get:
+      operationId: getCheckpoints
+      summary: 检查点候选不是自动信任来源
+      tags:
+      - public-query
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Checkpoints'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /health/live:
+    get:
+      operationId: getLiveness
+      summary: 仅表明进程存活
+      tags:
+      - health
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /health/ready:
+    get:
+      operationId: getReadiness
+      summary: 同步/服务就绪，不代表资产安全
+      tags:
+      - health
+      responses:
+        '200':
+          description: 成功只表示接口语义，不表示余额或共识已由客户端验证。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '400':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: 结构化错误；429/503可含Retry-After。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/blocks:
+    get:
+      operationId: listBlocks
+      summary: 只读浏览器数据；不含私密支付身份，不授权升级
+      tags:
+      - explorer
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: 带验证所需信息的公开记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Blocks'
+        '503':
+          description: 索引未就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/blocks/{height}:
+    get:
+      operationId: getBlock
+      summary: 只读浏览器数据；不含私密支付身份，不授权升级
+      tags:
+      - explorer
+      parameters:
+      - name: height
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/UIntString'
+      responses:
+        '200':
+          description: 带验证所需信息的公开记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockDetail'
+        '503':
+          description: 索引未就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/validators/{id}/events:
+    get:
+      operationId: listValidatorEvents
+      summary: 只读浏览器数据；不含私密支付身份，不授权升级
+      tags:
+      - explorer
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Hash'
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 带验证所需信息的公开记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidatorEvents'
+        '503':
+          description: 索引未就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/upgrades:
+    get:
+      operationId: listUpgrades
+      summary: 只读浏览器数据；不含私密支付身份，不授权升级
+      tags:
+      - explorer
+      parameters: []
+      responses:
+        '200':
+          description: 带验证所需信息的公开记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Upgrades'
+        '503':
+          description: 索引未就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    UIntString:
+      type: string
+      description: 规范非负十进制；客户端使用BigInt，不经Number。
+      pattern: ^(0|[1-9][0-9]*)$
+    Amount:
+      type: string
+      description: 原子单位十进制字符串；语义校验0<=x<2^120。
+      pattern: ^(0|[1-9][0-9]{0,36})$
+    Hash:
+      type: string
+      pattern: ^[0-9a-f]{64}$
+    Base64:
+      type: string
+      format: byte
+      maxLength: 12000000
+    Meta:
+      type: object
+      additionalProperties: false
+      properties:
+        protocol_version:
+          type: integer
+          enum:
+          - 1
+        chain_context:
+          $ref: '#/components/schemas/Hash'
+        state_height:
+          $ref: '#/components/schemas/UIntString'
+        verified_header_height:
+          $ref: '#/components/schemas/UIntString'
+      required:
+      - protocol_version
+      - chain_context
+      - state_height
+      - verified_header_height
+    Error:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+          description: 只含脱敏消息
+        retryable:
+          type: boolean
+        request_id:
+          type: string
+        details:
+          type: object
+          additionalProperties: false
+          properties:
+            required_state_height:
+              $ref: '#/components/schemas/UIntString'
+          required: []
+      required:
+      - code
+      - message
+      - retryable
+      - request_id
+      - details
+    StateProof:
+      type: object
+      additionalProperties: false
+      properties:
+        key_base64:
+          $ref: '#/components/schemas/Base64'
+        exists:
+          type: boolean
+        value_base64:
+          $ref: '#/components/schemas/Base64'
+        proof_format:
+          type: string
+        proof_version:
+          type: integer
+          minimum: 1
+        proof_base64:
+          $ref: '#/components/schemas/Base64'
+        app_hash:
+          $ref: '#/components/schemas/Hash'
+        header_hash:
+          $ref: '#/components/schemas/Hash'
+      required:
+      - key_base64
+      - exists
+      - value_base64
+      - proof_format
+      - proof_version
+      - proof_base64
+      - app_hash
+      - header_hash
+    Header:
+      type: object
+      additionalProperties: false
+      properties:
+        height:
+          $ref: '#/components/schemas/UIntString'
+        signed_header_base64:
+          $ref: '#/components/schemas/Base64'
+        validator_set_base64:
+          $ref: '#/components/schemas/Base64'
+        next_validator_set_base64:
+          $ref: '#/components/schemas/Base64'
+      required:
+      - height
+      - signed_header_base64
+      - validator_set_base64
+      - next_validator_set_base64
+    Network:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        chain_id:
+          type: string
+        genesis_manifest_hash:
+          $ref: '#/components/schemas/Hash'
+        native_asset_id:
+          $ref: '#/components/schemas/Hash'
+        decimals:
+          type: integer
+          enum:
+          - 8
+        privacy_required:
+          type: boolean
+        crypto_manifest_hash:
+          $ref: '#/components/schemas/Hash'
+        params_hash:
+          $ref: '#/components/schemas/Hash'
+        max_compact_batch_bytes:
+          type: integer
+          minimum: 1
+      required:
+      - meta
+      - chain_id
+      - genesis_manifest_hash
+      - native_asset_id
+      - decimals
+      - privacy_required
+      - crypto_manifest_hash
+      - params_hash
+      - max_compact_batch_bytes
+    Headers:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Header'
+          maxItems: 500
+        next_height:
+          $ref: '#/components/schemas/UIntString'
+      required:
+      - meta
+      - items
+      - next_height
+    CompactBlock:
+      type: object
+      additionalProperties: false
+      properties:
+        height:
+          $ref: '#/components/schemas/UIntString'
+        format_version:
+          type: integer
+          enum:
+          - 1
+        records_base64:
+          $ref: '#/components/schemas/Base64'
+        records_hash:
+          $ref: '#/components/schemas/Hash'
+        commitment_proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - height
+      - format_version
+      - records_base64
+      - records_hash
+      - commitment_proof
+    CompactBlocks:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompactBlock'
+          maxItems: 500
+        next_height:
+          $ref: '#/components/schemas/UIntString'
+        complete_to_tip:
+          type: boolean
+      required:
+      - meta
+      - items
+      - next_height
+      - complete_to_tip
+    BroadcastRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        envelope_base64:
+          type: string
+          format: byte
+          maxLength: 87384
+      required:
+      - envelope_base64
+    BroadcastReceipt:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        tx_id:
+          $ref: '#/components/schemas/Hash'
+        status:
+          type: string
+          enum:
+          - RECEIVED
+          - MEMPOOL
+          - CONFIRMED
+          - UNKNOWN
+          - REJECTED
+        code:
+          type: string
+        confirmation:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - meta
+      - tx_id
+      - status
+      - code
+    TransactionStatus:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        tx_id:
+          $ref: '#/components/schemas/Hash'
+        status:
+          type: string
+          enum:
+          - UNKNOWN
+          - MEMPOOL
+          - MEMPOOL_EVICTED
+          - CONFIRMED
+          - REJECTED
+          - EXPIRED
+        block_height:
+          $ref: '#/components/schemas/UIntString'
+        transaction_index:
+          type: integer
+          minimum: 0
+        execution_code:
+          type: string
+        canonical_envelope_base64:
+          $ref: '#/components/schemas/Base64'
+        inclusion_proof_base64:
+          $ref: '#/components/schemas/Base64'
+        result_proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - meta
+      - tx_id
+      - status
+    Validator:
+      type: object
+      additionalProperties: false
+      properties:
+        validator_id:
+          $ref: '#/components/schemas/Hash'
+        operator_pubkey:
+          $ref: '#/components/schemas/Hash'
+        consensus_pubkey:
+          $ref: '#/components/schemas/Hash'
+        display_name:
+          type: string
+        status:
+          type: string
+          enum:
+          - REGISTERED
+          - ACTIVE
+          - INACTIVE
+          - JAILED
+          - DISABLED
+          - TOMBSTONED
+        pool_generation:
+          $ref: '#/components/schemas/UIntString'
+        pool_assets:
+          $ref: '#/components/schemas/Amount'
+        pool_shares:
+          $ref: '#/components/schemas/Amount'
+        self_bond_value:
+          $ref: '#/components/schemas/Amount'
+        voting_power:
+          $ref: '#/components/schemas/UIntString'
+        commission_bps:
+          type: integer
+          minimum: 0
+          maximum: 2000
+        sequence:
+          $ref: '#/components/schemas/UIntString'
+        proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - validator_id
+      - operator_pubkey
+      - consensus_pubkey
+      - display_name
+      - status
+      - pool_generation
+      - pool_assets
+      - pool_shares
+      - self_bond_value
+      - voting_power
+      - commission_bps
+      - sequence
+      - proof
+    Validators:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Validator'
+          maxItems: 500
+        next_cursor:
+          type: string
+      required:
+      - meta
+      - items
+    ValidatorResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        validator:
+          $ref: '#/components/schemas/Validator'
+      required:
+      - meta
+      - validator
+    Position:
+      type: object
+      additionalProperties: false
+      properties:
+        position_id:
+          $ref: '#/components/schemas/Hash'
+        owner_pubkey:
+          $ref: '#/components/schemas/Hash'
+        validator_id:
+          $ref: '#/components/schemas/Hash'
+        generation:
+          $ref: '#/components/schemas/UIntString'
+        shares:
+          $ref: '#/components/schemas/Amount'
+        pending_amount:
+          $ref: '#/components/schemas/Amount'
+        status:
+          type: string
+          enum:
+          - PENDING
+          - ACTIVE
+          - REFUNDABLE_PENDING
+          - EXITED
+          - INSOLVENT
+        sequence:
+          $ref: '#/components/schemas/UIntString'
+        created_height:
+          $ref: '#/components/schemas/UIntString'
+        receipt_base64:
+          $ref: '#/components/schemas/Base64'
+        proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - position_id
+      - owner_pubkey
+      - validator_id
+      - generation
+      - shares
+      - pending_amount
+      - status
+      - sequence
+      - created_height
+      - receipt_base64
+      - proof
+    PositionResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        position:
+          $ref: '#/components/schemas/Position'
+      required:
+      - meta
+      - position
+    ExitTicket:
+      type: object
+      additionalProperties: false
+      properties:
+        ticket_id:
+          $ref: '#/components/schemas/Hash'
+        position_id:
+          $ref: '#/components/schemas/Hash'
+        cohort_id:
+          $ref: '#/components/schemas/Hash'
+        units:
+          $ref: '#/components/schemas/Amount'
+        sequence:
+          $ref: '#/components/schemas/UIntString'
+        current_gross_value:
+          $ref: '#/components/schemas/Amount'
+        exposure_end_height:
+          $ref: '#/components/schemas/UIntString'
+        exposure_end_time:
+          type: string
+          format: date-time
+        maturity_height_exclusive:
+          $ref: '#/components/schemas/UIntString'
+        maturity_time_exclusive:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+          - WAITING_EXPOSURE_END
+          - LOCKED
+          - SLASH_PENDING
+          - MATURE
+          - CLAIMED
+        proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - ticket_id
+      - position_id
+      - cohort_id
+      - units
+      - sequence
+      - current_gross_value
+      - exposure_end_height
+      - status
+      - proof
+    ExitTicketResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        ticket:
+          $ref: '#/components/schemas/ExitTicket'
+      required:
+      - meta
+      - ticket
+    Supply:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        total:
+          $ref: '#/components/schemas/Amount'
+        genesis:
+          $ref: '#/components/schemas/Amount'
+        minted:
+          $ref: '#/components/schemas/Amount'
+        burned:
+          $ref: '#/components/schemas/Amount'
+        shielded_pool:
+          $ref: '#/components/schemas/Amount'
+        stake_pools:
+          $ref: '#/components/schemas/Amount'
+        pending_delegation:
+          $ref: '#/components/schemas/Amount'
+        exit_pools:
+          $ref: '#/components/schemas/Amount'
+        commission_payable:
+          $ref: '#/components/schemas/Amount'
+        fee_reserve:
+          $ref: '#/components/schemas/Amount'
+        unclaimed_genesis:
+          $ref: '#/components/schemas/Amount'
+        proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - meta
+      - total
+      - genesis
+      - minted
+      - burned
+      - shielded_pool
+      - stake_pools
+      - pending_delegation
+      - exit_pools
+      - commission_payable
+      - fee_reserve
+      - unclaimed_genesis
+      - proof
+    Fees:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        base:
+          $ref: '#/components/schemas/Amount'
+        per_kib:
+          $ref: '#/components/schemas/Amount'
+        per_spend_proof:
+          $ref: '#/components/schemas/Amount'
+        per_output_proof:
+          $ref: '#/components/schemas/Amount'
+        new_position_surcharge:
+          $ref: '#/components/schemas/Amount'
+        validator_registration_surcharge:
+          $ref: '#/components/schemas/Amount'
+        proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - meta
+      - base
+      - per_kib
+      - per_spend_proof
+      - per_output_proof
+      - new_position_surcharge
+      - validator_registration_surcharge
+      - proof
+    Checkpoint:
+      type: object
+      additionalProperties: false
+      properties:
+        chain_context:
+          $ref: '#/components/schemas/Hash'
+        height:
+          $ref: '#/components/schemas/UIntString'
+        block_hash:
+          $ref: '#/components/schemas/Hash'
+        validators_hash:
+          $ref: '#/components/schemas/Hash'
+        issued_at:
+          type: string
+          format: date-time
+        signatures:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              signer_id:
+                $ref: '#/components/schemas/Hash'
+              signature_base64:
+                $ref: '#/components/schemas/Base64'
+            required:
+            - signer_id
+            - signature_base64
+          maxItems: 16
+      required:
+      - chain_context
+      - height
+      - block_hash
+      - validators_hash
+      - issued_at
+      - signatures
+    Checkpoints:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Checkpoint'
+          maxItems: 100
+      required:
+      - meta
+      - items
+    StateProofResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        result:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - meta
+      - result
+    Health:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum:
+          - OK
+          - NOT_READY
+        protocol_version:
+          type: integer
+          enum:
+          - 1
+        state_height:
+          $ref: '#/components/schemas/UIntString'
+        verified_header_height:
+          $ref: '#/components/schemas/UIntString'
+      required:
+      - status
+      - protocol_version
+      - state_height
+      - verified_header_height
+    BlockSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        height:
+          $ref: '#/components/schemas/UIntString'
+        block_hash:
+          $ref: '#/components/schemas/Hash'
+        chain_time:
+          type: string
+          format: date-time
+        tx_count:
+          type: integer
+          minimum: 0
+        proposer_id:
+          $ref: '#/components/schemas/Hash'
+        app_hash:
+          $ref: '#/components/schemas/Hash'
+        header:
+          $ref: '#/components/schemas/Header'
+      required:
+      - height
+      - block_hash
+      - chain_time
+      - tx_count
+      - proposer_id
+      - app_hash
+      - header
+    Blocks:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlockSummary'
+          maxItems: 500
+        next_cursor:
+          type: string
+      required:
+      - meta
+      - items
+    BlockDetail:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        block:
+          $ref: '#/components/schemas/BlockSummary'
+        transaction_ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/Hash'
+          maxItems: 100
+        transactions_root:
+          $ref: '#/components/schemas/Hash'
+        compact_hash_proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - meta
+      - block
+      - transaction_ids
+      - transactions_root
+      - compact_hash_proof
+    ValidatorEvent:
+      type: object
+      additionalProperties: false
+      properties:
+        height:
+          $ref: '#/components/schemas/UIntString'
+        event_index:
+          type: integer
+          minimum: 0
+        type:
+          type: string
+        canonical_public_payload_base64:
+          $ref: '#/components/schemas/Base64'
+        event_proof:
+          $ref: '#/components/schemas/StateProof'
+      required:
+      - height
+      - event_index
+      - type
+      - canonical_public_payload_base64
+      - event_proof
+    ValidatorEvents:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        validator_id:
+          $ref: '#/components/schemas/Hash'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidatorEvent'
+          maxItems: 500
+        next_cursor:
+          type: string
+      required:
+      - meta
+      - validator_id
+      - items
+    UpgradeAnnouncement:
+      type: object
+      additionalProperties: false
+      properties:
+        release_id:
+          type: string
+        source_commit:
+          type: string
+        manifest_hash:
+          $ref: '#/components/schemas/Hash'
+        target_height:
+          $ref: '#/components/schemas/UIntString'
+        signatures:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              signer_id:
+                $ref: '#/components/schemas/Hash'
+              signature_base64:
+                $ref: '#/components/schemas/Base64'
+            required:
+            - signer_id
+            - signature_base64
+          maxItems: 16
+        status:
+          type: string
+          enum:
+          - ADVISORY
+          - SCHEDULED_BY_INSTALLED_BINARY
+          - APPLIED
+        automatic_authority:
+          type: boolean
+          enum:
+          - false
+      required:
+      - release_id
+      - source_commit
+      - manifest_hash
+      - target_height
+      - signatures
+      - status
+      - automatic_authority
+    Upgrades:
+      type: object
+      additionalProperties: false
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpgradeAnnouncement'
+          maxItems: 100
+      required:
+      - meta
+      - items

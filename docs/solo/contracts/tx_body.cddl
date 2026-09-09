@@ -1,0 +1,56 @@
+; Solo 1.0 signing-body CONTRACT. Not an executable proof verifier.
+; RFC 8949 deterministic encoding: shortest integer/length encoding, definite
+; arrays/strings only; arrays below have exact arity. No maps/floats/tags.
+; Every bstr carrying an upstream body must also pass the frozen upstream codec.
+; Integers in JSON never pass through a JavaScript Number.
+solo-body = [
+  version: 1,
+  chain-context: hash32,
+  expiry-height: uint64,
+  anchor: hash32,
+  fee: amount,
+  spends: [0*8 upstream-spend-body],
+  outputs: [0*8 upstream-output-body],
+  action: business-action,
+  proof-hashes: [0*16 hash32],
+  memo-ciphertext: (bstr .size 528) / null
+]
+hash32 = bstr .size 32
+pubkey32 = bstr .size 32
+uint64 = 0..18446744073709551615
+amount = bstr .size 16 ; big endian; first byte MUST be 0, value < 2^120
+upstream-spend-body = bstr .size (1..8192)
+upstream-output-body = bstr .size (1..8192)
+receipt = bstr .size 512 ; 24-byte nonce || 472-byte encrypted padded plaintext || 16-byte tag
+fee-source = 0 / 1 ; 0 = SHIELDED, 1 = RELEASED_VALUE
+business-action = transfer / delegate / cancel-pending / unbond / claim-exit /
+  register-validator / update-validator / unjail-validator /
+  rotate-consensus-key / claim-commission / claim-genesis
+transfer = [0]
+delegate = [1, position-id: hash32, owner: pubkey32, validator-id: hash32,
+  deposit: amount, min-shares: amount, self-bond: bool, recovery: receipt]
+cancel-pending = [2, position-id: hash32, expected-sequence: uint64,
+  expected-release: amount, fee-source: fee-source]
+unbond = [3, position-id: hash32, expected-sequence: uint64,
+  shares: amount, min-gross: amount, max-fee: amount, fee-source: fee-source]
+claim-exit = [4, ticket-id: hash32, expected-sequence: uint64,
+  expected-release: amount, fee-source: fee-source]
+register-validator = [5, validator-id: hash32, operator: pubkey32,
+  consensus: pubkey32, commission-bps: 0..2000,
+  display-name: tstr .size (1..64), website: tstr .size (0..256),
+  description: tstr .size (0..512)]
+update-validator = [6, validator-id: hash32, expected-sequence: uint64,
+  display-name: (tstr .size (1..64)) / null,
+  website: (tstr .size (0..256)) / null,
+  description: (tstr .size (0..512)) / null,
+  commission-bps: (0..2000) / null, request-disable: bool / null]
+unjail-validator = [7, validator-id: hash32, expected-sequence: uint64]
+rotate-consensus-key = [8, validator-id: hash32, expected-sequence: uint64,
+  new-consensus: pubkey32]
+claim-commission = [9, validator-id: hash32, expected-sequence: uint64,
+  requested-amount: amount, fee-source: fee-source]
+claim-genesis = [10, claim-id: hash32, expected-amount: amount,
+  fee-source: fee-source]
+; Proof order is every Spend, then every Output. Cardinality must match exactly.
+; Signer roles/order are fixed in protocol-extra.md. No optional extra signatures.
+; Owner/validator/ticket IDs are validated against authoritative state, not UI.

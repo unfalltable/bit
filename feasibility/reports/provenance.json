@@ -1,0 +1,195 @@
+{
+  "captured_at": "2026-09-09T02:49:53.432932+00:00",
+  "system": "Windows-11-10.0.22631-SP0",
+  "python": "3.14.7",
+  "commands": [
+    {
+      "command": [
+        "git",
+        "-C",
+        "D:\\others\\BIT\\feasibility\\upstream\\penumbra",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "3a87ce786373113f9b82d3b6df9504998b7f44a7",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "-C",
+        "D:\\others\\BIT\\feasibility\\upstream\\penumbra",
+        "status",
+        "--porcelain"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "D:\\others\\BIT\\feasibility\\.tools\\rust\\bin\\rustc.exe",
+        "--version",
+        "--verbose"
+      ],
+      "exit_code": 0,
+      "stdout": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-pc-windows-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "D:\\others\\BIT\\feasibility\\.tools\\go\\bin\\go.exe",
+        "version",
+        "-m",
+        "D:\\others\\BIT\\feasibility\\.tools\\bin\\cometbft.exe"
+      ],
+      "exit_code": 0,
+      "stdout": "D:\\others\\BIT\\feasibility\\.tools\\bin\\cometbft.exe: go1.27.1\n\tpath\tgithub.com/cometbft/cometbft/cmd/cometbft\n\tmod\tgithub.com/cometbft/cometbft\tv0.38.23\th1:jtCe5Do4EcHVf/FCyZMvkBm+AmsRGGyvswImXYAabdM=\n\tdep\tgithub.com/beorn7/perks\tv1.0.1\th1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=\n\tdep\tgithub.com/cespare/xxhash/v2\tv2.3.0\th1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=\n\tdep\tgithub.com/cometbft/cometbft-db\tv0.14.1\th1:SxoamPghqICBAIcGpleHbmoPqy+crij/++eZz3DlerQ=\n\tdep\tgithub.com/cosmos/gogoproto\tv1.7.0\th1:79USr0oyXAbxg3rspGh/m4SWNyoz/GLaAh0QlCe2fro=\n\tdep\tgithub.com/davecgh/go-spew\tv1.1.2-0.20180830191138-d8f796af33cc\th1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=\n\tdep\tgithub.com/decred/dcrd/dcrec/secp256k1/v4\tv4.4.0\th1:NMZiJj8QnKe1LgsbDayM4UoHwbvwDRwnI3hwNaAHRnc=\n\tdep\tgithub.com/fsnotify/fsnotify\tv1.7.0\th1:8JEhPFa5W2WU7YfeZzPNqzMP6Lwt7L2715Ggo0nosvA=\n\tdep\tgithub.com/go-kit/kit\tv0.13.0\th1:OoneCcHKHQ03LfBpoQCUfCluwd2Vt3ohz+kvbJneZAU=\n\tdep\tgithub.com/go-kit/log\tv0.2.1\th1:MRVx0/zhvdseW+Gza6N9rVzU/IVzaeE1SFI4raAhmBU=\n\tdep\tgithub.com/go-logfmt/logfmt\tv0.6.0\th1:wGYYu3uicYdqXVgoYbvnkrPVXkuLM1p1ifugDMEdRi4=\n\tdep\tgithub.com/golang/protobuf\tv1.5.4\th1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=\n\tdep\tgithub.com/golang/snappy\tv0.0.4\th1:yAGX7huGHXlcLOEtBnF4w7FQwA26wojNCwOYAEhLjQM=\n\tdep\tgithub.com/google/btree\tv1.1.3\th1:CVpQJjYgC4VbzxeGVHfvZrv1ctoYCAI8vbl07Fcxlyg=\n\tdep\tgithub.com/google/go-cmp\tv0.6.0\th1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=\n\tdep\tgithub.com/google/orderedcode\tv0.0.1\th1:UzfcAexk9Vhv8+9pNOgRu41f16lHq725vPwnSeiG/Us=\n\tdep\tgithub.com/gorilla/websocket\tv1.5.3\th1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=\n\tdep\tgithub.com/hashicorp/golang-lru/v2\tv2.0.7\th1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=\n\tdep\tgithub.com/hashicorp/hcl\tv1.0.0\th1:0Anlzjpi4vEasTeNFn2mLJgTSwt0+6sfsiTG8qcWGx4=\n\tdep\tgithub.com/inconshreveable/mousetrap\tv1.1.0\th1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=\n\tdep\tgithub.com/klauspost/compress\tv1.17.11\th1:In6xLpyWOi1+C7tXUUWv2ot1QvBjxevKAaI6IXrJmUc=\n\tdep\tgithub.com/lib/pq\tv1.12.0\th1:mC1zeiNamwKBecjHarAr26c/+d8V5w/u4J0I/yASbJo=\n\tdep\tgithub.com/magiconair/properties\tv1.8.7\th1:IeQXZAiQcpL9mgcAe1Nu6cX9LLw6ExEHKjN0VQdvPDY=\n\tdep\tgithub.com/minio/highwayhash\tv1.0.4\th1:asJizugGgchQod2ja9NJlGOWq4s7KsAWr5XUc9Clgl4=\n\tdep\tgithub.com/mitchellh/mapstructure\tv1.5.0\th1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=\n\tdep\tgithub.com/munnerz/goautoneg\tv0.0.0-20191010083416-a7dc8b61c822\th1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=\n\tdep\tgithub.com/oasisprotocol/curve25519-voi\tv0.0.0-20220708102147-0a8a51822cae\th1:FatpGJD2jmJfhZiFDElaC0QhZUDQnxUeAwTGkfAHN3I=\n\tdep\tgithub.com/pelletier/go-toml/v2\tv2.2.2\th1:aYUidT7k73Pcl9nb2gScu7NSrKCSHIDE89b3+6Wq+LM=\n\tdep\tgithub.com/pkg/errors\tv0.9.1\th1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=\n\tdep\tgithub.com/pmezard/go-difflib\tv1.0.1-0.20181226105442-5d4384ee4fb2\th1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=\n\tdep\tgithub.com/prometheus/client_golang\tv1.21.0\th1:DIsaGmiaBkSangBgMtWdNfxbMNdku5IK6iNhrEqWvdA=\n\tdep\tgithub.com/prometheus/client_model\tv0.6.1\th1:ZKSh/rekM+n3CeS952MLRAdFwIKqeY8b62p8ais2e9E=\n\tdep\tgithub.com/prometheus/common\tv0.62.0\th1:xasJaQlnWAeyHdUBeGjXmutelfJHWMRr+Fg4QszZ2Io=\n\tdep\tgithub.com/rcrowley/go-metrics\tv0.0.0-20201227073835-cf1acfcdf475\th1:N/ElC8H3+5XpJzTSTfLsJV/mx9Q9g7kxmchpfZyxgzM=\n\tdep\tgithub.com/rs/cors\tv1.11.1\th1:eU3gRzXLRK57F5rKMGMZURNdIG4EoAmX8k94r9wXWHA=\n\tdep\tgithub.com/sagikazarmark/slog-shim\tv0.1.0\th1:diDBnUNK9N/354PgrxMywXnAwEr1QZcOr6gto+ugjYE=\n\tdep\tgithub.com/spf13/afero\tv1.11.0\th1:WJQKhtpdm3v2IzqG8VMqrr6Rf3UYpEF239Jy9wNepM8=\n\tdep\tgithub.com/spf13/cast\tv1.6.0\th1:GEiTHELF+vaR5dhz3VqZfFSzZjYbgeKDpBxQVS4GYJ0=\n\tdep\tgithub.com/spf13/cobra\tv1.9.1\th1:CXSaggrXdbHK9CF+8ywj8Amf7PBRmPCOJugH954Nnlo=\n\tdep\tgithub.com/spf13/pflag\tv1.0.6\th1:jFzHGLGAlb3ruxLB8MhbI6A8+AQX/2eW4qeyNZXNp2o=\n\tdep\tgithub.com/spf13/viper\tv1.19.0\th1:RWq5SEjt8o25SROyN3z2OrDB9l7RPd3lwTWU8EcEdcI=\n\tdep\tgithub.com/stretchr/testify\tv1.10.0\th1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=\n\tdep\tgithub.com/subosito/gotenv\tv1.6.0\th1:9NlTDc1FTs4qu0DDq7AEtTPNw6SVm7uBMsUCUjABIf8=\n\tdep\tgithub.com/syndtr/goleveldb\tv1.0.1-0.20210819022825-2ae1ddf74ef7\th1:epCh84lMvA70Z7CTTCmYQn2CKbY8j86K7/FAIr141uY=\n\tdep\tgolang.org/x/crypto\tv0.33.0\th1:IOBPskki6Lysi0lo9qQvbxiQ+FvsCC/YWOecCHAixus=\n\tdep\tgolang.org/x/net\tv0.35.0\th1:T5GQRQb2y08kTAByq9L4/bz8cipCdA8FbRTXewonqY8=\n\tdep\tgolang.org/x/sync\tv0.11.0\th1:GGz8+XQP4FvTTrjZPzNKTMFtSXH80RAzG+5ghFPgK9w=\n\tdep\tgolang.org/x/sys\tv0.30.0\th1:QjkSwP/36a20jFYWkSue1YwXzLmsV5Gfq7Eiy72C1uc=\n\tdep\tgolang.org/x/text\tv0.22.0\th1:bofq7m3/HAFvbF51jz3Q9wLg3jkvSPuiZu/pD1XwgtM=\n\tdep\tgoogle.golang.org/genproto/googleapis/rpc\tv0.0.0-20241202173237-19429a94021a\th1:hgh8P4EuoxpsuKMXX/To36nOFD7vixReXgn8lPGnt+o=\n\tdep\tgoogle.golang.org/grpc\tv1.70.0\th1:pWFv03aZoHzlRKHWicjsZytKAiYCtNS0dHbXnIdq7jQ=\n\tdep\tgoogle.golang.org/protobuf\tv1.36.5\th1:tPhr+woSbjfYvY6/GPufUoYizxw1cF/yFoxJ2fmpwlM=\n\tdep\tgopkg.in/ini.v1\tv1.67.0\th1:Dgnx+6+nfE+IfzjUEISNeydPJh9AXNNsWbGP9KzCsOA=\n\tdep\tgopkg.in/yaml.v3\tv3.0.1\th1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\tDefaultGODEBUG=containermaxprocs=0,cryptocustomrand=1,decoratemappings=0,gotestjsonbuildtext=1,httpcookiemaxnum=0,httpservecontentkeepheaders=1,multipathtcp=0,randseednop=0,rsa1024min=0,tlsmlkem=0,tlssecpmlkem=0,tlssha1=1,tracebacklabels=0,updatemaxprocs=0,urlmaxqueryparams=0,urlstrictcolons=0,winreadlinkvolume=0,winsymlink=0,x509negativeserial=1,x509rsacrt=0,x509sha256skid=0,x509sslcertoverrideplatform=0,x509usepolicies=0\n\tbuild\tCGO_ENABLED=0\n\tbuild\tGOARCH=amd64\n\tbuild\tGOOS=windows\n\tbuild\tGOAMD64=v1",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "D:\\others\\BIT\\feasibility\\.tools\\bin\\cometbft.exe",
+        "version"
+      ],
+      "exit_code": 0,
+      "stdout": "0.38.22",
+      "stderr": ""
+    }
+  ],
+  "files": [
+    {
+      "path": ".tools/bin/cometbft.exe",
+      "size": 40069120,
+      "sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e"
+    },
+    {
+      "path": "consensus-probe/Cargo.lock",
+      "size": 10554,
+      "sha256": "cdc04e51b3d93b14ef81c01fe4120f66d0e9b16044a11953c52addaecaf6f7ce"
+    },
+    {
+      "path": "consensus-probe/Cargo.toml",
+      "size": 335,
+      "sha256": "32052897266b22b9003ff0522ccba95e584208b109b2db061e2f66d83bf96ffd"
+    },
+    {
+      "path": "consensus-probe/src/economics.rs",
+      "size": 6633,
+      "sha256": "357d625b6b36270ef62beaa4b81f04c7337c429639874510f87325b90e49380a"
+    },
+    {
+      "path": "consensus-probe/src/main.rs",
+      "size": 6559,
+      "sha256": "20fa67c8309acf4396c7c44963c9c7069e3a78c902eac945e0c7d478ab3263ab"
+    },
+    {
+      "path": "proof-probe/Cargo.lock",
+      "size": 97815,
+      "sha256": "f04a564397552899663480460edbf4e3d73277f48a9181f42f8f14d168adfac0"
+    },
+    {
+      "path": "proof-probe/Cargo.toml",
+      "size": 1334,
+      "sha256": "6bfc574a8062f5b6ac89f88c84dff99b15cbb59958c77e4ffe512841d62d23d4"
+    },
+    {
+      "path": "proof-probe/src/main.rs",
+      "size": 20057,
+      "sha256": "e0d8ea22b5520ebce18a636089847bb3401abcf4db2d7c93b71911975a033c21"
+    },
+    {
+      "path": "reports/comet-module.json",
+      "size": 887,
+      "sha256": "cc025c1d306a12b2233a73588c02244caf544a8e3882a7ae0b2d5a22c0dab63e"
+    },
+    {
+      "path": "reports/consensus-build.log",
+      "size": 819,
+      "sha256": "6388d64ce03aa6e632524a386e909ae44e6207b9bd6f3f9c162298cc3f29e72c"
+    },
+    {
+      "path": "reports/consensus-unit.log",
+      "size": 2814,
+      "sha256": "01814f5540f6d1d5aeb00eb005684436d478656efd32d85c53943ca1f7d9d326"
+    },
+    {
+      "path": "reports/feasibility-summary.json",
+      "size": 2938,
+      "sha256": "d80a1764ecb490e8760419b9d9578e5747fb2651eae3134d7e3de9185d5ae3f0"
+    },
+    {
+      "path": "reports/native-linker-download.json",
+      "size": 379,
+      "sha256": "a9c444c89344a258fb2b7284e66bd74c4dfb3261eb01e3e1b7b695998b4ac7d9"
+    },
+    {
+      "path": "reports/network-result.json",
+      "size": 2275,
+      "sha256": "3567703b6f07335429c9628be5906ef9bd2beaaf91522ed8d53fb74956206815"
+    },
+    {
+      "path": "reports/proof-build.log",
+      "size": 15841,
+      "sha256": "86a1f95daeb5e0ad28e2edde56d6cdf87cbd5a3e83789701d83a2f10e0ebf50a"
+    },
+    {
+      "path": "reports/proof-parameter-downloads.json",
+      "size": 967,
+      "sha256": "25f9a0c57ca829181e3fbf327dca90d64a039eb1a22dc5fedd4c71b804c805ed"
+    },
+    {
+      "path": "reports/proof-result.json",
+      "size": 3290,
+      "sha256": "a7a1ba3b5b959002c82b220267fba8a8ab070d307602e988571cf3121004280b"
+    },
+    {
+      "path": "reports/tool-downloads.json",
+      "size": 3066,
+      "sha256": "1742515a2da3d602c69b03777ebd325d0979501b640763f1d95f2271de79c01f"
+    },
+    {
+      "path": "scripts/bootstrap_tools.py",
+      "size": 5187,
+      "sha256": "b76897df483cbfeccf353a9efa652bd263313e68523fd62b09d0feba772b0e4c"
+    },
+    {
+      "path": "scripts/capture_evidence.py",
+      "size": 2297,
+      "sha256": "85eb408f1454511d860f2622d22c5f7eecc8379ebb2965bd1372a0d8c0eaca68"
+    },
+    {
+      "path": "scripts/run_network.py",
+      "size": 8329,
+      "sha256": "c152744a10b1b477b63634cafe24800d7db6566771b90ab044b38d80ae28047b"
+    },
+    {
+      "path": "scripts/run_proof_probe.py",
+      "size": 2442,
+      "sha256": "e048e6ad27fb950a911fcd770b563513d52139b1c0ae439d08beb7933a68dad3"
+    },
+    {
+      "path": "scripts/rust_env.ps1",
+      "size": 894,
+      "sha256": "0aebc3c6a88117eec00417e78100db6a8d6aaed827563c5c9000c6e63b3b87da"
+    },
+    {
+      "path": "scripts/summarize_results.py",
+      "size": 3155,
+      "sha256": "88e079453484ac1c5060253d8b90944458047cf867dda26cbaf8d8ba0066b2e7"
+    },
+    {
+      "path": "target/release/bit-proof-probe.exe",
+      "size": 23118848,
+      "sha256": "74501a722f1c1a941038090465fb0caa0cc27cb7a3149e544b6d6e123d8158bc"
+    },
+    {
+      "path": "target-consensus/release/bit-consensus-probe.exe",
+      "size": 2715136,
+      "sha256": "bbe28fa8c41d4847f1efc08e2cc4c7da3da9de7bbf01e691fe4adad7e0bc1b47"
+    }
+  ],
+  "mobile": "SKIPPED_BY_USER",
+  "scope": "experimental source/build/report provenance, not a production release manifest or SBOM"
+}

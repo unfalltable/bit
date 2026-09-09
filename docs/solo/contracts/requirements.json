@@ -1,0 +1,84 @@
+{
+  "requirements": [
+    {
+      "id": "PR-001",
+      "requirement": "无身份注册创建钱包",
+      "acceptance": "断网可创建，抓包无身份上报"
+    },
+    {
+      "id": "PR-002",
+      "requirement": "不使用生物识别",
+      "acceptance": "无 FaceID/指纹授权流程、依赖和替代强制提示"
+    },
+    {
+      "id": "PR-003",
+      "requirement": "本地密码、锁定与恢复",
+      "acceptance": "密码不上链不上传；错误密码拒绝；种子恢复资产"
+    },
+    {
+      "id": "PR-004",
+      "requirement": "隐私扫码支付",
+      "acceptance": "真证明、真广播、收方本地扫描与验证到账"
+    },
+    {
+      "id": "PR-005",
+      "requirement": "本币手续费自动计算",
+      "acceptance": "金额字符串精确，确认前显示总扣款"
+    },
+    {
+      "id": "PR-006",
+      "requirement": "委托质押",
+      "acceptance": "真实扣除私密池资金，创建原生持仓，不转给运营者钱包"
+    },
+    {
+      "id": "PR-007",
+      "requirement": "自动奖励",
+      "acceptance": "由确定性发行与分配更新池净值，手机离线不影响规则"
+    },
+    {
+      "id": "PR-008",
+      "requirement": "部分/全部退出",
+      "acceptance": "正确扣份额、生成退出票据、等待、再回到可花费余额"
+    },
+    {
+      "id": "PR-009",
+      "requirement": "全部余额锁定仍能退出",
+      "acceptance": "支持退出金额承担手续费；极小粉尘另有明示处理"
+    },
+    {
+      "id": "PR-010",
+      "requirement": "家庭节点",
+      "acceptance": "安装、诊断、同步、绑定、候选/活跃状态与处罚监测"
+    },
+    {
+      "id": "PR-011",
+      "requirement": "权限隔离",
+      "acceptance": "在线节点无法签署普通支付或任意取走委托者资产"
+    },
+    {
+      "id": "PR-012",
+      "requirement": "换机恢复",
+      "acceptance": "仅恢复凭证能重建支付与持仓密钥并找回链上权益"
+    },
+    {
+      "id": "PR-013",
+      "requirement": "多服务容错",
+      "acceptance": "网关伪造、遗漏或停机不能伪造确认，不静默泄露 IP"
+    },
+    {
+      "id": "PR-014",
+      "requirement": "公开发行与验证",
+      "acceptance": "公开总量、已发行、罚没、费用和验证者数据"
+    },
+    {
+      "id": "PR-015",
+      "requirement": "运维与升级闭环",
+      "acceptance": "快照验证、版本迁移、防双签、签名发布和故障恢复"
+    },
+    {
+      "id": "PR-016",
+      "requirement": "全量交付",
+      "acceptance": "所有正式页面、错误状态、测试与安装包同时完成"
+    }
+  ]
+}

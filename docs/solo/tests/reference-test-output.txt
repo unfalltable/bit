@@ -1,0 +1,25 @@
+test_all_funds_staked_can_exit (test_accounting_model.AccountingTests.test_all_funds_staked_can_exit) ... ok
+test_amount_boundaries (test_accounting_model.AccountingTests.test_amount_boundaries) ... ok
+test_cancel_pending_fee_release (test_accounting_model.AccountingTests.test_cancel_pending_fee_release) ... ok
+test_cap_clipping (test_accounting_model.AccountingTests.test_cap_clipping) ... ok
+test_cohort_outside_exposure_not_slashed (test_accounting_model.AccountingTests.test_cohort_outside_exposure_not_slashed) ... ok
+test_commission_claim (test_accounting_model.AccountingTests.test_commission_claim) ... ok
+test_deposit_floor_and_last_redemption (test_accounting_model.AccountingTests.test_deposit_floor_and_last_redemption) ... ok
+test_failed_action_atomic (test_accounting_model.AccountingTests.test_failed_action_atomic) ... ok
+test_fractional_emission_carry (test_accounting_model.AccountingTests.test_fractional_emission_carry) ... ok
+test_genesis_single_claim (test_accounting_model.AccountingTests.test_genesis_single_claim) ... ok
+test_insolvent_generation_rejects_deposit (test_accounting_model.AccountingTests.test_insolvent_generation_rejects_deposit) ... ok
+test_last_pool_and_cohort_no_dust (test_accounting_model.AccountingTests.test_last_pool_and_cohort_no_dust) ... ok
+test_maturity_requires_both_strict_bounds (test_accounting_model.AccountingTests.test_maturity_requires_both_strict_bounds) ... ok
+test_no_eligible_no_mint (test_accounting_model.AccountingTests.test_no_eligible_no_mint) ... ok
+test_penalty_active_exit_not_pending (test_accounting_model.AccountingTests.test_penalty_active_exit_not_pending) ... ok
+test_pending_no_reward (test_accounting_model.AccountingTests.test_pending_no_reward) ... ok
+test_repeat_exit_claim_rejected (test_accounting_model.AccountingTests.test_repeat_exit_claim_rejected) ... ok
+test_reward_commission_total (test_accounting_model.AccountingTests.test_reward_commission_total) ... ok
+test_seeded_random_accounting_sequences (test_accounting_model.AccountingTests.test_seeded_random_accounting_sequences) ... ok
+test_shielded_fee_source (test_accounting_model.AccountingTests.test_shielded_fee_source) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.564s
+
+OK

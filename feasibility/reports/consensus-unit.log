@@ -1,0 +1,71 @@
+    Blocking waiting for file lock on package cache
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.229
+   Compiling anyhow v1.0.104
+   Compiling version_check v0.9.5
+   Compiling serde v1.0.229
+   Compiling generic-array v0.14.7
+   Compiling paste v1.0.15
+   Compiling either v1.18.0
+   Compiling typenum v1.20.1
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling itertools v0.14.0
+   Compiling time-core v0.1.9
+   Compiling num-conv v0.2.2
+   Compiling time-macros v0.2.32
+   Compiling serde_derive v1.0.229
+   Compiling prost-derive v0.13.5
+   Compiling zeroize v1.9.0
+   Compiling powerfmt v0.2.0
+   Compiling zmij v1.0.23
+   Compiling deranged v0.5.8
+   Compiling subtle-encoding v0.5.1
+   Compiling flex-error v0.4.4
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling serde_bytes v0.11.19
+   Compiling tracing-core v0.1.36
+   Compiling time v0.3.55
+   Compiling pin-project-lite v0.2.17
+   Compiling serde_json v1.0.151
+   Compiling tracing v0.1.44
+   Compiling digest v0.10.7
+   Compiling bytes v1.12.1
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling prost v0.13.5
+   Compiling cfg-if v1.0.4
+   Compiling cpufeatures v0.2.17
+   Compiling sha2 v0.10.9
+   Compiling tendermint-proto v0.40.4
+   Compiling ethnum v1.5.3
+   Compiling hex v0.4.3
+   Compiling tendermint-abci v0.40.4
+   Compiling bit-consensus-probe v0.1.0 (D:\others\BIT\feasibility\consensus-probe)
+    Finished `release` profile [optimized] target(s) in 1m 07s
+     Running unittests src\main.rs (feasibility\target-consensus\release\deps\bit_consensus_probe-ab67ce2c4545809a.exe)
+
+running 18 tests
+test economics::tests::forfeited_does_not_catch_up ... ok
+test economics::tests::golden_points ... ok
+test economics::tests::invalid_numeric_json_rejected ... ok
+test economics::tests::large_shift_and_horizon ... ok
+test economics::tests::no_wall_clock_input ... ok
+test economics::tests::serialization_big_integer ... ok
+test economics::tests::bad_genesis_rejected ... ok
+test economics::tests::bad_state_rejected ... ok
+test economics::tests::burn_does_not_reopen ... ok
+test economics::tests::duplicate_is_atomic ... ok
+test economics::tests::fixed_cap_and_signed_range ... ok
+test economics::tests::share_rounding_and_last_exit ... ok
+test economics::tests::share_u256_intermediate ... ok
+test economics::tests::small_schedule ... ok
+test economics::tests::zero_quota_not_finished ... ok
+test tests::first_settlement_and_replay ... ok
+test tests::serialization_root_stable ... ok
+test economics::tests::exhaustive_small_budgets ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s

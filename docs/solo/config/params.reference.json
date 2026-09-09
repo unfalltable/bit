@@ -1,0 +1,103 @@
+{
+  "spec_version": "1.0",
+  "profile": "reference_testnet",
+  "network": {
+    "chain_id": "solo-test-1",
+    "display_name": "Solo Testnet",
+    "symbol": "SLC",
+    "base_denom": "uslc",
+    "decimals": 8,
+    "privacy_required": true,
+    "allow_test_keys": true
+  },
+  "consensus": {
+    "target_block_seconds": 5,
+    "epoch_blocks": 720,
+    "max_validators": 64,
+    "power_unit_atomic": "100000000",
+    "max_total_voting_power": "1152921504606846975",
+    "max_block_bytes": 1048576,
+    "max_txs_per_block": 100,
+    "max_proofs_per_block": 512,
+    "max_state_writes_per_block": 10000,
+    "vote_extensions_enabled": false,
+    "validator_update_delay_blocks": 2
+  },
+  "transactions": {
+    "max_tx_bytes": 65536,
+    "max_spends": 8,
+    "max_outputs": 8,
+    "max_business_actions": 1,
+    "max_tx_lifetime_blocks": 120,
+    "anchor_retention_blocks": 720,
+    "max_memo_utf8_bytes": 256,
+    "max_public_metadata_bytes": 1024,
+    "max_amount_exclusive": "1329227995784915872903807060280344576"
+  },
+  "staking": {
+    "min_delegation_atomic": "100000000",
+    "min_self_bond_atomic": "100000000000",
+    "unbonding_seconds": 1209600,
+    "unbonding_blocks": 241920,
+    "downtime_window": 10000,
+    "min_signed_bps": 9500,
+    "downtime_slash_bps": 0,
+    "byzantine_slash_bps": 500,
+    "jail_seconds": 7200,
+    "jail_blocks": 1440,
+    "max_commission_bps": 2000,
+    "default_commission_bps": 500,
+    "max_commission_increase_bps": 100,
+    "commission_notice_seconds": 604800,
+    "commission_notice_blocks": 120960,
+    "slash_cohorts_per_block": 128,
+    "max_pending_positions_per_activation_epoch": 1000
+  },
+  "evidence": {
+    "max_age_seconds": 604800,
+    "max_age_blocks": 120960,
+    "max_bytes_per_block": 65536
+  },
+  "trust": {
+    "trust_period_seconds": 259200,
+    "max_clock_drift_seconds": 10,
+    "required_witnesses": 2,
+    "configured_independent_endpoints": 3,
+    "checkpoint_signature_threshold": 2
+  },
+  "economics": {
+    "reference_genesis_supply_atomic": "10000000000000000",
+    "emission_bps_per_target_year": 200,
+    "target_blocks_per_year": 6307200,
+    "supply_technical_cap_atomic": "100000000000000000000000000",
+    "operator_admin_mint": false
+  },
+  "fees": {
+    "base_atomic": "1000",
+    "per_kib_atomic": "200",
+    "per_spend_proof_atomic": "500",
+    "per_output_proof_atomic": "500",
+    "new_position_surcharge_atomic": "100000",
+    "validator_registration_surcharge_atomic": "100000000"
+  },
+  "wallet": {
+    "auto_lock_background_seconds": 30,
+    "auto_lock_idle_seconds": 120,
+    "password_min_characters": 10,
+    "argon2_memory_kib": 65536,
+    "argon2_iterations": 3,
+    "argon2_parallelism": 4,
+    "biometrics_enabled": false,
+    "telemetry_enabled": false,
+    "max_sync_batch_bytes": 8388608
+  },
+  "runtime": {
+    "abci_listen": "127.0.0.1:26658",
+    "comet_rpc_listen": "127.0.0.1:26657",
+    "p2p_port": 26656,
+    "gateway_port": 8443,
+    "metrics_listen": "127.0.0.1:9100",
+    "signer_transport": "local_os_socket",
+    "mainnet_enabled": false
+  }
+}

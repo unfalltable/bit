@@ -1,0 +1,1121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:solo:public:1",
+  "title": "Solo Public JSON Contract",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Network"
+    },
+    {
+      "$ref": "#/$defs/Headers"
+    },
+    {
+      "$ref": "#/$defs/CompactBlocks"
+    },
+    {
+      "$ref": "#/$defs/Supply"
+    },
+    {
+      "$ref": "#/$defs/PositionResponse"
+    },
+    {
+      "$ref": "#/$defs/ExitTicketResponse"
+    },
+    {
+      "$ref": "#/$defs/Blocks"
+    },
+    {
+      "$ref": "#/$defs/BlockDetail"
+    },
+    {
+      "$ref": "#/$defs/ValidatorEvents"
+    },
+    {
+      "$ref": "#/$defs/Upgrades"
+    }
+  ],
+  "$defs": {
+    "UIntString": {
+      "type": "string",
+      "description": "规范非负十进制；客户端使用BigInt，不经Number。",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "Amount": {
+      "type": "string",
+      "description": "原子单位十进制字符串；语义校验0<=x<2^120。",
+      "pattern": "^(0|[1-9][0-9]{0,36})$"
+    },
+    "Hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Base64": {
+      "type": "string",
+      "format": "byte",
+      "maxLength": 12000000
+    },
+    "Meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "chain_context": {
+          "$ref": "#/$defs/Hash"
+        },
+        "state_height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "verified_header_height": {
+          "$ref": "#/$defs/UIntString"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "chain_context",
+        "state_height",
+        "verified_header_height"
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "description": "只含脱敏消息"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "required_state_height": {
+              "$ref": "#/$defs/UIntString"
+            }
+          },
+          "required": []
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "request_id",
+        "details"
+      ]
+    },
+    "StateProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "value_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "proof_format": {
+          "type": "string"
+        },
+        "proof_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "proof_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "app_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "header_hash": {
+          "$ref": "#/$defs/Hash"
+        }
+      },
+      "required": [
+        "key_base64",
+        "exists",
+        "value_base64",
+        "proof_format",
+        "proof_version",
+        "proof_base64",
+        "app_hash",
+        "header_hash"
+      ]
+    },
+    "Header": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "signed_header_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "validator_set_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "next_validator_set_base64": {
+          "$ref": "#/$defs/Base64"
+        }
+      },
+      "required": [
+        "height",
+        "signed_header_base64",
+        "validator_set_base64",
+        "next_validator_set_base64"
+      ]
+    },
+    "Network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "chain_id": {
+          "type": "string"
+        },
+        "genesis_manifest_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "native_asset_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "decimals": {
+          "type": "integer",
+          "enum": [
+            8
+          ]
+        },
+        "privacy_required": {
+          "type": "boolean"
+        },
+        "crypto_manifest_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "params_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "max_compact_batch_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "meta",
+        "chain_id",
+        "genesis_manifest_hash",
+        "native_asset_id",
+        "decimals",
+        "privacy_required",
+        "crypto_manifest_hash",
+        "params_hash",
+        "max_compact_batch_bytes"
+      ]
+    },
+    "Headers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Header"
+          },
+          "maxItems": 500
+        },
+        "next_height": {
+          "$ref": "#/$defs/UIntString"
+        }
+      },
+      "required": [
+        "meta",
+        "items",
+        "next_height"
+      ]
+    },
+    "CompactBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "format_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "records_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "records_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "commitment_proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "height",
+        "format_version",
+        "records_base64",
+        "records_hash",
+        "commitment_proof"
+      ]
+    },
+    "CompactBlocks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CompactBlock"
+          },
+          "maxItems": 500
+        },
+        "next_height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "complete_to_tip": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "meta",
+        "items",
+        "next_height",
+        "complete_to_tip"
+      ]
+    },
+    "BroadcastRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "envelope_base64": {
+          "type": "string",
+          "format": "byte",
+          "maxLength": 87384
+        }
+      },
+      "required": [
+        "envelope_base64"
+      ]
+    },
+    "BroadcastReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "tx_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "RECEIVED",
+            "MEMPOOL",
+            "CONFIRMED",
+            "UNKNOWN",
+            "REJECTED"
+          ]
+        },
+        "code": {
+          "type": "string"
+        },
+        "confirmation": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "meta",
+        "tx_id",
+        "status",
+        "code"
+      ]
+    },
+    "TransactionStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "tx_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "UNKNOWN",
+            "MEMPOOL",
+            "MEMPOOL_EVICTED",
+            "CONFIRMED",
+            "REJECTED",
+            "EXPIRED"
+          ]
+        },
+        "block_height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "transaction_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "execution_code": {
+          "type": "string"
+        },
+        "canonical_envelope_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "inclusion_proof_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "result_proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "meta",
+        "tx_id",
+        "status"
+      ]
+    },
+    "Validator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "validator_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "operator_pubkey": {
+          "$ref": "#/$defs/Hash"
+        },
+        "consensus_pubkey": {
+          "$ref": "#/$defs/Hash"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "REGISTERED",
+            "ACTIVE",
+            "INACTIVE",
+            "JAILED",
+            "DISABLED",
+            "TOMBSTONED"
+          ]
+        },
+        "pool_generation": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "pool_assets": {
+          "$ref": "#/$defs/Amount"
+        },
+        "pool_shares": {
+          "$ref": "#/$defs/Amount"
+        },
+        "self_bond_value": {
+          "$ref": "#/$defs/Amount"
+        },
+        "voting_power": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "commission_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000
+        },
+        "sequence": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "validator_id",
+        "operator_pubkey",
+        "consensus_pubkey",
+        "display_name",
+        "status",
+        "pool_generation",
+        "pool_assets",
+        "pool_shares",
+        "self_bond_value",
+        "voting_power",
+        "commission_bps",
+        "sequence",
+        "proof"
+      ]
+    },
+    "Validators": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Validator"
+          },
+          "maxItems": 500
+        },
+        "next_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "items"
+      ]
+    },
+    "ValidatorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "validator": {
+          "$ref": "#/$defs/Validator"
+        }
+      },
+      "required": [
+        "meta",
+        "validator"
+      ]
+    },
+    "Position": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "position_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "owner_pubkey": {
+          "$ref": "#/$defs/Hash"
+        },
+        "validator_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "generation": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "shares": {
+          "$ref": "#/$defs/Amount"
+        },
+        "pending_amount": {
+          "$ref": "#/$defs/Amount"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "ACTIVE",
+            "REFUNDABLE_PENDING",
+            "EXITED",
+            "INSOLVENT"
+          ]
+        },
+        "sequence": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "created_height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "receipt_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "position_id",
+        "owner_pubkey",
+        "validator_id",
+        "generation",
+        "shares",
+        "pending_amount",
+        "status",
+        "sequence",
+        "created_height",
+        "receipt_base64",
+        "proof"
+      ]
+    },
+    "PositionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "position": {
+          "$ref": "#/$defs/Position"
+        }
+      },
+      "required": [
+        "meta",
+        "position"
+      ]
+    },
+    "ExitTicket": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ticket_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "position_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "cohort_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "units": {
+          "$ref": "#/$defs/Amount"
+        },
+        "sequence": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "current_gross_value": {
+          "$ref": "#/$defs/Amount"
+        },
+        "exposure_end_height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "exposure_end_time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "maturity_height_exclusive": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "maturity_time_exclusive": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "WAITING_EXPOSURE_END",
+            "LOCKED",
+            "SLASH_PENDING",
+            "MATURE",
+            "CLAIMED"
+          ]
+        },
+        "proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "ticket_id",
+        "position_id",
+        "cohort_id",
+        "units",
+        "sequence",
+        "current_gross_value",
+        "exposure_end_height",
+        "status",
+        "proof"
+      ]
+    },
+    "ExitTicketResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "ticket": {
+          "$ref": "#/$defs/ExitTicket"
+        }
+      },
+      "required": [
+        "meta",
+        "ticket"
+      ]
+    },
+    "Supply": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "total": {
+          "$ref": "#/$defs/Amount"
+        },
+        "genesis": {
+          "$ref": "#/$defs/Amount"
+        },
+        "minted": {
+          "$ref": "#/$defs/Amount"
+        },
+        "burned": {
+          "$ref": "#/$defs/Amount"
+        },
+        "shielded_pool": {
+          "$ref": "#/$defs/Amount"
+        },
+        "stake_pools": {
+          "$ref": "#/$defs/Amount"
+        },
+        "pending_delegation": {
+          "$ref": "#/$defs/Amount"
+        },
+        "exit_pools": {
+          "$ref": "#/$defs/Amount"
+        },
+        "commission_payable": {
+          "$ref": "#/$defs/Amount"
+        },
+        "fee_reserve": {
+          "$ref": "#/$defs/Amount"
+        },
+        "unclaimed_genesis": {
+          "$ref": "#/$defs/Amount"
+        },
+        "proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "meta",
+        "total",
+        "genesis",
+        "minted",
+        "burned",
+        "shielded_pool",
+        "stake_pools",
+        "pending_delegation",
+        "exit_pools",
+        "commission_payable",
+        "fee_reserve",
+        "unclaimed_genesis",
+        "proof"
+      ]
+    },
+    "Fees": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "base": {
+          "$ref": "#/$defs/Amount"
+        },
+        "per_kib": {
+          "$ref": "#/$defs/Amount"
+        },
+        "per_spend_proof": {
+          "$ref": "#/$defs/Amount"
+        },
+        "per_output_proof": {
+          "$ref": "#/$defs/Amount"
+        },
+        "new_position_surcharge": {
+          "$ref": "#/$defs/Amount"
+        },
+        "validator_registration_surcharge": {
+          "$ref": "#/$defs/Amount"
+        },
+        "proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "meta",
+        "base",
+        "per_kib",
+        "per_spend_proof",
+        "per_output_proof",
+        "new_position_surcharge",
+        "validator_registration_surcharge",
+        "proof"
+      ]
+    },
+    "Checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chain_context": {
+          "$ref": "#/$defs/Hash"
+        },
+        "height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "block_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "validators_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "signatures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "signer_id": {
+                "$ref": "#/$defs/Hash"
+              },
+              "signature_base64": {
+                "$ref": "#/$defs/Base64"
+              }
+            },
+            "required": [
+              "signer_id",
+              "signature_base64"
+            ]
+          },
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "chain_context",
+        "height",
+        "block_hash",
+        "validators_hash",
+        "issued_at",
+        "signatures"
+      ]
+    },
+    "Checkpoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Checkpoint"
+          },
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "meta",
+        "items"
+      ]
+    },
+    "StateProofResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "result": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "meta",
+        "result"
+      ]
+    },
+    "Health": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "OK",
+            "NOT_READY"
+          ]
+        },
+        "protocol_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "state_height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "verified_header_height": {
+          "$ref": "#/$defs/UIntString"
+        }
+      },
+      "required": [
+        "status",
+        "protocol_version",
+        "state_height",
+        "verified_header_height"
+      ]
+    },
+    "BlockSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "block_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "chain_time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "tx_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proposer_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "app_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "header": {
+          "$ref": "#/$defs/Header"
+        }
+      },
+      "required": [
+        "height",
+        "block_hash",
+        "chain_time",
+        "tx_count",
+        "proposer_id",
+        "app_hash",
+        "header"
+      ]
+    },
+    "Blocks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BlockSummary"
+          },
+          "maxItems": 500
+        },
+        "next_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "items"
+      ]
+    },
+    "BlockDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "block": {
+          "$ref": "#/$defs/BlockSummary"
+        },
+        "transaction_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hash"
+          },
+          "maxItems": 100
+        },
+        "transactions_root": {
+          "$ref": "#/$defs/Hash"
+        },
+        "compact_hash_proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "meta",
+        "block",
+        "transaction_ids",
+        "transactions_root",
+        "compact_hash_proof"
+      ]
+    },
+    "ValidatorEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "event_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "type": "string"
+        },
+        "canonical_public_payload_base64": {
+          "$ref": "#/$defs/Base64"
+        },
+        "event_proof": {
+          "$ref": "#/$defs/StateProof"
+        }
+      },
+      "required": [
+        "height",
+        "event_index",
+        "type",
+        "canonical_public_payload_base64",
+        "event_proof"
+      ]
+    },
+    "ValidatorEvents": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "validator_id": {
+          "$ref": "#/$defs/Hash"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidatorEvent"
+          },
+          "maxItems": 500
+        },
+        "next_cursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "validator_id",
+        "items"
+      ]
+    },
+    "UpgradeAnnouncement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "release_id": {
+          "type": "string"
+        },
+        "source_commit": {
+          "type": "string"
+        },
+        "manifest_hash": {
+          "$ref": "#/$defs/Hash"
+        },
+        "target_height": {
+          "$ref": "#/$defs/UIntString"
+        },
+        "signatures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "signer_id": {
+                "$ref": "#/$defs/Hash"
+              },
+              "signature_base64": {
+                "$ref": "#/$defs/Base64"
+              }
+            },
+            "required": [
+              "signer_id",
+              "signature_base64"
+            ]
+          },
+          "maxItems": 16
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ADVISORY",
+            "SCHEDULED_BY_INSTALLED_BINARY",
+            "APPLIED"
+          ]
+        },
+        "automatic_authority": {
+          "type": "boolean",
+          "enum": [
+            false
+          ]
+        }
+      },
+      "required": [
+        "release_id",
+        "source_commit",
+        "manifest_hash",
+        "target_height",
+        "signatures",
+        "status",
+        "automatic_authority"
+      ]
+    },
+    "Upgrades": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UpgradeAnnouncement"
+          },
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "meta",
+        "items"
+      ]
+    }
+  }
+}

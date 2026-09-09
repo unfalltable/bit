@@ -1,0 +1,31 @@
+{
+  "network_type": "mainnet",
+  "mainnet_ready": false,
+  "status": "REQUIRES_REAL_EXTERNAL_INPUTS",
+  "chain_id": null,
+  "genesis_time": null,
+  "crypto_manifest_sha256": null,
+  "source_commit": null,
+  "native_asset_id": null,
+  "key_derivation_version": null,
+  "address_encoding_version": null,
+  "economic_policy_approved": false,
+  "allocations": [],
+  "initial_validators": [],
+  "checkpoint_publishers": [],
+  "independent_endpoints": [],
+  "external_security_reviews": [],
+  "platform_signing_certificates": [],
+  "release_signatures": [],
+  "monetary_policy": {
+    "max_supply_coins": "102400000000",
+    "max_supply_atomic": "10240000000000000000",
+    "decimals": 8,
+    "policy_id": "BUDGET_HALVING_EPOCH_V1",
+    "genesis_supply_atomic": null,
+    "epoch_blocks": null,
+    "halving_interval_epochs": null,
+    "monetary_policy_hash": null,
+    "confirmed_requirement": "TOTAL_SUPPLY_CAP_1024_YI_BIT"
+  }
+}

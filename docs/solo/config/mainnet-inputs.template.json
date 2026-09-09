@@ -1,0 +1,17 @@
+{
+  "network_type": "mainnet",
+  "mainnet_ready": false,
+  "status": "REQUIRES_REAL_EXTERNAL_INPUTS",
+  "chain_id": null,
+  "genesis_time": null,
+  "crypto_manifest_sha256": null,
+  "source_commit": null,
+  "economic_policy_approved": false,
+  "allocations": [],
+  "initial_validators": [],
+  "checkpoint_publishers": [],
+  "independent_endpoints": [],
+  "external_security_reviews": [],
+  "platform_signing_certificates": [],
+  "release_signatures": []
+}

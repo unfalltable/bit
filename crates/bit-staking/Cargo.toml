@@ -1,0 +1,11 @@
+[package]
+name = "bit-staking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bit-types = { path = "../bit-types" }
+primitive-types = "0.12.2"
+thiserror = "2.0.18"

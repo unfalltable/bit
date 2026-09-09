@@ -1,0 +1,22 @@
+[workspace]
+members = [
+    "crates/bit-types",
+    "crates/bit-shielded",
+    "crates/bit-transaction",
+    "crates/bit-emission",
+    "crates/bit-staking",
+    "crates/bit-state",
+    "crates/bit-app",
+]
+exclude = ["feasibility/proof-probe", "feasibility/consensus-probe", "feasibility/upstream/penumbra"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.83"
+
+[profile.release]
+overflow-checks = true
+lto = "thin"

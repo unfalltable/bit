@@ -1,0 +1,17 @@
+[package]
+name = "bit-transaction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bit-emission = { path = "../bit-emission" }
+bit-shielded = { path = "../bit-shielded" }
+bit-types = { path = "../bit-types" }
+ed25519-consensus = "2.1.0"
+
+[dev-dependencies]
+decaf377 = "0.10.1"
+decaf377-rdsa = "0.11.0"

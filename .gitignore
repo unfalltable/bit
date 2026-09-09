@@ -1,0 +1,6 @@
+/target/
+/target-bit/
+/.idea/
+/.vscode/
+__pycache__/
+*.pyc

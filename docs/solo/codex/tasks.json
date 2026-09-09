@@ -1,0 +1,380 @@
+{
+  "spec_version": "1.0",
+  "tasks": [
+    {
+      "id": "D-001",
+      "title": "依赖与平台冻结",
+      "depends_on": [],
+      "implementation_paths": [
+        "dependency-lock.json",
+        "crypto/manifest.json",
+        "platform-support.json"
+      ],
+      "acceptance": "检查官方版本与通告，锁定源码SHA与平台构建，不伪造兼容性",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-002",
+      "title": "类型、规范编码与错误",
+      "depends_on": [
+        "D-001"
+      ],
+      "implementation_paths": [
+        "crates/solo-types"
+      ],
+      "acceptance": "金额/CBOR/envelope向量与字段篡改测试",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-003",
+      "title": "密码学窄适配",
+      "depends_on": [
+        "D-002"
+      ],
+      "implementation_paths": [
+        "crates/solo-crypto-adapter"
+      ],
+      "acceptance": "固定Spend/Output向量、参数哈希、真实正负证明",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-004",
+      "title": "状态数据库与证明",
+      "depends_on": [
+        "D-002"
+      ],
+      "implementation_paths": [
+        "crates/solo-state"
+      ],
+      "acceptance": "原子提交、KV证明、快照与崩溃重放",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-005",
+      "title": "ABCI与真实共识",
+      "depends_on": [
+        "D-003",
+        "D-004"
+      ],
+      "implementation_paths": [
+        "crates/solo-app"
+      ],
+      "acceptance": "4独立CometBFT节点真实出块、集合生效偏移",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-006",
+      "title": "隐私支付与会计",
+      "depends_on": [
+        "D-005"
+      ],
+      "implementation_paths": [
+        "crates/solo-shielded"
+      ],
+      "acceptance": "支付A到B、double-spend拒绝、每块供给守恒",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-007",
+      "title": "原生持仓与激活",
+      "depends_on": [
+        "D-006"
+      ],
+      "implementation_paths": [
+        "crates/solo-staking"
+      ],
+      "acceptance": "独立owner、公钥收据、pending与激活、无凭证币",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-008",
+      "title": "退出、领取、处罚",
+      "depends_on": [
+        "D-007"
+      ],
+      "implementation_paths": [
+        "crates/solo-staking"
+      ],
+      "acceptance": "双期限、从释放值付费、SlashJob崩溃恢复",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-009",
+      "title": "发行与奖励佣金",
+      "depends_on": [
+        "D-008"
+      ],
+      "implementation_paths": [
+        "crates/solo-emission"
+      ],
+      "acceptance": "确定发行、实际权重计分、手续费/佣金/舍入守恒",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-010",
+      "title": "轻客户端与完整同步",
+      "depends_on": [
+        "D-006"
+      ],
+      "implementation_paths": [
+        "crates/solo-light-client"
+      ],
+      "acceptance": "伪造/遗漏数据拒绝、信任过期流程",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-011",
+      "title": "Vault和密钥恢复",
+      "depends_on": [
+        "D-003"
+      ],
+      "implementation_paths": [
+        "crates/solo-wallet-core"
+      ],
+      "acceptance": "本地加密、无生物识别、随机密钥与种子恢复",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-012",
+      "title": "钱包计划与恢复扫描",
+      "depends_on": [
+        "D-008",
+        "D-009",
+        "D-010",
+        "D-011"
+      ],
+      "implementation_paths": [
+        "crates/solo-wallet-core"
+      ],
+      "acceptance": "未知交易不重付、恢复持仓不依赖旧索引计数",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-013",
+      "title": "Flutter桥与跨平台构建",
+      "depends_on": [
+        "D-012"
+      ],
+      "implementation_paths": [
+        "crates/solo-wallet-ffi",
+        "apps/wallet"
+      ],
+      "acceptance": "精确匹配codegen、金额和秘密不泄漏",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-014",
+      "title": "创建与安全页面",
+      "depends_on": [
+        "D-013"
+      ],
+      "implementation_paths": [
+        "apps/wallet"
+      ],
+      "acceptance": "W01-W10及异常状态、密码修改中断恢复",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-015",
+      "title": "支付与订单联系人页面",
+      "depends_on": [
+        "D-014"
+      ],
+      "implementation_paths": [
+        "apps/wallet"
+      ],
+      "acceptance": "W11-W22真实支付、少付/多付/退款",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-016",
+      "title": "质押与节点授权页面",
+      "depends_on": [
+        "D-015"
+      ],
+      "implementation_paths": [
+        "apps/wallet"
+      ],
+      "acceptance": "W23-W35全部真实业务状态",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-017",
+      "title": "隐私网络与设置页面",
+      "depends_on": [
+        "D-016"
+      ],
+      "implementation_paths": [
+        "apps/wallet",
+        "crates/solo-wallet-core"
+      ],
+      "acceptance": "W36-W41和Arti统一网络出口",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-018",
+      "title": "钱包可访问性与语言",
+      "depends_on": [
+        "D-017"
+      ],
+      "implementation_paths": [
+        "apps/wallet"
+      ],
+      "acceptance": "中英、主题、字体200%、支持平台",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-019",
+      "title": "耐崩溃共识签名器",
+      "depends_on": [
+        "D-005"
+      ],
+      "implementation_paths": [
+        "crates/solo-signer"
+      ],
+      "acceptance": "同HRS异消息拒签、intent/fsync恢复、克隆风险",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-020",
+      "title": "节点Agent和权限隔离",
+      "depends_on": [
+        "D-019"
+      ],
+      "implementation_paths": [
+        "crates/solo-node-agent"
+      ],
+      "acceptance": "OS IPC/ACL、子进程管理、QR批准、无资金seed",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-021",
+      "title": "家庭节点全部页面",
+      "depends_on": [
+        "D-020"
+      ],
+      "implementation_paths": [
+        "apps/node_desktop"
+      ],
+      "acceptance": "N01-N16 Linux/macOS/WSL2安装、故障和迁移",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-022",
+      "title": "公开网关与API",
+      "depends_on": [
+        "D-010",
+        "D-009"
+      ],
+      "implementation_paths": [
+        "crates/solo-gateway"
+      ],
+      "acceptance": "OpenAPI合同、证明、幂等、限额、无私钥接口",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-023",
+      "title": "公开索引",
+      "depends_on": [
+        "D-022"
+      ],
+      "implementation_paths": [
+        "crates/solo-indexer"
+      ],
+      "acceptance": "SQL迁移、逐块幂等、删除重建不影响资产",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-024",
+      "title": "只读浏览器",
+      "depends_on": [
+        "D-023"
+      ],
+      "implementation_paths": [
+        "apps/explorer"
+      ],
+      "acceptance": "E01-E08，无私密个人流水/恢复词入口",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-025",
+      "title": "CLI与创世工具",
+      "depends_on": [
+        "D-009",
+        "D-012"
+      ],
+      "implementation_paths": [
+        "crates/solo-cli"
+      ],
+      "acceptance": "全部命令、真实genesis校验、测试键阻断主网",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-026",
+      "title": "完整部署与安装打包",
+      "depends_on": [
+        "D-018",
+        "D-021",
+        "D-024",
+        "D-025"
+      ],
+      "implementation_paths": [
+        "deploy",
+        "scripts"
+      ],
+      "acceptance": "localnet、systemd、容器、移动桌面安装包",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-027",
+      "title": "全流程E2E与故障",
+      "depends_on": [
+        "D-026"
+      ],
+      "implementation_paths": [
+        "tests/e2e",
+        "tests/chaos"
+      ],
+      "acceptance": "支付-质押-奖励-处罚-退出-恢复闭环及分区停链",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-028",
+      "title": "隐私与安全负例",
+      "depends_on": [
+        "D-027"
+      ],
+      "implementation_paths": [
+        "tests/privacy"
+      ],
+      "acceptance": "抓包无直连降级、字段篡改、无秘密日志",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-029",
+      "title": "性能与资源预算",
+      "depends_on": [
+        "D-028"
+      ],
+      "implementation_paths": [
+        "tests/performance",
+        "reports"
+      ],
+      "acceptance": "真实设备/网络资源、20TPS压力及手机流量评估",
+      "scope": "FULL_RELEASE_REQUIRED"
+    },
+    {
+      "id": "D-030",
+      "title": "全量验收与发布证据",
+      "depends_on": [
+        "D-029"
+      ],
+      "implementation_paths": [
+        "reports",
+        "release_manifest.json"
+      ],
+      "acceptance": "完整功能、独立复现、外部输入阻断与真实主网检查",
+      "scope": "FULL_RELEASE_REQUIRED"
+    }
+  ]
+}

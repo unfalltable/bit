@@ -1,0 +1,530 @@
+{
+  "spec_version": "1.0",
+  "contract_status": "TO_BE_IMPLEMENTED",
+  "common_rules": [
+    "NoSecretDebug",
+    "NoRemoteSigner",
+    "NoBiometrics",
+    "NoSilentDirectNetwork",
+    "NoArbitrarySignBytes",
+    "BigIntAmounts",
+    "ExplicitConfirmation"
+  ],
+  "types": {
+    "Amount": "u128 < 2^120; FFI decimal string",
+    "Shares": "u128 < 2^120; FFI decimal string",
+    "Hash32": "32 byte array; JSON lowercase hex",
+    "SecretString": "zeroizing Rust buffer, redacted debug, no implicit clone",
+    "Plan": "plan_id,chain_context,state_height,effect_summary,effect_hash,fee,expiry_height,input_reservations,status",
+    "SoloError": "code,retryable,redacted_message,required_action",
+    "EffectHash64": "64 byte BLAKE2b-512 effect hash; not Hash32"
+  },
+  "methods": [
+    {
+      "name": "wallet_create",
+      "arguments": {
+        "password": "SecretString",
+        "network": "VerifiedNetworkManifest"
+      },
+      "returns": "WalletHandle",
+      "authorization": "LOCAL_EXPLICIT",
+      "side_effect": "create encrypted vault",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "wallet_restore",
+      "arguments": {
+        "recovery": "SecretRecoveryWords",
+        "password": "SecretString",
+        "network": "VerifiedNetworkManifest"
+      },
+      "returns": "WalletHandle",
+      "authorization": "LOCAL_EXPLICIT",
+      "side_effect": "create vault, verify checkpoint, scan",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "wallet_unlock",
+      "arguments": {
+        "wallet_id": "Uuid",
+        "password": "SecretString"
+      },
+      "returns": "UnlockedSession",
+      "authorization": "PASSWORD",
+      "side_effect": "unlock locally",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "wallet_lock",
+      "arguments": {
+        "wallet_id": "Uuid"
+      },
+      "returns": "Unit",
+      "authorization": "LOCAL",
+      "side_effect": "zeroize secrets",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "wallet_change_password",
+      "arguments": {
+        "session": "UnlockedSession",
+        "old_password": "SecretString",
+        "new_password": "SecretString"
+      },
+      "returns": "Unit",
+      "authorization": "FRESH_PASSWORD",
+      "side_effect": "rewrap DEK atomically",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "wallet_delete_local",
+      "arguments": {
+        "wallet_id": "Uuid",
+        "confirmation": "DeleteLocalConfirmation"
+      },
+      "returns": "Unit",
+      "authorization": "FRESH_PASSWORD",
+      "side_effect": "delete local ciphertext, not chain funds",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "backup_begin",
+      "arguments": {
+        "session": "UnlockedSession"
+      },
+      "returns": "BackupSession",
+      "authorization": "FRESH_PASSWORD",
+      "side_effect": "enable bounded display",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "backup_reveal_chunk",
+      "arguments": {
+        "backup": "BackupSession",
+        "index": "u16"
+      },
+      "returns": "SecretWordsChunk",
+      "authorization": "BACKUP_SESSION",
+      "side_effect": "display only, no logs",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "verify_backup",
+      "arguments": {
+        "session": "UnlockedSession",
+        "answers": "SecretBackupAnswers"
+      },
+      "returns": "BackupStatus",
+      "authorization": "BACKUP_SESSION",
+      "side_effect": "record verified locally",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "export_encrypted_backup",
+      "arguments": {
+        "session": "UnlockedSession",
+        "export_password": "SecretString"
+      },
+      "returns": "EncryptedBackupBytes",
+      "authorization": "FRESH_PASSWORD",
+      "side_effect": "encrypt verified export",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "import_backup",
+      "arguments": {
+        "ciphertext": "EncryptedBackupBytes",
+        "password": "SecretString"
+      },
+      "returns": "WalletHandle",
+      "authorization": "LOCAL_EXPLICIT",
+      "side_effect": "validate then import",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "sync_start",
+      "arguments": {
+        "wallet": "WalletHandle"
+      },
+      "returns": "SyncStream",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "Tor header/proof/compact verification",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "sync_pause",
+      "arguments": {
+        "wallet": "WalletHandle"
+      },
+      "returns": "Unit",
+      "authorization": "LOCAL",
+      "side_effect": "stop network work",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "sync_status",
+      "arguments": {
+        "wallet": "WalletHandle"
+      },
+      "returns": "SyncStatus",
+      "authorization": "LOCAL",
+      "side_effect": "read cached verified state",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "import_checkpoint",
+      "arguments": {
+        "candidate": "SignedCheckpoint",
+        "confirmation": "TrustAcknowledgement"
+      },
+      "returns": "VerifiedCheckpoint",
+      "authorization": "LOCAL_EXPLICIT",
+      "side_effect": "verify anchored signer threshold, never blindly trust gateway",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "receive_request_create",
+      "arguments": {
+        "session": "UnlockedSession",
+        "amount": "Option<Amount>",
+        "invoice": "Option<InvoiceId>"
+      },
+      "returns": "PaymentRequest",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "derive receiving address locally",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "parse_payment_uri",
+      "arguments": {
+        "uri": "String"
+      },
+      "returns": "ParsedPaymentRequest",
+      "authorization": "LOCAL",
+      "side_effect": "strict parse only, no network",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "plan_payment",
+      "arguments": {
+        "session": "UnlockedSession",
+        "request": "PaymentRequest",
+        "max_fee": "Amount"
+      },
+      "returns": "Plan",
+      "authorization": "UNLOCKED_SPEND",
+      "side_effect": "reserve notes, local planning",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "prove_plan",
+      "arguments": {
+        "session": "UnlockedSession",
+        "plan_id": "PlanId"
+      },
+      "returns": "ProvenPlan",
+      "authorization": "UNLOCKED_SPEND",
+      "side_effect": "local CPU proof, cancellable",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "confirm_and_sign",
+      "arguments": {
+        "session": "UnlockedSession",
+        "plan_id": "PlanId",
+        "acknowledged_effect_hash": "EffectHash64",
+        "confirmation": "ExplicitConfirmation"
+      },
+      "returns": "SignedEnvelope",
+      "authorization": "EXPLICIT_SEND",
+      "side_effect": "local only, exact displayed summary",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "broadcast_signed",
+      "arguments": {
+        "envelope": "SignedEnvelope"
+      },
+      "returns": "SubmissionReceipt",
+      "authorization": "LOCAL",
+      "side_effect": "Tor broadcast, no automatic re-sign",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "transaction_status",
+      "arguments": {
+        "tx_id": "Hash32"
+      },
+      "returns": "VerifiedTransactionStatus",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "verified query over Tor",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "rebroadcast",
+      "arguments": {
+        "tx_id": "Hash32"
+      },
+      "returns": "SubmissionReceipt",
+      "authorization": "LOCAL",
+      "side_effect": "same exact stored envelope",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "validators_list",
+      "arguments": {
+        "wallet": "WalletHandle"
+      },
+      "returns": "List<VerifiedValidator>",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "prefer common scan",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "plan_delegate",
+      "arguments": {
+        "session": "UnlockedSession",
+        "validator_id": "Hash32",
+        "amount": "Amount",
+        "min_shares": "Shares",
+        "self_bond": "bool"
+      },
+      "returns": "Plan",
+      "authorization": "UNLOCKED_SPEND",
+      "side_effect": "new unique owner, encrypt recovery receipt",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "list_positions",
+      "arguments": {
+        "wallet": "WalletHandle"
+      },
+      "returns": "List<VerifiedPosition>",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "local verified records",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "plan_cancel_pending",
+      "arguments": {
+        "session": "UnlockedSession",
+        "position_id": "Hash32",
+        "fee_source": "FeeSource"
+      },
+      "returns": "Plan",
+      "authorization": "UNLOCKED_SPEND",
+      "side_effect": "state-bound cancellation",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "plan_unbond",
+      "arguments": {
+        "session": "UnlockedSession",
+        "position_id": "Hash32",
+        "shares": "Shares",
+        "min_gross": "Amount",
+        "fee_source": "FeeSource"
+      },
+      "returns": "Plan",
+      "authorization": "UNLOCKED_SPEND",
+      "side_effect": "no broadcast until confirmed",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "list_exit_tickets",
+      "arguments": {
+        "wallet": "WalletHandle"
+      },
+      "returns": "List<VerifiedExitTicket>",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "dual-time maturity state",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "plan_claim_exit",
+      "arguments": {
+        "session": "UnlockedSession",
+        "ticket_id": "Hash32",
+        "fee_source": "FeeSource"
+      },
+      "returns": "Plan",
+      "authorization": "UNLOCKED_SPEND",
+      "side_effect": "state-derived release only",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "plan_claim_commission",
+      "arguments": {
+        "session": "UnlockedSession",
+        "validator_id": "Hash32",
+        "amount": "Amount",
+        "fee_source": "FeeSource"
+      },
+      "returns": "Plan",
+      "authorization": "UNLOCKED_SPEND",
+      "side_effect": "operator authorization",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "parse_node_request",
+      "arguments": {
+        "qr_bytes": "Bytes"
+      },
+      "returns": "TypedNodeRequest",
+      "authorization": "LOCAL",
+      "side_effect": "reject unknown action; no arbitrary signing",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "approve_validator_request",
+      "arguments": {
+        "session": "UnlockedSession",
+        "request": "TypedNodeRequest",
+        "confirmation": "ExplicitConfirmation"
+      },
+      "returns": "SignedApproval",
+      "authorization": "FRESH_PASSWORD",
+      "side_effect": "bind chain/node/action/expiry/nonce",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "export_approval",
+      "arguments": {
+        "approval": "SignedApproval"
+      },
+      "returns": "AnimatedQrPayload",
+      "authorization": "LOCAL",
+      "side_effect": "only signed public request data",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "contacts_list",
+      "arguments": {
+        "wallet": "WalletHandle"
+      },
+      "returns": "List<Contact>",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "local",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "contacts_save",
+      "arguments": {
+        "session": "UnlockedSession",
+        "contact": "Contact"
+      },
+      "returns": "Contact",
+      "authorization": "LOCAL_EXPLICIT",
+      "side_effect": "encrypted local database",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "contacts_delete",
+      "arguments": {
+        "session": "UnlockedSession",
+        "contact_id": "Uuid"
+      },
+      "returns": "Unit",
+      "authorization": "LOCAL_EXPLICIT",
+      "side_effect": "local only",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "invoices_create",
+      "arguments": {
+        "session": "UnlockedSession",
+        "input": "InvoiceDraft"
+      },
+      "returns": "Invoice",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "local invoice; no public identity",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "invoices_list",
+      "arguments": {
+        "wallet": "WalletHandle"
+      },
+      "returns": "List<Invoice>",
+      "authorization": "UNLOCKED_VIEW",
+      "side_effect": "verified local reconciliation",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "export_history",
+      "arguments": {
+        "session": "UnlockedSession",
+        "range": "HeightRange"
+      },
+      "returns": "SensitiveExport",
+      "authorization": "FRESH_PASSWORD",
+      "side_effect": "explicit privacy warning",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    },
+    {
+      "name": "diagnostic_preview",
+      "arguments": {
+        "component": "ComponentId"
+      },
+      "returns": "RedactedDiagnostics",
+      "authorization": "LOCAL_EXPLICIT",
+      "side_effect": "preview before any export",
+      "error_type": "SoloError",
+      "transport": "in_process_ffi"
+    }
+  ],
+  "node_ipc_methods": [
+    "InspectHost",
+    "GetStatus",
+    "InstallRuntime",
+    "Start",
+    "Stop",
+    "ImportVerifiedSnapshot",
+    "CreateConsensusIdentity",
+    "MakeRegistrationRequest",
+    "ApplySignedOperatorTx",
+    "ExportDiagnostics",
+    "PrepareUpgrade",
+    "ApplyApprovedUpgrade"
+  ]
+}

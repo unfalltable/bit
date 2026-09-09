@@ -1,0 +1,101 @@
+{
+  "scope": "real CometBFT v0.38.23 module and four Rust ABCI processes; empty-block emission fixture only",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\network-20260908T083603666741",
+  "checks": {
+    "four_node_state_equal_at_40": true,
+    "state40_matches_header41": true,
+    "validator_updates": [
+      {
+        "height": 5,
+        "power": 10
+      },
+      {
+        "height": 6,
+        "power": 10
+      },
+      {
+        "height": 7,
+        "power": 11
+      }
+    ],
+    "crash_recovery": [
+      {
+        "fault_node": 0,
+        "exit_code": 86,
+        "durable_height": 10,
+        "completed_epochs": 0,
+        "phase": "after-finalize"
+      },
+      {
+        "fault_node": 1,
+        "exit_code": 86,
+        "durable_height": 21,
+        "completed_epochs": 2,
+        "phase": "after-commit"
+      }
+    ],
+    "quorum_halt_height": 42,
+    "resumed_heights": [
+      46,
+      46,
+      46
+    ]
+  },
+  "state_at_40": {
+    "height": 40,
+    "supply": {
+      "genesis": "10000000000000000",
+      "minted": "6393750000000000000",
+      "burned": "0",
+      "forfeited": "0",
+      "completed": 3,
+      "interval": 2
+    },
+    "first_validator": [
+      1,
+      45,
+      80,
+      111,
+      58,
+      143,
+      118,
+      107,
+      46,
+      239,
+      28,
+      48,
+      238,
+      216,
+      71,
+      19,
+      121,
+      81,
+      223,
+      252,
+      59,
+      163,
+      31,
+      7,
+      66,
+      55,
+      28,
+      149,
+      220,
+      50,
+      202,
+      85
+    ]
+  },
+  "sha256_state40": "a92b1e0b5579fcf4fb048cd11a8294988e2eea53fa8f4ad933946f825557bc73",
+  "limitations": [
+    "no BIT user transaction protocol or ZK in this network",
+    "no production staking, slashing, fees or reward-score allocation",
+    "upstream FilePV signer in CometBFT processes, not a separate BIT signer",
+    "JSON durable fixture, not JMT/RocksDB state or state proofs",
+    "accelerated experimental policy; no mainnet decisions",
+    "same physical host, not independent failure domains"
+  ],
+  "status": "PASS",
+  "started_at": "2026-09-08T08:36:03.666971+00:00",
+  "finished_at": "2026-09-08T08:37:19.821034+00:00"
+}

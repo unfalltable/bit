@@ -1,0 +1,66 @@
+{
+  "complete_transfer": {
+    "bad_binding_signature_rejected": true,
+    "bad_spend_authorization_rejected": true,
+    "binding_signature_verified": true,
+    "canonical_envelope_bytes": 2762,
+    "duplicate_nullifiers_in_distinct_envelope_rejected": true,
+    "duplicate_transaction_rejected": true,
+    "effect_hash": "9acbca963e66ff68e18ca03b7f2d79b9fe42619c72f33788083ef3cd62d9d5e1048c3f7904a9d3fef9320262da19d228147a8e0e72e209fa909ca9528a85ce50",
+    "failed_transaction_left_state_unchanged": true,
+    "memo_ciphertext_bytes": 528,
+    "native_asset_id_hex": "0100000000000000000000000000000000000000000000000000000000000000",
+    "native_asset_scope": "reference test fixture; mainnet undecided",
+    "outputs": 2,
+    "proofs": 4,
+    "spend_authorizations": 2,
+    "spend_authorizations_verified": true,
+    "spends": 2,
+    "tx_id": "37ef1d3978cdcdd4834391648928a671053b329dbf0fd69806ed895e94cefdae"
+  },
+  "limitations": [
+    "in-memory acceptance harness only; no persistent state or commitment-tree update",
+    "not a formal single-asset closure proof",
+    "no Tor, receipts, headers, database or phone in scan test",
+    "fixture native asset ID only"
+  ],
+  "mobile": "SKIPPED_BY_USER",
+  "negative_checks": "wrong nullifier, wrong output, malformed/short proof, changed effect, foreign positive value, unfunded fee rejected",
+  "parameter_load_ms": 205.83270000000002,
+  "public_boundary_binding": "transfer, public lock, public release passed as primitive equations; chain authorization not tested",
+  "samples": [
+    {
+      "sample": 0,
+      "strict_verification_ms": 25.225700000000003,
+      "two_spend_two_output_proving_ms": 4075.2837
+    },
+    {
+      "sample": 1,
+      "strict_verification_ms": 19.9159,
+      "two_spend_two_output_proving_ms": 4017.089
+    },
+    {
+      "sample": 2,
+      "strict_verification_ms": 29.8146,
+      "two_spend_two_output_proving_ms": 4388.6964
+    },
+    {
+      "sample": 3,
+      "strict_verification_ms": 35.2515,
+      "two_spend_two_output_proving_ms": 4437.503500000001
+    },
+    {
+      "sample": 4,
+      "strict_verification_ms": 26.3151,
+      "two_spend_two_output_proving_ms": 4471.090999999999
+    }
+  ],
+  "scan": {
+    "elapsed_ms": 136.6392,
+    "owned": 10,
+    "payloads": 1000,
+    "protobuf_bytes_total": 252000
+  },
+  "scope": "desktop BIT Transfer cryptographic acceptance and upstream primitive measurements; not network/mainnet/mobile acceptance",
+  "upstream_commit": "3a87ce786373113f9b82d3b6df9504998b7f44a7"
+}

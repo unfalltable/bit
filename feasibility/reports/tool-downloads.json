@@ -1,0 +1,58 @@
+[
+  {
+    "name": "go",
+    "url": "https://go.dev/dl/go1.27.1.windows-amd64.zip",
+    "sha256": "a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d",
+    "expected_sha256": "a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d",
+    "size": 78931360,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\go1.27.1.windows-amd64.zip"
+  },
+  {
+    "name": "rustc",
+    "url": "https://static.rust-lang.org/dist/2026-09-03/rustc-1.98.1-x86_64-pc-windows-gnu.tar.xz",
+    "sha256": "f0e8e33973771acc4d2f87891b19d4f3f2d3827e2e7848c091d7c070bd63479c",
+    "expected_sha256": "f0e8e33973771acc4d2f87891b19d4f3f2d3827e2e7848c091d7c070bd63479c",
+    "size": 100998000,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\rustc-1.98.1-x86_64-pc-windows-gnu.tar.xz"
+  },
+  {
+    "name": "cargo",
+    "url": "https://static.rust-lang.org/dist/2026-09-03/cargo-1.98.1-x86_64-pc-windows-gnu.tar.xz",
+    "sha256": "4bd77f16bd2a26db6eacf9320414d3a792d9998cb5e9ac122280ba56126f2a44",
+    "expected_sha256": "4bd77f16bd2a26db6eacf9320414d3a792d9998cb5e9ac122280ba56126f2a44",
+    "size": 12381196,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\cargo-1.98.1-x86_64-pc-windows-gnu.tar.xz"
+  },
+  {
+    "name": "rust-std",
+    "url": "https://static.rust-lang.org/dist/2026-09-03/rust-std-1.98.1-x86_64-pc-windows-gnu.tar.xz",
+    "sha256": "5bb599a541fcb9c0edc00e512570f60d2262623f1e2a19a44cce3a7a97208788",
+    "expected_sha256": "5bb599a541fcb9c0edc00e512570f60d2262623f1e2a19a44cce3a7a97208788",
+    "size": 27397568,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\rust-std-1.98.1-x86_64-pc-windows-gnu.tar.xz"
+  },
+  {
+    "name": "rust-mingw",
+    "url": "https://static.rust-lang.org/dist/2026-09-03/rust-mingw-1.98.1-x86_64-pc-windows-gnu.tar.xz",
+    "sha256": "75d898804789c12ca969365f0a86d85c3bca1fdb070f0be615ca513a986b2674",
+    "expected_sha256": "75d898804789c12ca969365f0a86d85c3bca1fdb070f0be615ca513a986b2674",
+    "size": 5492844,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\rust-mingw-1.98.1-x86_64-pc-windows-gnu.tar.xz"
+  },
+  {
+    "name": "rustfmt-preview",
+    "url": "https://static.rust-lang.org/dist/2026-09-03/rustfmt-1.98.1-x86_64-pc-windows-gnu.tar.gz",
+    "sha256": "f0f51c0c5c0c7b1673822c6d77a4eb98e2abfd0fd1fc335fb80103575caed253",
+    "expected_sha256": "f0f51c0c5c0c7b1673822c6d77a4eb98e2abfd0fd1fc335fb80103575caed253",
+    "size": 4896712,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\rustfmt-1.98.1-x86_64-pc-windows-gnu.tar.gz"
+  },
+  {
+    "name": "clippy-preview",
+    "url": "https://static.rust-lang.org/dist/2026-09-03/clippy-1.98.1-x86_64-pc-windows-gnu.tar.gz",
+    "sha256": "72d4651d4c87d78dc89d52b13f748ce56c89c5f5c79c3bd9b4f8f09259925904",
+    "expected_sha256": "72d4651d4c87d78dc89d52b13f748ce56c89c5f5c79c3bd9b4f8f09259925904",
+    "size": 12783732,
+    "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\clippy-1.98.1-x86_64-pc-windows-gnu.tar.gz"
+  }
+]

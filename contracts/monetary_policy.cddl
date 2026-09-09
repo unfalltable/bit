@@ -1,0 +1,14 @@
+; BIT spec 1.2 monetary policy hash input; no maps, floats or tags.
+monetary-policy = [
+  policy-id: "BUDGET_HALVING_EPOCH_V1",
+  max-supply: amount,
+  decimals: 8,
+  genesis-supply: amount,
+  epoch-blocks: 1..18446744073709551615,
+  halving-interval-epochs: 1..18446744073709551615,
+  empty-set-policy: "FORFEIT_UNISSUED_NO_CATCHUP",
+  burn-reopens-issuance: false,
+  tail-emission-enabled: false
+]
+amount = bstr .size 16 ; big endian, first byte 0, value < 2^120.
+; max-supply MUST equal 10240000000000000000 and 0 < genesis-supply < max-supply.

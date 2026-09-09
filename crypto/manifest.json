@@ -1,0 +1,46 @@
+{
+  "status": "DEVELOPMENT_PIN_S1_INCOMPLETE",
+  "upstream": {
+    "repository": "https://github.com/penumbra-zone/penumbra",
+    "tag": "v2.1.1",
+    "commit": "3a87ce786373113f9b82d3b6df9504998b7f44a7",
+    "license_files": ["LICENSE", "LICENSE-APACHE", "LICENSE-MIT"]
+  },
+  "selected_primitives": {
+    "curve": "BLS12-377",
+    "proof_system": "Groth16",
+    "value_group": "decaf377",
+    "spend_proving_key_id": "groth16pk1ke43yax8cg78h69y0pn6kvjcktdakwq9m4c58nyam8hffweramfqxr94fh",
+    "spend_verification_key_id": "groth16vk1zu2ks8er6fcj65y7w735wqzj9nx4fd5rsf2483lqyn6j2c0e57xzde43lznzuvf2sxmsw2nfh",
+    "output_proving_key_id": "groth16pk1rkpwdlcaw56gvyqpt0lm7lvj8q9mx93gqpz85dl9l3u677k75reqcnuq7d",
+    "output_verification_key_id": "groth16vk1lnuw3xdngtwsq42wa5g4ceq3c3zyn6j2c0e57xzde43lznzuvf2sxmsdcc",
+    "spend_proving_key_sha256": "87eca85bef562803fb9684c56c0a6db84aa6d0791b1c00b909e6f2a5c2cff452",
+    "output_proving_key_sha256": "c9e97866edd6c815a7bcb2f3b5493713794369692bb96e5a2e682613c330e4a8",
+    "spend_proving_key_bytes": 21673392,
+    "output_proving_key_bytes": 7257360,
+    "tree": "Penumbra tiered commitment tree, three 8-level quaternary tiers",
+    "proof_bytes": 192
+  },
+  "bit_adapter": {
+    "crates": ["crates/bit-shielded", "crates/bit-transaction"],
+    "checked_proof_deserialization": true,
+    "canonical_proof_reencoding": true,
+    "canonical_upstream_body_reencoding": true,
+    "effect_hash_bytes": 64,
+    "spend_authorization_verified": true,
+    "binding_signature_verified": true,
+    "identity_binding_key_rejected": true,
+    "native_asset_id_source": "verification context; reference fixture exists, mainnet undecided",
+    "enabled_application_routes": ["Spend", "Output"],
+    "disabled_application_routes": ["DEX", "IBC", "swap", "asset issuance"]
+  },
+  "unresolved_before_d003_complete": [
+    "independently recorded R1CS/constraint-matrix digests",
+    "trusted setup evidence reference and review",
+    "final native_asset_id and address/key derivation vectors",
+    "production source layout replacing the local feasibility path dependencies",
+    "formal single-asset closure review",
+    "logging and panic-path audit"
+  ],
+  "mainnet_approved": false
+}

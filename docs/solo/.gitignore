@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+target/
+build/
+.env
+.env.*
+!*.example
+*.key
+*.pem
+*.p12
+*.pfx
+priv_validator_key.json
+priv_validator_state.json
+wallet-data/
+node-data/

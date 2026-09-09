@@ -1,0 +1,19 @@
+[package]
+name = "bit-shielded"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+ark-groth16 = "0.4.0"
+ark-serialize = "0.4.2"
+decaf377 = "0.10.1"
+decaf377-rdsa = "0.11.0"
+penumbra-sdk-asset = { path = "../../feasibility/upstream/penumbra/crates/core/asset", default-features = false }
+penumbra-sdk-num = { path = "../../feasibility/upstream/penumbra/crates/core/num", default-features = false }
+penumbra-sdk-proof-params = { path = "../../feasibility/upstream/penumbra/crates/crypto/proof-params", default-features = false }
+penumbra-sdk-proto = { path = "../../feasibility/upstream/penumbra/crates/proto", default-features = false }
+penumbra-sdk-shielded-pool = { path = "../../feasibility/upstream/penumbra/crates/core/component/shielded-pool", default-features = false, features = ["std"] }
+penumbra-sdk-tct = { path = "../../feasibility/upstream/penumbra/crates/crypto/tct", default-features = false }

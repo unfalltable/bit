@@ -1,0 +1,8 @@
+{
+  "name": "llvm-mingw",
+  "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20250812/llvm-mingw-20250812-msvcrt-x86_64.zip",
+  "sha256": "2140379cf53a9da9e8e38823ea85f64d6e999c766e92c5ea3fd2f8fb3a4ee1c7",
+  "expected_sha256": null,
+  "size": 165480419,
+  "path": "D:\\others\\BIT\\feasibility\\.tools\\downloads\\llvm-mingw-20250812-msvcrt-x86_64.zip"
+}

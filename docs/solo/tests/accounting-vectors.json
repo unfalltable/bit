@@ -1,0 +1,56 @@
+{
+  "scope": "integer oracle only; units atomic; no keys or proofs",
+  "all_staked_exit": {
+    "genesis": "10000",
+    "unbond_fee": "10",
+    "claim_fee": "10",
+    "before_claim": {
+      "total": "10000",
+      "shielded": "0",
+      "stake": "0",
+      "pending": "0",
+      "exits": "9990",
+      "commission": "0",
+      "fees": "10",
+      "unclaimed_genesis": "0",
+      "minted": "0",
+      "burned": "0",
+      "stake_shares": "0"
+    },
+    "after_claim": {
+      "total": "10000",
+      "shielded": "9980",
+      "stake": "0",
+      "pending": "0",
+      "exits": "0",
+      "commission": "0",
+      "fees": "20",
+      "unclaimed_genesis": "0",
+      "minted": "0",
+      "burned": "0",
+      "stake_shares": "0"
+    }
+  },
+  "rounding": [
+    {
+      "assets": "3",
+      "shares": "2",
+      "deposit": "2",
+      "minted": "1"
+    },
+    {
+      "assets": "7",
+      "shares": "3",
+      "burn": "3",
+      "redeemed": "7"
+    }
+  ],
+  "emission": {
+    "supply": "10000000000000000",
+    "carry_in": "0",
+    "scheduled_and_carry": [
+      "22831050228",
+      "19584000000"
+    ]
+  }
+}

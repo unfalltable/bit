@@ -1,0 +1,245 @@
+{
+  "note": "初始规格状态，不代表实现或测试已完成。",
+  "tasks": [
+    {
+      "id": "D-001",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-002",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-003",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-004",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-005",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-006",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-007",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-008",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-009",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-010",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-011",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-012",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-013",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-014",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-015",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-016",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-017",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-018",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-019",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-020",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-021",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-022",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-023",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-024",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-025",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-026",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-027",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-028",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-029",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "D-030",
+      "status": "NOT_STARTED",
+      "actual_files": [],
+      "test_commands": [],
+      "evidence": [],
+      "blockers": []
+    }
+  ]
+}
