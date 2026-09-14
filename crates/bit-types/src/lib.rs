@@ -9,6 +9,7 @@ mod block;
 mod cbor;
 mod envelope;
 mod policy;
+mod supply;
 mod tx;
 
 pub use amount::{Amount, MAX_AMOUNT_EXCLUSIVE, MAX_SUPPLY_ATOMIC};
@@ -19,6 +20,7 @@ pub use block::{
 };
 pub use envelope::{ed25519_authorization_message, Authorization, Envelope, Role};
 pub use policy::{quota, scheduled_issuance, MonetaryPolicy};
+pub use supply::SupplyAuditSnapshot;
 pub use tx::{
     chain_context, cohort_id, effect_hash, position_id, proof_hash, ticket_id, validator_id,
     Action, FeeSource, TxBody,
@@ -33,6 +35,7 @@ pub enum Error {
     InvalidBlockArtifact(&'static str),
     InvalidEnvelope(&'static str),
     InvalidPolicy(&'static str),
+    InvalidSupplyAudit(&'static str),
     InvalidTransaction(&'static str),
     Overflow,
 }
@@ -45,6 +48,7 @@ impl fmt::Display for Error {
             Self::InvalidBlockArtifact(reason) => write!(f, "invalid block artifact: {reason}"),
             Self::InvalidEnvelope(reason) => write!(f, "invalid canonical envelope: {reason}"),
             Self::InvalidPolicy(reason) => write!(f, "invalid monetary policy: {reason}"),
+            Self::InvalidSupplyAudit(reason) => write!(f, "invalid supply audit: {reason}"),
             Self::InvalidTransaction(reason) => write!(f, "invalid transaction: {reason}"),
             Self::Overflow => f.write_str("integer overflow"),
         }

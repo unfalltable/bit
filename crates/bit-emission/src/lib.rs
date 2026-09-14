@@ -1,10 +1,10 @@
 //! Fixed-cap supply accounting for BIT.
 //!
 //! This crate owns integer conservation rules and epoch issuance transitions.
-//! It deliberately does not define the unresolved `supply/audit_snapshot` wire
-//! encoding from SPEC-04; persistence stores the individual consensus fields.
+//! The complete proof-bearing `supply/audit_snapshot` uses the canonical type
+//! owned by `bit-types` so state, APIs, and independent readers share one wire.
 
-use bit_types::{Amount, FeeSource, MonetaryPolicy, MAX_SUPPLY_ATOMIC};
+use bit_types::{Amount, FeeSource, MonetaryPolicy, SupplyAuditSnapshot, MAX_SUPPLY_ATOMIC};
 use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
@@ -193,6 +193,35 @@ pub struct SupplyAudit {
     pub unclaimed_genesis_total: Amount,
     pub completed_epochs: u64,
     pub monetary_policy_hash: Hash32,
+}
+
+impl SupplyAudit {
+    pub fn canonical_snapshot(&self) -> SupplyAuditSnapshot {
+        SupplyAuditSnapshot {
+            max_supply: self.max_supply,
+            genesis_supply: self.genesis_supply,
+            cumulative_minted: self.cumulative_minted,
+            burned: self.burned,
+            issued_total: self.issued_total,
+            current_supply: self.current_supply,
+            scheduled_to_date: self.scheduled_to_date,
+            forfeited_unissued: self.forfeited_unissued,
+            future_issuance_budget: self.future_issuance_budget,
+            shielded_total: self.shielded_total,
+            stake_total: self.stake_total,
+            pending_delegation_total: self.pending_delegation_total,
+            exit_total: self.exit_total,
+            commission_total: self.commission_total,
+            fee_reserve: self.fee_reserve,
+            unclaimed_genesis_total: self.unclaimed_genesis_total,
+            completed_epochs: self.completed_epochs,
+            monetary_policy_hash: self.monetary_policy_hash,
+        }
+    }
+
+    pub fn encode_canonical_snapshot(&self) -> bit_types::Result<Vec<u8>> {
+        self.canonical_snapshot().encode_canonical()
+    }
 }
 
 impl SupplyState {

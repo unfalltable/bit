@@ -23,7 +23,7 @@ use bit_transaction::{
     StatelessVerificationContext, VerifiedStakingAction, VerifiedStakingTransaction,
     VerifiedTransfer,
 };
-use bit_types::{Action, Amount, Envelope, MonetaryPolicy};
+use bit_types::{Action, Amount, Envelope, MonetaryPolicy, SupplyAuditSnapshot};
 use cnidarium::{Snapshot, StagedWriteBatch, StateDelta, StateRead, StateWrite, Storage};
 use decaf377::Fq;
 use futures::StreamExt;
@@ -43,7 +43,7 @@ pub use state_snapshot::{StateSnapshotManifest, STATE_SNAPSHOT_CHUNK_BYTES};
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 16;
+const STORAGE_SCHEMA_VERSION: u32 = 17;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -71,6 +71,7 @@ const SUPPLY_STAKE: &str = "supply/stake_total";
 const SUPPLY_PENDING: &str = "supply/pending_delegation_total";
 const SUPPLY_EXITS: &str = "supply/exit_total";
 const SUPPLY_COMMISSION: &str = "supply/commission_total";
+const SUPPLY_AUDIT: &str = "supply/audit_snapshot";
 const FEES_RESERVE: &str = "fees/reserve";
 const FEES_BASE: &str = "fees/base_atomic";
 const FEES_PER_KIB: &str = "fees/per_kib_atomic";
@@ -2256,6 +2257,12 @@ impl BlockSession<'_> {
         self.delta
             .put_raw(compact_key(self.height), self.compact_hash.to_vec());
         write_supply(&mut self.delta, &self.supply);
+        self.delta.put_raw(
+            SUPPLY_AUDIT.to_owned(),
+            supply.encode_canonical_snapshot().map_err(|error| {
+                Error::CorruptState(format!("cannot encode supply audit snapshot: {error}"))
+            })?,
+        );
         write_staking_updates(&mut self.delta, &self.staking, &self.staking_touches)?;
         self.delta.put_raw(
             STAKING_EFFECTIVE_SCHEDULE.to_owned(),
@@ -2404,6 +2411,15 @@ async fn initialize_genesis(storage: &Storage, config: &GenesisConfig) -> Result
     );
     write_fee_policy(&mut delta, config.fee_policy);
     write_supply(&mut delta, &supply);
+    let audit = supply.audit_at_height(&config.monetary_policy, 0)?;
+    delta.put_raw(
+        SUPPLY_AUDIT.to_owned(),
+        audit.encode_canonical_snapshot().map_err(|error| {
+            Error::CorruptState(format!(
+                "cannot encode genesis supply audit snapshot: {error}"
+            ))
+        })?,
+    );
     write_staking_genesis(&mut delta, &config.genesis_staking)?;
     let genesis_set = config.genesis_staking.effective_validator_set()?;
     delta.put_raw(
@@ -2501,6 +2517,16 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
     }
     let supply = read_supply(&snapshot).await?;
     supply.validate_at_height(&config.monetary_policy, height)?;
+    let expected_audit = supply.audit_at_height(&config.monetary_policy, height)?;
+    let stored_audit = SupplyAuditSnapshot::decode_canonical(
+        &required(&snapshot, SUPPLY_AUDIT).await?,
+    )
+    .map_err(|error| Error::CorruptState(format!("invalid supply audit snapshot: {error}")))?;
+    if stored_audit != expected_audit.canonical_snapshot() {
+        return Err(Error::CorruptState(
+            "supply audit snapshot differs from consensus accounting".to_owned(),
+        ));
+    }
     let staking = read_staking_book(&snapshot, config.chain_context).await?;
     if staking.parameters() != config.genesis_staking.parameters() {
         return Err(Error::CorruptState(
@@ -4412,6 +4438,17 @@ mod tests {
             genesis.supply.unclaimed_genesis_total,
             genesis.supply.genesis_supply
         );
+        let genesis_audit = state.query_latest_with_proof(SUPPLY_AUDIT).await.unwrap();
+        let expected_genesis_audit = genesis.supply.encode_canonical_snapshot().unwrap();
+        assert_eq!(
+            genesis_audit.value.as_deref(),
+            Some(expected_genesis_audit.as_slice())
+        );
+        genesis_audit.verify().unwrap();
+        assert_eq!(
+            SupplyAuditSnapshot::decode_canonical(genesis_audit.value.as_deref().unwrap()).unwrap(),
+            genesis.supply.canonical_snapshot()
+        );
 
         let transfer = verified(4, genesis.shielded_tree_root, 5, 6);
         let mut block = state.begin_block(1, [7; 32], [8; 32]).await.unwrap();
@@ -4440,6 +4477,19 @@ mod tests {
             .await
             .unwrap());
         assert!(state.transaction_is_applied(&transfer.tx_id).await.unwrap());
+
+        let committed_audit = state.query_latest_with_proof(SUPPLY_AUDIT).await.unwrap();
+        let expected_committed_audit = receipt.supply.encode_canonical_snapshot().unwrap();
+        assert_eq!(
+            committed_audit.value.as_deref(),
+            Some(expected_committed_audit.as_slice())
+        );
+        committed_audit.verify().unwrap();
+        assert_eq!(
+            SupplyAuditSnapshot::decode_canonical(committed_audit.value.as_deref().unwrap())
+                .unwrap(),
+            receipt.supply.canonical_snapshot()
+        );
 
         let member = state
             .query_latest_with_proof(&nullifier_key(&transfer.nullifiers[0]))

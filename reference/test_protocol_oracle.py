@@ -66,6 +66,22 @@ class ProtocolOracleTests(unittest.TestCase):
             vector["compact_hash_hex"],
         )
 
+    def test_supply_audit_snapshot_encoding(self):
+        vector = json.loads((ROOT / "tests/vectors/supply-audit-vectors.json").read_text(
+            encoding="utf-8"))["complete_snapshot"]
+        values = {
+            name: int(vector[name + "_atomic"])
+            for name in oracle.SUPPLY_AMOUNT_FIELDS
+        }
+        values["completed_epochs"] = vector["completed_epochs"]
+        values["monetary_policy_hash"] = bytes.fromhex(vector["monetary_policy_hash_hex"])
+        encoded = oracle.supply_audit_snapshot(values)
+        self.assertEqual(encoded.hex(), vector["canonical_cbor_hex"])
+        changed = dict(values)
+        changed["current_supply"] -= 1
+        with self.assertRaises(ValueError):
+            oracle.supply_audit_snapshot(changed)
+
 
 if __name__ == "__main__":
     unittest.main()

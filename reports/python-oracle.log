@@ -10,10 +10,12 @@ t_encoding_and_domain_hashes) ... ok
 test_policy_bytes_and_hash (test_protocol_oracle.ProtocolOracleTests.test_policy_bytes_and_hash) ... ok
 test_reference_config_keeps_mainnet_unapproved (test_protocol_oracle.ProtocolOracleTests.test_reference_config_keeps_ma
 innet_unapproved) ... ok
+test_supply_audit_snapshot_encoding (test_protocol_oracle.ProtocolOracleTests.test_supply_audit_snapshot_encoding) ...
+ok
 test_transaction_body_effect_and_envelope (test_protocol_oracle.ProtocolOracleTests.test_transaction_body_effect_and_en
 velope) ... ok
 
 ----------------------------------------------------------------------
-Ran 5 tests in 0.004s
+Ran 6 tests in 0.004s
 
 OK

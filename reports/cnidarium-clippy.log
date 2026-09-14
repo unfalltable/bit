@@ -1,6 +1,6 @@
-cargo.exe :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.32s
+cargo.exe :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.86s
 At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
 +     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
 +     ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (    Finished `d...get(s) in 9.32s:String) [], RemoteException
+    + CategoryInfo          : NotSpecified: (    Finished `d...get(s) in 0.86s:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError

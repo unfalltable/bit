@@ -473,6 +473,9 @@ def main():
     tree_roots = [state_query(index, "shielded/tree_root").hex() for index in range(4)]
     if len(set(tree_roots)) != 1 or tree_roots[0] == fixture["anchor"]:
         raise AssertionError("output commitments did not advance a common shielded tree root")
+    supply_audits = [state_query(index, "supply/audit_snapshot") for index in range(4)]
+    if not supply_audits[0] or len(set(supply_audits)) != 1:
+        raise AssertionError("proved supply audit snapshots differ across applications")
     transfer_app_hashes = {
         rpc(index, f"block?height={transfer_height + 1}")["block"]["header"][
             "app_hash"
@@ -609,6 +612,11 @@ def main():
                 "compact_hash": compact_hashes[0],
                 "compact_bytes": int(artifact_event["compact_bytes"]),
                 "state_proofs_and_abci_event_match_on_nodes": 4,
+            },
+            "canonical_supply_audit": {
+                "canonical_bytes": len(supply_audits[0]),
+                "sha256": hashlib.sha256(supply_audits[0]).hexdigest(),
+                "state_proved_on_nodes": 4,
             },
             "validator_powers_h6_h7_h8": powers,
             "h_plus_two_update": True,

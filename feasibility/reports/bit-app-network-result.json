@@ -1,12 +1,12 @@
 {
   "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, canonical block artifacts, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T162704171268",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T164705774549",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "application_sha256": "2dc7d11f637cd281afb833212af9674f052c84d2fdac58fec1593e565347acaa",
-    "evidence_injector_sha256": "995f9df668edf56ff5c9ce9b99631a22d0817fa194c506ca3b245b36cb567d54"
+    "application_sha256": "5b1f21125e65b1255b4b7ef1649e3ceb87b5318f3570a2c40fd06509d13801aa",
+    "evidence_injector_sha256": "8f46390e7cb83e1b02c0fbab8142858c1f3e6db0b2b2e155e128a20fbf684c64"
   },
   "checks": {
     "real_transfer": {
@@ -26,33 +26,38 @@
       "transaction_record_proved_on_nodes": 4,
       "nullifier_records_proved_on_nodes": 4,
       "post_transfer_tree_root": "f39cfb2b0c15f9ecb7db42822873216564459be096826ed6b3015f7a2ddd5d05",
-      "post_transfer_app_hash": "2db0ed50e3e8a9e2d166106c9d3998ca02e3beaf1e3fb932027298387ac054bf"
+      "post_transfer_app_hash": "466351d56830bfc02810ad7c004a87a648637d7a329b47b42fa84a2a85183aca"
     },
     "canonical_block_artifacts": {
       "height": 12,
-      "execution_hash": "19f4970336af67f03af831a6cd6a2ee1c43f5d237dd5d849721671bb97735e5c",
-      "compact_hash": "b4c99e714f659adf475bfa2f7470bc21cd63bd60c1e73525eb9f1db1d339a294",
+      "execution_hash": "155cbf030497a15e5c7b4a5aaa9dbd453a6b5c1d114192c779cb49f6700def4d",
+      "compact_hash": "aa455962f09e91019eda4d790b90911b5b9cf72909edfe67037cb6f480a7d63e",
       "compact_bytes": 1577,
       "state_proofs_and_abci_event_match_on_nodes": 4
     },
+    "canonical_supply_audit": {
+      "canonical_bytes": 309,
+      "sha256": "66f9a6b6d12b9503011a93dcbf5965c97f3a38e3e71502f76426e511048075ee",
+      "state_proved_on_nodes": 4
+    },
     "validator_powers_h6_h7_h8": {
       "6": {
-        "fb6f95f31a23ba2ddab0348fbd71c6ebe9c4c3cb83b395499570fc0d6e8b0f20": 10,
-        "237ee7469b4e8d4955b85d300bd93a37773da8d49ec0afacf15f206a58690bff": 10,
-        "a0f471a9574f8051e98576f3d095aed16fec519685072fe964a0053c453e257c": 10,
-        "23874bc0c4b2d6e34c9757433b9da9d894657698125224d0c5e49311176ffd6c": 10
+        "e5ae15b945ae568486bf96607967b50cca8cfd0b4aa2b7e66eca7aa980cb3196": 10,
+        "ad070679f14d4cf4e69c4611ff43ae97f944dbbba83e39856939301ba61d49ff": 10,
+        "e366e95f068af335722ae8b57b317b8221b9ba08d69efd60eaf2a2939c380360": 10,
+        "9b0ec68936d78599447ec7064575708249719086af9235eae1f90bc915d01b72": 10
       },
       "7": {
-        "fb6f95f31a23ba2ddab0348fbd71c6ebe9c4c3cb83b395499570fc0d6e8b0f20": 10,
-        "237ee7469b4e8d4955b85d300bd93a37773da8d49ec0afacf15f206a58690bff": 10,
-        "a0f471a9574f8051e98576f3d095aed16fec519685072fe964a0053c453e257c": 10,
-        "23874bc0c4b2d6e34c9757433b9da9d894657698125224d0c5e49311176ffd6c": 10
+        "e5ae15b945ae568486bf96607967b50cca8cfd0b4aa2b7e66eca7aa980cb3196": 10,
+        "ad070679f14d4cf4e69c4611ff43ae97f944dbbba83e39856939301ba61d49ff": 10,
+        "e366e95f068af335722ae8b57b317b8221b9ba08d69efd60eaf2a2939c380360": 10,
+        "9b0ec68936d78599447ec7064575708249719086af9235eae1f90bc915d01b72": 10
       },
       "8": {
-        "fb6f95f31a23ba2ddab0348fbd71c6ebe9c4c3cb83b395499570fc0d6e8b0f20": 3476,
-        "237ee7469b4e8d4955b85d300bd93a37773da8d49ec0afacf15f206a58690bff": 3476,
-        "a0f471a9574f8051e98576f3d095aed16fec519685072fe964a0053c453e257c": 3476,
-        "23874bc0c4b2d6e34c9757433b9da9d894657698125224d0c5e49311176ffd6c": 3476
+        "e5ae15b945ae568486bf96607967b50cca8cfd0b4aa2b7e66eca7aa980cb3196": 3476,
+        "ad070679f14d4cf4e69c4611ff43ae97f944dbbba83e39856939301ba61d49ff": 3476,
+        "e366e95f068af335722ae8b57b317b8221b9ba08d69efd60eaf2a2939c380360": 3476,
+        "9b0ec68936d78599447ec7064575708249719086af9235eae1f90bc915d01b72": 3476
       }
     },
     "h_plus_two_update": true,
@@ -64,23 +69,23 @@
       19
     ],
     "same_app_hash_height": 18,
-    "same_app_hash": "a0fdf6b85dccd58805accbd869b922dff437fc472890377305975c3b658312b5",
+    "same_app_hash": "1c4a2dd78bcd37c1f87fec55df2aa2d77914fa248cdea65c47a8cc65fd66c19e",
     "latest_ics23_proof": true,
     "real_duplicate_vote_evidence": {
-      "comet_evidence_hash": "016a6d379aead3adb27e6f1eb1facdddfc17cc871ed93c8533e56efaf4edbc32",
-      "validator_address": "04fa41eaa6e05522b4c7b74c47403031032d5cdd",
+      "comet_evidence_hash": "6d041beab433ce825fad0f56b1da4e50f5977530168ee42c7732dbc98dddb983",
+      "validator_address": "1362b3850a1935ab9580c03b3c08a3a3d4b4eae2",
       "validator_power": 6943,
       "infraction_height": 17,
-      "infraction_time_seconds": 1789403251,
-      "infraction_time_nanos": 938037500,
+      "infraction_time_seconds": 1789404451,
+      "infraction_time_nanos": 534375800,
       "total_voting_power": 27772,
       "inclusion_height": 20,
-      "bit_evidence_hash": "f4a156a6036548397db8e62f2c25199a100473d1cc0e7b6caa4eee59380db429",
+      "bit_evidence_hash": "4b3fe071547d93668c69f4accb3006280654b7ae70638e461676e8aaf8c5ac9a",
       "validator_present_at_h_plus_one": true,
       "validator_removed_at_h_plus_two": true,
       "post_evidence_validator_count": 3,
-      "burned_atomic": "4858822721098",
-      "same_app_hash": "3b5be2af9c822d623bc494cc31c0461eb1e5adc50610e8238f9ea600a2a1760b",
+      "burned_atomic": "4667359881995",
+      "same_app_hash": "28b3b69e2c304dbfd0d34ca8480cfe64957b8e49e4f1b86f67b6b184174389bf",
       "ics23_evidence_membership": true
     },
     "quorum_halt_height": 23,
@@ -97,6 +102,6 @@
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T16:27:04.171374+00:00",
-  "finished_at": "2026-09-14T16:27:51.504095+00:00"
+  "started_at": "2026-09-14T16:47:05.774651+00:00",
+  "finished_at": "2026-09-14T16:47:51.080183+00:00"
 }

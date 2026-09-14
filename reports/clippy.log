@@ -108,4 +108,4 @@ d-pool -- -D warnings` to apply 1 suggestion)
     Checking bit-staking v0.1.0 (D:\others\BIT\crates\bit-staking)
     Checking bit-state v0.1.0 (D:\others\BIT\crates\bit-state)
     Checking bit-app v0.1.0 (D:\others\BIT\crates\bit-app)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 18.13s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.75s

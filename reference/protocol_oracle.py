@@ -109,3 +109,42 @@ def empty_block_artifact(chain_context: bytes, height: int, block_time_seconds: 
 
 def block_artifact_hash(domain: bytes, artifact: bytes) -> bytes:
     return hashlib.sha256(domain + len(artifact).to_bytes(8, "big") + artifact).digest()
+
+
+SUPPLY_AMOUNT_FIELDS = (
+    "max_supply", "genesis_supply", "cumulative_minted", "burned",
+    "issued_total", "current_supply", "scheduled_to_date",
+    "forfeited_unissued", "future_issuance_budget", "shielded_total",
+    "stake_total", "pending_delegation_total", "exit_total",
+    "commission_total", "fee_reserve", "unclaimed_genesis_total",
+)
+
+
+def supply_audit_snapshot(values: dict[str, int | bytes]) -> bytes:
+    amounts = {name: int(values[name]) for name in SUPPLY_AMOUNT_FIELDS}
+    if amounts["max_supply"] != MAX_SUPPLY_ATOMIC:
+        raise ValueError("wrong fixed supply")
+    if amounts["issued_total"] != amounts["genesis_supply"] + amounts["cumulative_minted"]:
+        raise ValueError("wrong issued total")
+    if amounts["current_supply"] != amounts["issued_total"] - amounts["burned"]:
+        raise ValueError("wrong current supply")
+    if amounts["scheduled_to_date"] != amounts["cumulative_minted"] + amounts["forfeited_unissued"]:
+        raise ValueError("wrong scheduled issuance")
+    if amounts["max_supply"] != sum(amounts[name] for name in (
+        "issued_total", "forfeited_unissued", "future_issuance_budget"
+    )):
+        raise ValueError("wrong future issuance identity")
+    if amounts["current_supply"] != sum(amounts[name] for name in (
+        "shielded_total", "stake_total", "pending_delegation_total", "exit_total",
+        "commission_total", "fee_reserve", "unclaimed_genesis_total"
+    )):
+        raise ValueError("wrong container identity")
+    policy_hash = values["monetary_policy_hash"]
+    if not isinstance(policy_hash, bytes) or len(policy_hash) != 32:
+        raise ValueError("policy hash must be 32 bytes")
+    return cbor_array(
+        cbor_uint(1),
+        *(amount(amounts[name]) for name in SUPPLY_AMOUNT_FIELDS),
+        cbor_uint(int(values["completed_epochs"])),
+        cbor_bytes(policy_hash),
+    )
