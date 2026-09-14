@@ -1,6 +1,6 @@
 # BIT D-025 CLI 与创世清单
 
-状态：`IN_PROGRESS`。创世公开领取权的共识身份、状态编码、交易执行和证明查询已经实现；identity manifest v1 的规范编码、多方签名包、离线 CLI 与首版 release preflight 已实现。派生结果清单、完整 InitChain 构建和真实外部输入仍待完成。
+状态：`IN_PROGRESS`。创世公开领取权的共识身份、状态编码、交易执行和证明查询已经实现；identity manifest v1 的规范编码、多方签名包、离线 CLI 与首版 release preflight 已实现。manifest hash 已绑定高度零状态、chain context 和网关证明；派生结果清单、完整 InitChain 构建和真实外部输入仍待完成。
 
 ## 1. 哈希依赖顺序
 
@@ -18,7 +18,7 @@
 
 `claim_id` 不进入产生 `genesis_manifest_hash` 的身份主体。身份主体只记录领取公钥和金额；节点在得到 `chain_context` 后使用 `SHA256("bit/genesis-claim-id/v1" || chain_context || claim_pubkey || amount_be_16)` 派生领取 ID。最终派生结果可以列出 `claim_id`、状态根和 app hash 供签署者复核，但不能反向改变身份 hash。
 
-当前代码已固定上述 `claim_id` 公式。identity manifest 的机器合同位于 `bit-genesis`；现阶段仍不能仅凭 identity manifest 生成主网创世，因为高度零状态与派生结果签名尚未闭合。
+当前代码已固定上述 `claim_id` 公式。identity manifest 的机器合同位于 `bit-genesis`；`GenesisConfig` 现在必须携带非零 manifest hash，并要求其派生结果等于 chain context。manifest hash 与 chain context 会写入高度零 JMT，重启时作为不可变配置核对。现阶段仍不能仅凭 identity manifest 生成主网创世，因为完整配置转换、状态结果清单与第二阶段签名尚未闭合。
 
 ## 2. 创世领取状态
 
@@ -50,7 +50,7 @@ ClaimGenesis 使用动作 tag 10，包含 `claim_id`、`expected_amount` 和 `fe
 
 成功时原子执行 `G -= amount; Q += amount - fee; F += fee`，把领取高度与交易、nullifier、TCT、供应审计写入同一 JMT 批次。相同领取权的后续交易在授权阶段返回过期状态报价，不会再次释放资产。
 
-`GET /v1/network` 返回 `genesis_claims_hash` 及同高 ICS23 证明；`GET /v1/state/proof?key=genesis/claims/<claim_id>` 可取得单项成员或非成员证明。客户端必须针对已验证区块头的 app hash 校验证明，并按本节固定记录格式解码。
+`GET /v1/network` 返回 `genesis_manifest_hash`、`genesis_claims_hash` 及各自同高 ICS23 证明；`GET /v1/state/proof?key=meta/genesis_manifest_hash` 可独立取得身份哈希证明，`GET /v1/state/proof?key=genesis/claims/<claim_id>` 可取得单项成员或非成员证明。客户端必须针对已验证区块头的 app hash 校验证明，并按本节固定记录格式解码。
 
 ## 4. Identity manifest v1
 
@@ -116,8 +116,8 @@ bit release preflight --input mainnet.json \
 
 ## 7. 尚未完成的 D-025 范围
 
-1. 冻结派生结果清单的规范编码和第二阶段复核签名，将 identity 输入实际构造成 `GenesisConfig`、CometBFT genesis 与高度零状态根。
-2. 把 manifest hash、policy hash、crypto hash、资源参数和全部初始容器接入生产 `InitChain`，拒绝节点本地覆盖。
+1. 冻结派生结果清单的规范编码和第二阶段复核签名，将 identity 输入实际构造成完整 `GenesisConfig`、CometBFT genesis 与高度零状态根。
+2. manifest hash 与 chain context 已进入不可变状态；继续把 policy hash、crypto hash、资源参数和全部初始容器接入生产 `InitChain`，拒绝节点本地覆盖。
 3. 对初始私密承诺执行完整曲线/资产检查，对验证者自质押执行 staking 参数、投票权和元数据检查；生成可独立重放的完整创世产物。
 4. 将检查点、独立端点、安全审查、平台证书和发布产物升级为有明确字段、签名范围及撤销语义的证据合同。
 5. 实现 `genesis claim` 的钱包构造流程，并由真实参与者填写、独立签署主网公钥、金额、验证人和发布材料。

@@ -16,7 +16,7 @@
 |---|---|
 | `GET /health/live` | 仅说明网关进程存活 |
 | `GET /health/ready` | 要求应用状态可读且 verified header height 不落后 |
-| `GET /v1/network?height=` | 返回 chain context、本币 ID、政策/资源限制、创世承诺摘要和领取清单摘要，并附组成这些字段的同高证明；完整创世 identity manifest hash 尚待 D-025 接入 |
+| `GET /v1/network?height=` | 返回 genesis identity manifest hash、chain context、本币 ID、政策/资源限制、创世承诺摘要和领取清单摘要，并附组成这些字段的同高证明 |
 | `GET /v1/state/proof?key=&height=` | 高度 0/省略表示最新，正数表示精确历史高度；返回原值、app hash 和一至两段 ICS23 proof |
 | `GET /v1/supply?height=` | 严格解码同高 `supply/audit_snapshot` 与 `emission/policy`，返回完整供应容器、减半阶段、下一配额和发行完成状态，并附两份证明 |
 | `GET /v1/compact-blocks?from_height=&limit=&max_bytes=` | 连续返回本地归档中的规范 compact bytes、域分离 hash 和同高 `compact/hash` 证明 |
@@ -25,7 +25,7 @@
 
 ## 3. 公开键与资源限制
 
-状态证明不是任意数据库反射。键最长 256 ASCII 字节；只允许固定网络/费用/TCT 根/供应键，以及 transaction、nullifier、区块摘要、创世领取状态和选定公开 staking 记录前缀。`meta/genesis_claims_hash` 和 `genesis/claims/<claim_id>` 均可证明；后者的版本化 58 字节格式由 D-025 固定。TCT frontier、子存储版本标记、内部推进队列、SlashJob 游标和未知键空间不会由网关暴露。缺失、无法解析或越界的查询参数统一返回 JSON `E_BAD_QUERY` 或对应的稳定错误码。
+状态证明不是任意数据库反射。键最长 256 ASCII 字节；只允许固定网络/费用/TCT 根/供应键，以及 transaction、nullifier、区块摘要、创世领取状态和选定公开 staking 记录前缀。`meta/genesis_manifest_hash`、`meta/genesis_claims_hash` 和 `genesis/claims/<claim_id>` 均可证明；领取状态的版本化 58 字节格式由 D-025 固定。TCT frontier、子存储版本标记、内部推进队列、SlashJob 游标和未知键空间不会由网关暴露。缺失、无法解析或越界的查询参数统一返回 JSON `E_BAD_QUERY` 或对应的稳定错误码。
 
 compact 请求默认最多 100 块、硬上限 100 块；规范 compact 载荷默认最多 4 MiB、硬上限 16 MiB。首块已经超过请求上限时返回 413；本地归档缺失时返回 503 `E_ARTIFACT_UNAVAILABLE`，不会用空结果伪装同步完成。`block_artifacts_with_proofs` 会重新验证归档字节，并要求同一高度的历史证明值与 compact hash 精确相等。
 

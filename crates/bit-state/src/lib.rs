@@ -23,7 +23,9 @@ use bit_transaction::{
     PositionAuthorization, StatelessVerificationContext, VerifiedStakingAction,
     VerifiedStakingTransaction, VerifiedTransfer,
 };
-use bit_types::{genesis_claim_id, Action, Amount, Envelope, MonetaryPolicy, SupplyAuditSnapshot};
+use bit_types::{
+    chain_context, genesis_claim_id, Action, Amount, Envelope, MonetaryPolicy, SupplyAuditSnapshot,
+};
 use cnidarium::{Snapshot, StagedWriteBatch, StateDelta, StateRead, StateWrite, Storage};
 use decaf377::Fq;
 use ed25519_consensus::VerificationKey as Ed25519VerificationKey;
@@ -44,11 +46,12 @@ pub use state_snapshot::{StateSnapshotManifest, STATE_SNAPSHOT_CHUNK_BYTES};
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 19;
+const STORAGE_SCHEMA_VERSION: u32 = 20;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
 const META_BLOCK_TIME_SECONDS: &str = "meta/block_time_seconds";
+const META_GENESIS_MANIFEST_HASH: &str = "meta/genesis_manifest_hash";
 const META_CHAIN_CONTEXT: &str = "meta/chain_context";
 const META_NATIVE_ASSET_ID: &str = "meta/native_asset_id";
 const META_PROTOCOL_VERSION: &str = "meta/protocol_version";
@@ -231,6 +234,7 @@ impl GenesisClaimStatus {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GenesisConfig {
+    pub genesis_manifest_hash: Hash32,
     pub chain_context: Hash32,
     pub native_asset_id: Hash32,
     pub protocol_version: u64,
@@ -253,6 +257,16 @@ pub struct GenesisConfig {
 
 impl GenesisConfig {
     fn validate(&self) -> Result<()> {
+        if self.genesis_manifest_hash == [0; 32] {
+            return Err(Error::InvalidConfig(
+                "genesis_manifest_hash must be nonzero",
+            ));
+        }
+        if chain_context(self.genesis_manifest_hash) != self.chain_context {
+            return Err(Error::InvalidConfig(
+                "chain_context does not match genesis_manifest_hash",
+            ));
+        }
         if self.protocol_version == 0 {
             return Err(Error::InvalidConfig(
                 "protocol_version must be greater than zero",
@@ -2632,6 +2646,10 @@ async fn initialize_genesis(storage: &Storage, config: &GenesisConfig) -> Result
     );
     delta.put_raw(META_HEIGHT.to_owned(), u64_bytes(0));
     delta.put_raw(META_BLOCK_TIME_SECONDS.to_owned(), u64_bytes(0));
+    delta.put_raw(
+        META_GENESIS_MANIFEST_HASH.to_owned(),
+        config.genesis_manifest_hash.to_vec(),
+    );
     delta.put_raw(META_CHAIN_CONTEXT.to_owned(), config.chain_context.to_vec());
     delta.put_raw(
         META_NATIVE_ASSET_ID.to_owned(),
@@ -2741,6 +2759,12 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
         )));
     }
     validate_substore_versions(&snapshot, height).await?;
+    require_equal_hash(
+        &snapshot,
+        META_GENESIS_MANIFEST_HASH,
+        &config.genesis_manifest_hash,
+    )
+    .await?;
     require_equal_hash(&snapshot, META_CHAIN_CONTEXT, &config.chain_context).await?;
     require_equal_hash(&snapshot, META_NATIVE_ASSET_ID, &config.native_asset_id).await?;
     require_equal_u64(&snapshot, META_PROTOCOL_VERSION, config.protocol_version).await?;
@@ -4475,6 +4499,7 @@ mod tests {
         };
         (
             GenesisConfig {
+                genesis_manifest_hash: [0x33; 32],
                 chain_context: chain,
                 native_asset_id,
                 protocol_version: 1,
@@ -4657,6 +4682,7 @@ mod tests {
             Amount::new(monetary_policy.genesis_supply.value() - release.value()).unwrap();
         (
             GenesisConfig {
+                genesis_manifest_hash: [0x43; 32],
                 chain_context: chain,
                 native_asset_id: asset::Id(Fq::from(1u64)).to_bytes(),
                 protocol_version: 1,
@@ -4687,8 +4713,11 @@ mod tests {
 
     fn config(retention: u64) -> GenesisConfig {
         let monetary_policy = MonetaryPolicy::reference_testnet();
+        let genesis_manifest_hash = [1; 32];
+        let chain = chain_context(genesis_manifest_hash);
         GenesisConfig {
-            chain_context: [1; 32],
+            genesis_manifest_hash,
+            chain_context: chain,
             native_asset_id: {
                 let mut id = [0; 32];
                 id[0] = 1;
@@ -4702,7 +4731,7 @@ mod tests {
             genesis_allocation: GenesisAllocation::unclaimed_only(monetary_policy.genesis_supply),
             fee_policy: FeePolicy::reference_testnet(),
             monetary_policy,
-            genesis_staking: StakingBook::new([1; 32], StakingParameters::reference_testnet())
+            genesis_staking: StakingBook::new(chain, StakingParameters::reference_testnet())
                 .unwrap(),
             genesis_commitments: Vec::new(),
             genesis_claims: Vec::new(),
@@ -6528,15 +6557,33 @@ mod tests {
     async fn immutable_configuration_mismatch_stops_open() {
         let dir = TempDir::new().unwrap();
         let original = config(8);
+
+        let mut inconsistent_identity = original.clone();
+        inconsistent_identity.genesis_manifest_hash = [8; 32];
+        let error = PersistentState::open(
+            dir.path().join("inconsistent-identity"),
+            inconsistent_identity,
+        )
+        .await
+        .err()
+        .expect("inconsistent genesis identity must be rejected");
+        assert!(error
+            .to_string()
+            .contains("chain_context does not match genesis_manifest_hash"));
+
         let state = PersistentState::open(dir.path().to_path_buf(), original.clone())
             .await
             .unwrap();
         state.close().await;
 
         let mut wrong_chain = original.clone();
-        wrong_chain.chain_context = [9; 32];
-        wrong_chain.genesis_staking =
-            StakingBook::new([9; 32], StakingParameters::reference_testnet()).unwrap();
+        wrong_chain.genesis_manifest_hash = [9; 32];
+        wrong_chain.chain_context = chain_context(wrong_chain.genesis_manifest_hash);
+        wrong_chain.genesis_staking = StakingBook::new(
+            wrong_chain.chain_context,
+            StakingParameters::reference_testnet(),
+        )
+        .unwrap();
         let error = PersistentState::open(dir.path().to_path_buf(), wrong_chain)
             .await
             .err()

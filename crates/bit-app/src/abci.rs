@@ -1237,7 +1237,7 @@ mod tests {
         consensus_address, StakingBook, StakingParameters, RECOVERY_RECEIPT_BYTES,
         TESTNET_MIN_SELF_BOND_ATOMIC,
     };
-    use bit_types::{position_id, validator_id, Amount, MonetaryPolicy};
+    use bit_types::{chain_context, position_id, validator_id, Amount, MonetaryPolicy};
     use decaf377::Fq;
     use std::{
         io::{Read, Write},
@@ -1266,15 +1266,16 @@ mod tests {
         let mut native_asset_id = [0; 32];
         native_asset_id.copy_from_slice(&Fq::from(1u64).to_bytes());
         let monetary_policy = MonetaryPolicy::reference_testnet();
-        let chain_context = [1; 32];
+        let genesis_manifest_hash = [1; 32];
+        let chain = chain_context(genesis_manifest_hash);
         let operator = [6; 32];
-        let validator_id = validator_id(&chain_context, &operator);
+        let validator_id = validator_id(&chain, &operator);
         let consensus_pubkey = [7; 32];
         let owner = [8; 32];
-        let position_id = position_id(&chain_context, &owner);
+        let position_id = position_id(&chain, &owner);
         let principal = Amount::new(TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
         let mut genesis_staking =
-            StakingBook::new(chain_context, StakingParameters::reference_testnet()).unwrap();
+            StakingBook::new(chain, StakingParameters::reference_testnet()).unwrap();
         genesis_staking
             .register_validator(validator_id, operator, consensus_pubkey, 500)
             .unwrap();
@@ -1297,7 +1298,8 @@ mod tests {
             1_000
         );
         GenesisConfig {
-            chain_context,
+            genesis_manifest_hash,
+            chain_context: chain,
             native_asset_id,
             protocol_version: 1,
             max_block_bytes,

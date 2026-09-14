@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: BIT Public Read API
-  version: 0.3.0
+  version: 0.3.1
   description: >-
     Implemented read-only gateway subset. Plain HTTP is restricted to loopback;
     public deployment requires a separately configured TLS ingress.
@@ -224,6 +224,7 @@ components:
       type: object
       additionalProperties: false
       required:
+        - genesis_manifest_hash
         - chain_context
         - native_asset_id
         - genesis_commitments_hash
@@ -242,6 +243,7 @@ components:
         - max_envelope_bytes
         - anchor_retention_blocks
       properties:
+        genesis_manifest_hash: { $ref: "#/components/schemas/Hex32" }
         chain_context: { $ref: "#/components/schemas/Hex32" }
         native_asset_id: { $ref: "#/components/schemas/Hex32" }
         genesis_commitments_hash: { $ref: "#/components/schemas/Hex32" }
@@ -265,6 +267,7 @@ components:
       required:
         - supply
         - monetary_policy
+        - genesis_manifest_hash
         - chain_context
         - native_asset_id
         - protocol_version
@@ -277,6 +280,7 @@ components:
       properties:
         supply: { $ref: "#/components/schemas/Proof" }
         monetary_policy: { $ref: "#/components/schemas/Proof" }
+        genesis_manifest_hash: { $ref: "#/components/schemas/Proof" }
         chain_context: { $ref: "#/components/schemas/Proof" }
         native_asset_id: { $ref: "#/components/schemas/Proof" }
         protocol_version: { $ref: "#/components/schemas/Proof" }

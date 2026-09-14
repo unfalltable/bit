@@ -142,6 +142,8 @@ async fn network(
     let snapshot = decode_supply_snapshot(&supply_proof)?;
     let policy_proof = query_same_state(&state.core, "emission/policy", &supply_proof).await?;
     let policy = decode_monetary_policy(&policy_proof, &snapshot)?;
+    let genesis_manifest_hash =
+        query_same_state(&state.core, "meta/genesis_manifest_hash", &supply_proof).await?;
     let chain_context = query_same_state(&state.core, "meta/chain_context", &supply_proof).await?;
     let native_asset_id =
         query_same_state(&state.core, "meta/native_asset_id", &supply_proof).await?;
@@ -178,6 +180,7 @@ async fn network(
                 .to_string(),
         },
         network: NetworkDto {
+            genesis_manifest_hash: decode_hash32_hex(&genesis_manifest_hash)?,
             chain_context: decode_hash32_hex(&chain_context)?,
             native_asset_id: decode_hash32_hex(&native_asset_id)?,
             genesis_commitments_hash: decode_hash32_hex(&genesis_commitments_hash)?,
@@ -199,6 +202,7 @@ async fn network(
         proofs: NetworkProofsDto {
             supply: proof_dto(supply_proof)?,
             monetary_policy: proof_dto(policy_proof)?,
+            genesis_manifest_hash: proof_dto(genesis_manifest_hash)?,
             chain_context: proof_dto(chain_context)?,
             native_asset_id: proof_dto(native_asset_id)?,
             protocol_version: proof_dto(protocol_version)?,
@@ -482,6 +486,7 @@ fn validate_public_key(key: &str) -> Result<(), ApiError> {
     const EXACT: &[&str] = &[
         "meta/version",
         "meta/height",
+        "meta/genesis_manifest_hash",
         "meta/chain_context",
         "meta/native_asset_id",
         "meta/protocol_version",
@@ -567,6 +572,7 @@ pub struct NetworkResponse {
 
 #[derive(Serialize)]
 pub struct NetworkDto {
+    pub genesis_manifest_hash: String,
     pub chain_context: String,
     pub native_asset_id: String,
     pub genesis_commitments_hash: String,
@@ -590,6 +596,7 @@ pub struct NetworkDto {
 pub struct NetworkProofsDto {
     pub supply: ProofDto,
     pub monetary_policy: ProofDto,
+    pub genesis_manifest_hash: ProofDto,
     pub chain_context: ProofDto,
     pub native_asset_id: ProofDto,
     pub protocol_version: ProofDto,
@@ -769,15 +776,18 @@ mod tests {
     use bit_emission::{FeePolicy, GenesisAllocation};
     use bit_staking::{StakingBook, StakingParameters};
     use bit_state::GenesisConfig;
-    use bit_types::MonetaryPolicy;
+    use bit_types::{chain_context, MonetaryPolicy};
     use serde_json::Value;
     use tempfile::TempDir;
     use tower::ServiceExt;
 
     fn genesis() -> GenesisConfig {
         let monetary_policy = MonetaryPolicy::reference_testnet();
+        let genesis_manifest_hash = [1; 32];
+        let chain = chain_context(genesis_manifest_hash);
         GenesisConfig {
-            chain_context: [1; 32],
+            genesis_manifest_hash,
+            chain_context: chain,
             native_asset_id: [2; 32],
             protocol_version: 1,
             max_block_bytes: 1_000_000,
@@ -787,7 +797,7 @@ mod tests {
             genesis_allocation: GenesisAllocation::unclaimed_only(monetary_policy.genesis_supply),
             fee_policy: FeePolicy::reference_testnet(),
             monetary_policy,
-            genesis_staking: StakingBook::new([1; 32], StakingParameters::reference_testnet())
+            genesis_staking: StakingBook::new(chain, StakingParameters::reference_testnet())
                 .unwrap(),
             genesis_commitments: Vec::new(),
             genesis_claims: Vec::new(),
@@ -846,7 +856,14 @@ mod tests {
         let (status, network) = json(router.clone(), "/v1/network").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(network["meta"]["state_height"], "0");
-        assert_eq!(network["network"]["chain_context"], hex::encode([1; 32]));
+        assert_eq!(
+            network["network"]["genesis_manifest_hash"],
+            hex::encode([1; 32])
+        );
+        assert_eq!(
+            network["network"]["chain_context"],
+            hex::encode(chain_context([1; 32]))
+        );
         assert_eq!(network["network"]["native_asset_id"], hex::encode([2; 32]));
         assert_eq!(network["network"]["protocol_version"], 1);
         assert_eq!(
@@ -856,12 +873,35 @@ mod tests {
         assert_eq!(network["network"]["max_block_bytes"], "1000000");
         assert_eq!(network["proofs"]["monetary_policy"]["state_height"], "0");
         assert_eq!(
+            network["proofs"]["genesis_manifest_hash"]["key"],
+            "meta/genesis_manifest_hash"
+        );
+        assert_eq!(
             network["proofs"]["genesis_claims_hash"]["key"],
             "meta/genesis_claims_hash"
         );
         assert_eq!(
             network["proofs"]["chain_context"]["app_hash"],
             network["proofs"]["supply"]["app_hash"]
+        );
+
+        let (status, manifest_hash) = json(
+            router.clone(),
+            "/v1/state/proof?key=meta%2Fgenesis_manifest_hash",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(manifest_hash["result"]["exists"], true);
+        assert_eq!(
+            manifest_hash["result"]["value_base64"],
+            BASE64.encode([1; 32])
+        );
+        assert_eq!(
+            manifest_hash["result"]["proof_ops_base64"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
         );
 
         let (status, _) = json(

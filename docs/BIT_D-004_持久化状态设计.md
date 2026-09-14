@@ -14,9 +14,10 @@
 
 | 键 | 值 | 约束 |
 |---|---|---|
-| `meta/version` | 4 字节大端 schema 版本 | 当前为 19，未知版本拒绝启动 |
+| `meta/version` | 4 字节大端 schema 版本 | 当前为 20，未知版本拒绝启动 |
 | `meta/height` | 8 字节大端状态高度 | 必须等于 Cnidarium 最新版本 |
 | `meta/block_time_seconds` | 8 字节大端 Unix 秒 | ABCI 区块时间，不允许相对 durable 状态倒退 |
+| `meta/genesis_manifest_hash` | 32 字节 | 已签 identity manifest 的哈希，非零且创世后不可变 |
 | `meta/chain_context` | 32 字节 | 创世后不可变 |
 | `meta/native_asset_id` | 32 字节 | 创世后不可变 |
 | `meta/protocol_version` | 8 字节 | ABCI 报告和执行规则版本，创世后不可变 |
@@ -73,9 +74,9 @@
 | `execution/block/<height>` | 32 字节执行摘要 | 与状态高度同批提交 |
 | `compact/hash/<height>` | 32 字节 compact 摘要 | 与状态高度同批提交 |
 
-初始化时按签名创世清单的顺序校验并插入隐私承诺，然后关闭高度零 TCT block；非法字段元素或重复承诺会在写盘前拒绝。承诺摘要使用 `BIT-GENESIS-COMMITMENTS-V1 || count_be_u64 || commitments` 的 SHA-256，重启配置必须给出同一有序清单。公开领取项校验派生 ID、Ed25519 公钥、正数金额、ID/公钥唯一性和 G 容器上界，再按 claim ID 排序计算 `BIT-GENESIS-CLAIMS-V1` 摘要。主网身份清单、签名和真实分配仍属于未批准外部输入，依赖顺序见 D-025。
+初始化要求 `genesis_manifest_hash` 非零，并要求 `chain_context = SHA256("bit/chain/v1" || genesis_manifest_hash)`；两者写入同一高度零状态，重启时逐字节核对。随后按签名创世清单的顺序校验并插入隐私承诺，再关闭高度零 TCT block；非法字段元素或重复承诺会在写盘前拒绝。承诺摘要使用 `BIT-GENESIS-COMMITMENTS-V1 || count_be_u64 || commitments` 的 SHA-256，重启配置必须给出同一有序清单。公开领取项校验派生 ID、Ed25519 公钥、正数金额、ID/公钥唯一性和 G 容器上界，再按 claim ID 排序计算 `BIT-GENESIS-CLAIMS-V1` 摘要。主网身份清单、签名和真实分配仍属于未批准外部输入，依赖顺序见 D-025。
 
-TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11；逐验证人的持久化候选排序记录进入 schema v12；退出参数、cohort 和 ticket 进入 schema v13；退出暴露/成熟队列进入 schema v14；逐高度真实验证者责任集合进入 schema v15；Byzantine evidence 和 SlashJob 进入 schema v16；规范供应审计快照进入 schema v17；九个子存储的逐高度版本标记和可重建历史证明进入 schema v18；创世领取清单、逐项状态和 G 容器交叉核对进入 schema v19。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
+TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11；逐验证人的持久化候选排序记录进入 schema v12；退出参数、cohort 和 ticket 进入 schema v13；退出暴露/成熟队列进入 schema v14；逐高度真实验证者责任集合进入 schema v15；Byzantine evidence 和 SlashJob 进入 schema v16；规范供应审计快照进入 schema v17；九个子存储的逐高度版本标记和可重建历史证明进入 schema v18；创世领取清单、逐项状态和 G 容器交叉核对进入 schema v19；identity manifest hash 与 chain context 的派生关系和不可变存储进入 schema v20。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
 
 ## 3. 块生命周期
 
@@ -92,7 +93,7 @@ Prepare 结果被丢弃或批次在写前失败时，数据库版本不变。重
 
 `query_latest_with_proof` 和 `query_at_height_with_proof` 返回原始值、状态版本、app hash 和 Cnidarium 生成的 ICS23 proof。主 JMT 键使用一层证明；九个子存储区使用“子树值到子树根、子树根到全局根”的两层证明。`QueryProof::verify` 同时处理存在和不存在证明。
 
-schema v19 延续 v18 的统一版本证明规则：创世及每个区块给九个子存储分别写入 `<prefix>/_meta/version`，要求标记、子树 JMT 版本、主树版本和 `meta/height` 全部等于提交高度。节点启动会校验最新标记；精确历史查询还会在指定版本逐项校验全部标记。Cnidarium 的固定补丁可在进程缓存缺失时，以同一旧版本重建主树和全部子树的只读快照，因此重启后仍可生成该高度的证明；未来高度返回明确的不可用错误。创世领取记录属于 `genesis` 子树，可返回成员或非成员证明。
+schema v20 延续 v18 的统一版本证明规则：创世及每个区块给九个子存储分别写入 `<prefix>/_meta/version`，要求标记、子树 JMT 版本、主树版本和 `meta/height` 全部等于提交高度。节点启动会校验最新标记；精确历史查询还会在指定版本逐项校验全部标记。Cnidarium 的固定补丁可在进程缓存缺失时，以同一旧版本重建主树和全部子树的只读快照，因此重启后仍可生成该高度的证明；未来高度返回明确的不可用错误。`meta/genesis_manifest_hash` 属于主树，可返回一层证明；创世领取记录属于 `genesis` 子树，可返回成员或非成员证明。
 
 ## 5. 状态快照
 
@@ -108,7 +109,7 @@ ABCI State Sync 使用固定 format 1。chunk 0 携带规范 manifest，后续 c
 
 ## 6. 已验证不变量
 
-- 空目录只初始化一次高度零状态；相同配置可重启，chain context 等不可变配置变化时拒绝打开。
+- 空目录只初始化一次高度零状态；相同配置可重启，genesis manifest hash、chain context 等不可变配置变化时拒绝打开，二者派生关系不成立时写盘前拒绝。
 - 状态高度、主 JMT 版本和九个子存储版本标记严格相等，倒退或缺键时停止打开，不自动清库。
 - schema 回退、无法解码的 TCT frontier、非法或重复创世承诺均拒绝启动或初始化。
 - Commit 前崩溃不产生 durable 写入；相同区块重放得到相同 app hash。

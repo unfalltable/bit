@@ -325,6 +325,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
         initial_height,
     };
     let genesis = GenesisConfig {
+        genesis_manifest_hash,
         chain_context,
         native_asset_id,
         protocol_version,

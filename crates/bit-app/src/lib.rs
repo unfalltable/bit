@@ -676,7 +676,8 @@ mod tests {
         TESTNET_MIN_SELF_BOND_ATOMIC,
     };
     use bit_types::{
-        position_id, validator_id, Amount, CompactBlock, ExecutionSummary, MonetaryPolicy,
+        chain_context, position_id, validator_id, Amount, CompactBlock, ExecutionSummary,
+        MonetaryPolicy,
     };
     use decaf377::Fq;
     use tempfile::TempDir;
@@ -685,8 +686,11 @@ mod tests {
         let mut native_asset_id = [0; 32];
         native_asset_id.copy_from_slice(&Fq::from(1u64).to_bytes());
         let monetary_policy = MonetaryPolicy::reference_testnet();
+        let genesis_manifest_hash = [1; 32];
+        let chain = chain_context(genesis_manifest_hash);
         GenesisConfig {
-            chain_context: [1; 32],
+            genesis_manifest_hash,
+            chain_context: chain,
             native_asset_id,
             protocol_version: 1,
             max_block_bytes,
@@ -696,7 +700,7 @@ mod tests {
             genesis_allocation: GenesisAllocation::unclaimed_only(monetary_policy.genesis_supply),
             fee_policy: FeePolicy::reference_testnet(),
             monetary_policy,
-            genesis_staking: StakingBook::new([1; 32], StakingParameters::reference_testnet())
+            genesis_staking: StakingBook::new(chain, StakingParameters::reference_testnet())
                 .unwrap(),
             genesis_commitments: Vec::new(),
             genesis_claims: Vec::new(),

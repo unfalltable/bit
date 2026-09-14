@@ -55,7 +55,7 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 ## 4. 持久化与证明
 
-货币政策、政策哈希、六项费率、供应累计量、七类资产容器、完成 epoch 数和已放弃额度都纳入当前 schema v19 的 JMT（这些字段最初在 v5 引入）。它们与高度、TCT、交易索引、execution 摘要、compact 摘要、创世领取、质押/退出记录、供应审计快照、三高度实际验证者集合及九个子存储版本标记在同一个 RocksDB WriteBatch 中提交。每个 validator v5 记录其 `commission_accrued`、签名窗口和 epoch score，重启时要求佣金总和精确等于供应容器 `ΣC`；全部 exit cohort 资产之和必须精确等于供应容器 `ΣX`；未领取的创世项加未映射余额必须精确等于供应容器 `G`。
+货币政策、政策哈希、六项费率、供应累计量、七类资产容器、完成 epoch 数和已放弃额度都纳入当前 schema v20 的 JMT（这些字段最初在 v5 引入）。它们与高度、TCT、交易索引、execution 摘要、compact 摘要、创世领取、质押/退出记录、供应审计快照、三高度实际验证者集合及九个子存储版本标记在同一个 RocksDB WriteBatch 中提交。每个 validator v5 记录其 `commission_accrued`、签名窗口和 epoch score，重启时要求佣金总和精确等于供应容器 `ΣC`；全部 exit cohort 资产之和必须精确等于供应容器 `ΣX`；未领取的创世项加未映射余额必须精确等于供应容器 `G`。
 
 `supply/audit_snapshot` 已冻结版本 1 规范值。它是 19 项 CBOR 数组：版本号、按本节恒定顺序排列的 16 个 Amount、`completed_epochs` 和 `monetary_policy_hash`。每个 Amount 必须编码为精确 16 字节大端 byte string，政策哈希必须为 32 字节，整数必须使用最短 CBOR 表示。顺序依次为 `M, G0, Mint, Burn, I, T, U(e), K, Future(e), Q, ΣP, D, ΣX, ΣC, F, G`。解码器要求无尾随字节、重新编码逐字节相等，并重新验证全部供应恒等式。
 
