@@ -80,7 +80,9 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'crates/bit-app/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/abci.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\abci.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'crates/bit-app/src/safety.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\safety.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/examples/comet_network_probe.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\examples\comet_network_probe.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'crates/bit-app/examples/safety_halt_admin.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\examples\safety_halt_admin.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/run_bit_app_network.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\run_bit_app_network.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/rust_env.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\rust_env.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/bootstrap_tools.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\bootstrap_tools.py') -Algorithm SHA256).Hash.ToLowerInvariant() }

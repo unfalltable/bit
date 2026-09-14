@@ -59,7 +59,7 @@
       "id": "D-005",
       "name": "ABCI 生命周期",
       "status": "IN_PROGRESS",
-      "implemented": ["shared CheckTx/PrepareProposal/ProcessProposal/FinalizeBlock execution", "strict InitChain", "last-commit and next-validator-hash checks", "H+2 ValidatorUpdates", "FinalizeBlock Byzantine evidence normalization", "latest ICS23 query", "ABCI TCP roundtrip", "four-node CometBFT application probe"],
+      "implemented": ["shared CheckTx/PrepareProposal/ProcessProposal/FinalizeBlock execution", "strict InitChain", "last-commit and next-validator-hash checks", "H+2 ValidatorUpdates", "FinalizeBlock Byzantine evidence normalization", "latest ICS23 query", "durable last-validator safety halt journal and digest-gated acknowledgement", "ABCI TCP roundtrip", "four-node CometBFT application probe"],
       "tested_by": ["reports/development-baseline.json", "feasibility/reports/bit-app-network-result.json"],
       "remaining": ["production execution and compact digest provider", "snapshot ABCI", "historical-height queries", "formal node command", "multi-node private transaction and evidence scenarios"]
     },
@@ -77,15 +77,15 @@
       "status": "IN_PROGRESS",
       "implemented": ["validators, pools, positions, activation capacity", "pending activation and refundable paths", "U256 share accounting", "incremental candidate index", "metadata/commission/key updates", "signing window and downtime jail", "epoch score/rewards", "H+2 effective sets", "last-validator protection", "nine enabled staking envelopes"],
       "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["public staking query/API surface", "operator workflows", "multi-node staking transaction replay", "persistent safe-halt recovery evidence"]
+      "remaining": ["public staking query/API surface", "operator workflows beyond safety-halt inspection and acknowledgement", "multi-node staking transaction replay", "coordinated last-validator set remediation procedure"]
     },
     {
       "id": "D-008",
       "name": "退出与处罚",
       "status": "IN_PROGRESS",
-      "implemented": ["Unbond cohorts and non-transferable tickets", "dual height/time maturity", "ClaimExit", "three persistent exit queues", "per-height validator responsibility history", "Comet duplicate-vote and light-client evidence validation", "canonical evidence deduplication", "permanent tombstone", "active pool and exposed exit cohort Burn", "globally bounded persistent SlashJob", "freeze during settlement", "per-block restart recovery and ICS23 proofs"],
+      "implemented": ["Unbond cohorts and non-transferable tickets", "dual height/time maturity", "ClaimExit", "three persistent exit queues", "per-height validator responsibility history", "Comet duplicate-vote and light-client evidence validation", "canonical evidence deduplication", "permanent tombstone", "active pool and exposed exit cohort Burn", "globally bounded persistent SlashJob", "freeze during settlement", "prepare/commit interruption replay", "durable HALT_NO_SAFE_VALIDATOR_SET evidence and startup lock", "per-block restart recovery and ICS23 proofs"],
       "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["real multi-node evidence injection", "slashing disk/crash fault injection", "persisted HALT_NO_SAFE_VALIDATOR_SET evidence", "gateway/indexer/wallet penalty status"]
+      "remaining": ["real multi-node evidence injection", "JMT/RocksDB disk-full, fsync, and batch-corruption fault injection", "coordinated last-validator set remediation procedure", "gateway/indexer/wallet penalty status"]
     }
   ],
   "not_started_from": "D-009",

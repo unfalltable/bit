@@ -28,7 +28,7 @@ FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`�
 
 ## 3. ABCI v0.38 适配
 
-`abci::AbciApplication` 固定使用 `tendermint-abci` 与 `tendermint-proto` 0.40.4 的 `v0_38` 方言。同步 ABCI 连接通过一个共享执行锁进入私有 Tokio runtime，保证不同 socket 线程不会并发推进 Finalize/Commit。共识关键错误会设置共享 halted 标志；后续所有连接均停止处理。公开的 bind 入口拒绝非 loopback 地址及零长度读缓冲区，保持 ABCI 为节点内部接口。
+`abci::AbciApplication` 固定使用 `tendermint-abci` 与 `tendermint-proto` 0.40.4 的 `v0_38` 方言。同步 ABCI 连接通过一个共享执行锁进入私有 Tokio runtime，保证不同 socket 线程不会并发推进 Finalize/Commit。共识关键错误会设置共享 halted 标志；后续所有连接均停止处理。`HALT_NO_SAFE_VALIDATOR_SET` 还会先写入状态目录旁的版本化安全日志；启动时存在日志、可恢复临时日志、损坏日志或 chain context 不匹配都会拒绝服务。运维只能用精确记录摘要把日志改名归档，不能通过该操作修改或提交被拒区块的状态。公开的 bind 入口拒绝非 loopback 地址及零长度读缓冲区，保持 ABCI 为节点内部接口。
 
 `InitChain` 只在高度零接受，并与启动时配置的完整 `RequestInitChain` 逐字段相等。启动配置还检查 chain ID、创世时间、初始高度、Ed25519 验证者及投票权、区块和证据限制、应用版本，并要求 vote extension 启用高度为零；InitChain 的 key/power 集合还必须精确等于 genesis staking 的 Active 集合。供给、分配和密码学清单的语义校验仍依赖 D-006 与最终创世编码，当前不能据此宣称主网创世已验收。
 

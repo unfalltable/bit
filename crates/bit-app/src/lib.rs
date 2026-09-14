@@ -5,6 +5,12 @@
 //! protobuf requests into these methods without duplicating execution rules.
 
 pub mod abci;
+mod safety;
+
+pub use safety::{
+    acknowledge_safety_halt, decode_hash_hex, encode_hex, read_safety_halt,
+    safety_halt_journal_path, SafetyHaltError, SafetyHaltReason, SafetyHaltRecord,
+};
 
 use bit_staking::{CommitVote, ConsensusPowerUpdate};
 use bit_state::{
@@ -22,6 +28,13 @@ pub type Hash32 = [u8; 32];
 pub enum Error {
     #[error("invalid application configuration: {0}")]
     InvalidConfig(&'static str),
+    #[error("safety halt journal operation failed: {0}")]
+    SafetyHaltJournal(#[from] SafetyHaltError),
+    #[error("safety halt {record_hash} is active at {journal}")]
+    SafetyHaltActive {
+        journal: PathBuf,
+        record_hash: String,
+    },
     #[error("state operation failed: {0}")]
     State(#[from] bit_state::Error),
     #[error("FinalizeBlock already produced an uncommitted block")]

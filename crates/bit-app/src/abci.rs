@@ -6,7 +6,8 @@
 //! flag before terminating the current ABCI request.
 
 use crate::{
-    ApplicationCore, BlockRequest, Error as CoreError, FinalizeOutcome, Hash32, LastCommit,
+    encode_hex, read_safety_halt, safety_halt_journal_path, ApplicationCore, BlockRequest,
+    Error as CoreError, FinalizeOutcome, Hash32, LastCommit, SafetyHaltError, SafetyHaltRecord,
     TxResult,
 };
 use bit_staking::{CommitVote, ValidatorStatus, COMETBFT_ADDRESS_BYTES};
@@ -316,6 +317,8 @@ struct Inner {
     runtime: tokio::runtime::Runtime,
     execution: Mutex<()>,
     config: AbciConfig,
+    state_path: PathBuf,
+    chain_context: Hash32,
     digest_provider: Arc<dyn FinalizeDigestProvider>,
     initialized: AtomicBool,
     halted: AtomicBool,
@@ -334,12 +337,25 @@ impl AbciApplication {
         digest_provider: Arc<dyn FinalizeDigestProvider>,
     ) -> crate::Result<Self> {
         config.validate(&genesis)?;
+        let chain_context = genesis.chain_context;
+        if let Some(record) = read_safety_halt(&state_path)? {
+            if record.chain_context != chain_context {
+                return Err(SafetyHaltError::Corrupt(
+                    "active halt journal belongs to another chain context",
+                )
+                .into());
+            }
+            return Err(CoreError::SafetyHaltActive {
+                journal: safety_halt_journal_path(&state_path),
+                record_hash: encode_hex(&record.record_hash()),
+            });
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
             .build()
             .map_err(|_| CoreError::InvalidConfig("failed to create ABCI runtime"))?;
-        let core = runtime.block_on(ApplicationCore::open(state_path, genesis))?;
+        let core = runtime.block_on(ApplicationCore::open(state_path.clone(), genesis))?;
         let initialized = runtime.block_on(core.info())?.last_block_height > 0;
         Ok(Self {
             inner: Arc::new(Inner {
@@ -347,6 +363,8 @@ impl AbciApplication {
                 runtime,
                 execution: Mutex::new(()),
                 config,
+                state_path,
+                chain_context,
                 digest_provider,
                 initialized: AtomicBool::new(initialized),
                 halted: AtomicBool::new(false),
@@ -718,6 +736,11 @@ impl Application for AbciApplication {
         if height == 0 || request.hash.len() != 32 {
             self.halt("FinalizeBlock height or block hash is invalid");
         }
+        let attempted_block_hash: Hash32 = request
+            .hash
+            .as_ref()
+            .try_into()
+            .expect("block hash length is checked");
         let block_time_seconds =
             block_time_seconds(request.time.as_ref()).unwrap_or_else(|error| self.halt(error));
         let last_commit = decided_last_commit(height, request.decided_last_commit.as_ref())
@@ -727,6 +750,11 @@ impl Application for AbciApplication {
         let byzantine_evidence = normalize_byzantine_evidence(&request.misbehavior)
             .unwrap_or_else(|error| self.halt(error));
         let _guard = self.execution_guard();
+        let committed = self
+            .inner
+            .runtime
+            .block_on(self.inner.core.state_summary())
+            .unwrap_or_else(|error| self.halt(format!("state summary lookup failed: {error}")));
         let digests = self
             .inner
             .digest_provider
@@ -739,7 +767,7 @@ impl Application for AbciApplication {
             execution_hash: digests.execution_hash,
             compact_hash: digests.compact_hash,
             last_commit,
-            byzantine_evidence,
+            byzantine_evidence: byzantine_evidence.clone(),
             next_validators_hash,
         };
         match self
@@ -748,6 +776,34 @@ impl Application for AbciApplication {
             .block_on(self.inner.core.finalize_block(block))
         {
             Ok(outcome) => self.map_finalize(outcome),
+            Err(error @ CoreError::State(bit_state::Error::NoSafeValidatorSet)) => {
+                let record = SafetyHaltRecord::no_safe_validator_set(
+                    self.inner.chain_context,
+                    committed.state_height,
+                    committed.app_hash,
+                    height,
+                    attempted_block_hash,
+                    block_time_seconds,
+                    next_validators_hash,
+                    byzantine_evidence,
+                )
+                .unwrap_or_else(|journal_error| {
+                    self.halt(format!(
+                        "FinalizeBlock failed: {error}; safety halt record construction failed: {journal_error}"
+                    ))
+                });
+                let record_hash = encode_hex(&record.record_hash());
+                crate::safety::persist_safety_halt(&self.inner.state_path, &record)
+                    .unwrap_or_else(|journal_error| {
+                        self.halt(format!(
+                            "FinalizeBlock failed: {error}; safety halt journal persistence failed: {journal_error}"
+                        ))
+                    });
+                self.halt(format!(
+                    "FinalizeBlock failed: {error}; durable safety halt record {record_hash} written to {}",
+                    safety_halt_journal_path(&self.inner.state_path).display()
+                ))
+            }
             Err(error) => self.halt(format!("FinalizeBlock failed: {error}")),
         }
     }
@@ -974,13 +1030,15 @@ mod tests {
     use super::*;
     use bit_emission::{FeePolicy, GenesisAllocation};
     use bit_staking::{
-        StakingBook, StakingParameters, RECOVERY_RECEIPT_BYTES, TESTNET_MIN_SELF_BOND_ATOMIC,
+        consensus_address, StakingBook, StakingParameters, RECOVERY_RECEIPT_BYTES,
+        TESTNET_MIN_SELF_BOND_ATOMIC,
     };
     use bit_types::{position_id, validator_id, Amount, MonetaryPolicy};
     use decaf377::Fq;
     use std::{
         io::{Read, Write},
         net::{TcpListener, TcpStream},
+        panic::{catch_unwind, AssertUnwindSafe},
         thread,
     };
     use tempfile::TempDir;
@@ -1412,6 +1470,149 @@ mod tests {
         malformed = valid;
         malformed.total_voting_power = -1;
         assert!(normalize_byzantine_evidence(&[malformed]).is_err());
+    }
+
+    #[test]
+    fn unsafe_validator_removal_writes_restart_lock_and_replay_halts_again() {
+        let dir = TempDir::new().unwrap();
+        let state_path = dir.path().to_path_buf();
+        let app = application(&dir, 1_000_000);
+        Application::init_chain(&app, init_chain(1_000_000));
+        let validators_hash = genesis_next_validators_hash();
+        Application::finalize_block(
+            &app,
+            RequestFinalizeBlock {
+                hash: vec![9; 32].into(),
+                height: 1,
+                time: Some(Timestamp {
+                    seconds: 1_800_000_001,
+                    nanos: 0,
+                }),
+                next_validators_hash: validators_hash.clone().into(),
+                ..Default::default()
+            },
+        );
+        Application::commit(&app);
+        let committed = app
+            .inner
+            .runtime
+            .block_on(app.inner.core.state_summary())
+            .unwrap();
+
+        let evidence = Misbehavior {
+            r#type: MisbehaviorType::DuplicateVote as i32,
+            validator: Some(Validator {
+                address: consensus_address(&[7; 32]).to_vec().into(),
+                power: 1_000,
+            }),
+            height: 1,
+            time: Some(Timestamp {
+                seconds: 1_800_000_001,
+                nanos: 0,
+            }),
+            total_voting_power: 1_000,
+        };
+        let unsafe_request = RequestFinalizeBlock {
+            hash: vec![10; 32].into(),
+            height: 2,
+            time: Some(Timestamp {
+                seconds: 1_800_000_002,
+                nanos: 0,
+            }),
+            decided_last_commit: Some(CommitInfo {
+                round: 0,
+                votes: vec![VoteInfo {
+                    validator: Some(Validator {
+                        address: consensus_address(&[7; 32]).to_vec().into(),
+                        power: 1_000,
+                    }),
+                    block_id_flag: BlockIdFlag::Commit as i32,
+                }],
+            }),
+            misbehavior: vec![evidence],
+            next_validators_hash: validators_hash.into(),
+            ..Default::default()
+        };
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            Application::finalize_block(&app, unsafe_request.clone())
+        }))
+        .is_err());
+        assert!(app.is_halted());
+        assert_eq!(
+            app.inner
+                .runtime
+                .block_on(app.inner.core.state_summary())
+                .unwrap()
+                .state_height,
+            1
+        );
+
+        let record = read_safety_halt(&state_path).unwrap().unwrap();
+        assert_eq!(record.committed_height, 1);
+        assert_eq!(record.committed_app_hash, committed.app_hash);
+        assert_eq!(record.attempted_height, 2);
+        assert_eq!(record.attempted_block_hash, [10; 32]);
+        assert_eq!(record.evidence.len(), 1);
+        let record_hash = record.record_hash();
+
+        let provider = |_: &RequestFinalizeBlock| {
+            Ok(FinalizeDigests {
+                execution_hash: [4; 32],
+                compact_hash: [5; 32],
+            })
+        };
+        assert!(matches!(
+            AbciApplication::open(
+                state_path.clone(),
+                genesis(1_000_000),
+                AbciConfig {
+                    application_name: "bit-app".to_owned(),
+                    application_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    expected_init_chain: init_chain(1_000_000),
+                    retain_height: 0,
+                },
+                Arc::new(provider),
+            ),
+            Err(CoreError::SafetyHaltActive { .. })
+        ));
+
+        let archive = crate::acknowledge_safety_halt(&state_path, record_hash).unwrap();
+        assert!(archive.is_file());
+        drop(app);
+
+        let provider = |_: &RequestFinalizeBlock| {
+            Ok(FinalizeDigests {
+                execution_hash: [4; 32],
+                compact_hash: [5; 32],
+            })
+        };
+        let reopened = AbciApplication::open(
+            state_path.clone(),
+            genesis(1_000_000),
+            AbciConfig {
+                application_name: "bit-app".to_owned(),
+                application_version: env!("CARGO_PKG_VERSION").to_owned(),
+                expected_init_chain: init_chain(1_000_000),
+                retain_height: 0,
+            },
+            Arc::new(provider),
+        )
+        .unwrap();
+        assert_eq!(
+            Application::info(&reopened, RequestInfo::default()).last_block_height,
+            1
+        );
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            Application::finalize_block(&reopened, unsafe_request)
+        }))
+        .is_err());
+        assert_eq!(
+            read_safety_halt(&state_path)
+                .unwrap()
+                .unwrap()
+                .record_hash(),
+            record_hash
+        );
     }
 
     #[test]

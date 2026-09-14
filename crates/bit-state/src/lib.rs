@@ -4758,7 +4758,7 @@ mod tests {
         let parameters = StakingParameters::reference_testnet();
         let slash_bps = parameters.byzantine_slash_bps;
         let (genesis_config, validators) = two_active_validator_config(8, parameters);
-        let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+        let mut state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
             .await
             .unwrap();
 
@@ -4837,7 +4837,43 @@ mod tests {
             .validator_updates
             .iter()
             .any(|update| update.consensus_pubkey == consensus_pubkey && update.power == 0));
-        let second_receipt = state.commit(second.prepare().await.unwrap()).unwrap();
+        let abandoned = second.prepare().await.unwrap();
+        let abandoned_app_hash = abandoned.app_hash;
+        drop(abandoned);
+        assert_eq!(state.summary().await.unwrap().state_height, 1);
+        assert_eq!(state.supply_audit().await.unwrap().burned, Amount::ZERO);
+        assert!(state
+            .evidence_record(&evidence_hash)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            state
+                .staking_book()
+                .unwrap()
+                .validator(&validator_id)
+                .unwrap()
+                .status,
+            ValidatorStatus::Active
+        );
+        state.close().await;
+
+        state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+        let second_hash = state.expected_next_validators_hash(2).await.unwrap();
+        let mut second = state
+            .begin_block_at(2, 20, [0xe3; 32], [0xe4; 32])
+            .await
+            .unwrap();
+        let replayed = second
+            .stage_consensus_system(Some(&votes), std::slice::from_ref(&evidence), second_hash)
+            .await
+            .unwrap();
+        assert_eq!(replayed.evidence, system.evidence);
+        let replayed = second.prepare().await.unwrap();
+        assert_eq!(replayed.app_hash, abandoned_app_hash);
+        let second_receipt = state.commit(replayed).unwrap();
         assert_eq!(second_receipt.supply.burned, expected_slash);
         assert_eq!(
             state

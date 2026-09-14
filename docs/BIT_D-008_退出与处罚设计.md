@@ -49,11 +49,26 @@ ABCI v0.38 `FinalizeBlock.misbehavior` 只接受重复投票和轻客户端攻�
 
 SlashJob 在证据接受时冻结当时已有的 validator-local cohort 范围，保存结束键、当前游标、已处理数量及 P/X 累计罚没。所有未完成任务按 validator_id 和 exit_epoch/cohort_id 稳定排序，共享每块最多 `slash_cohorts_per_block` 项的全局上限。游标也跨过不在责任范围或已经成熟的记录，避免重复扫描；任务未完成时拒绝相关 Unbond 和 ClaimExit，pending 激活会转为可退款状态。任务、被修改 cohort、供应 Burn、证据记录和集合日程在同一个 JMT/RocksDB 批次提交。
 
-测试覆盖池份额退出、尾差、双成熟边界、两类费用、epoch 交错、证据字段/责任/power 校验、两个年龄维度的单独超限与同时超限、永久 tombstone、重复证据、供应守恒、全局处理上限、跨块游标、每块关闭并重启后的继续执行，以及 evidence/job/cohort 的 ICS23 证明。真实 Unbond/ClaimExit 信封继续使用 Groth16、PositionOwner Ed25519、binding 和正式交易分发入口。
+测试覆盖池份额退出、尾差、双成熟边界、两类费用、epoch 交错、证据字段/责任/power 校验、两个年龄维度的单独超限与同时超限、永久 tombstone、重复证据、供应守恒、全局处理上限、跨块游标、FinalizeBlock 已 prepare 但 Commit 前中断后的确定性重放、每块关闭并重启后的继续执行，以及 evidence/job/cohort 的 ICS23 证明。真实 Unbond/ClaimExit 信封继续使用 Groth16、PositionOwner Ed25519、binding 和正式交易分发入口。
 
-## 5. 下一切片
+## 5. 最后安全验证人停签记录
+
+若 downtime jail、epoch 集合选择或有效重大证据产生的更新会把非空实际集合变为空，候选区块继续返回 `HALT_NO_SAFE_VALIDATOR_SET`，不会提交 tombstone、Burn 或集合日程的部分状态。ABCI 在停止请求前把触发上下文写到状态目录旁的 `<state-dir>.safety-halt-v1`。v1 记录绑定 chain context、最后已提交高度和 app hash、尝试高度/区块 hash/链时间、`next_validators_hash` 以及按规范 hash 排序去重后的完整 evidence 字段；文件末尾带域分离 SHA-256 校验和。
+
+写入使用同目录临时文件、文件 `sync_all` 和原子 rename；Unix 继续同步父目录。崩溃若留下完整临时文件，下一次读取会先提升为正式记录；正式或临时记录损坏、不可读、与 chain context 不同，节点都拒绝启动。已有不同记录也不会被覆盖。
+
+运维读取与确认命令为：
+
+```powershell
+cargo run -p bit-app --example safety_halt_admin -- inspect <STATE_DIR>
+cargo run -p bit-app --example safety_halt_admin -- acknowledge <STATE_DIR> <RECORD_HASH>
+```
+
+`acknowledge` 要求完整 32 字节记录摘要，成功后把原记录改名为带摘要的审计归档，不删除证据，也不改变共识状态。它只用于完成协调处置后的启动解锁；若 CometBFT 重放相同危险区块，节点会生成同一摘要并再次停机。单验证人环境不能借确认操作跳过有效处罚，多验证人生产网络应通过仍安全的集合完成正常 tombstone 和 H+2 移除。
+
+## 6. 下一切片
 
 1. 把真实重复投票或轻客户端攻击证据注入多节点 CometBFT 场景，核对四个独立应用的 app hash、验证人移除和 Burn 一致。
-2. 对处罚事务增加 prepare/commit 中断、磁盘满和损坏记录故障注入，验证重放不会重复扣罚。
-3. 完成 `HALT_NO_SAFE_VALIDATOR_SET` 的可持久化停签证据与恢复流程；单验证人测试网不会为了继续出块而忽略有效重大证据或保留被处罚验证人。
+2. 对 JMT/RocksDB 处罚提交增加磁盘满、fsync 失败和底层批次损坏故障注入；停签日志本身已覆盖临时文件恢复、损坏、路径不可写、冲突防覆盖和精确摘要确认。
+3. 为需要人工修复最后验证人集合的极端网络冻结正式治理/升级恢复规程；现有确认操作不会修改共识状态或跳过证据。
 4. 接入公开事件、gateway/indexer 和钱包的“处罚结算中”状态。
