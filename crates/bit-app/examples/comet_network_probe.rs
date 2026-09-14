@@ -11,7 +11,7 @@ use bit_emission::{FeePolicy, GenesisAllocation};
 use bit_staking::{
     consensus_address, StakingBook, StakingParameters, ATOMIC_PER_BIT, RECOVERY_RECEIPT_BYTES,
 };
-use bit_state::GenesisConfig;
+use bit_state::{GenesisClaim, GenesisConfig};
 use bit_types::{chain_context, position_id, validator_id, Amount, MonetaryPolicy};
 use decaf377::Fq;
 use serde::Deserialize;
@@ -49,8 +49,16 @@ struct GenesisDocument {
 #[derive(Deserialize)]
 struct ProbeAppState {
     bit_app_network_probe: u64,
+    genesis_claim: ProbeGenesisClaim,
     genesis_manifest_hash_hex: String,
     genesis_commitments_hex: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct ProbeGenesisClaim {
+    claim_id_hex: String,
+    claim_pubkey_hex: String,
+    amount_atomic: String,
 }
 
 #[derive(Deserialize)]
@@ -174,7 +182,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
     let app_state: ProbeAppState = serde_json::from_value(document.app_state.clone())
         .context("invalid BIT probe app_state")?;
     ensure!(
-        app_state.bit_app_network_probe == 2,
+        app_state.bit_app_network_probe == 3,
         "unsupported BIT probe app_state version"
     );
     let genesis_manifest_hash = hash32_hex(
@@ -199,6 +207,20 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
         "probe genesis commitments must be distinct"
     );
     let chain_context = chain_context(genesis_manifest_hash);
+    let claim_pubkey = hash32_hex(
+        &app_state.genesis_claim.claim_pubkey_hex,
+        "genesis claim public key",
+    )?;
+    let claim_amount = Amount::new(parse_number(
+        &app_state.genesis_claim.amount_atomic,
+        "genesis claim amount",
+    )?)?;
+    let genesis_claim = GenesisClaim::new(&chain_context, claim_pubkey, claim_amount)?;
+    ensure!(
+        genesis_claim.claim_id
+            == hash32_hex(&app_state.genesis_claim.claim_id_hex, "genesis claim ID")?,
+        "genesis claim ID differs from its public key and amount"
+    );
     let mut parameters = StakingParameters::reference_testnet();
     parameters.power_unit_atomic = Amount::new(PROBE_POWER_UNIT_ATOMIC)?;
     let mut staking = StakingBook::new(chain_context, parameters)?;
@@ -346,7 +368,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
         },
         genesis_staking: staking,
         genesis_commitments,
-        genesis_claims: Vec::new(),
+        genesis_claims: vec![genesis_claim],
         genesis_execution_hash: domain_hash(
             b"BIT-COMET-NETWORK-PROBE-GENESIS-EXECUTION-V1",
             &app_state_bytes,

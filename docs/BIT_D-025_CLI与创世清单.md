@@ -50,6 +50,8 @@ ClaimGenesis 使用动作 tag 10，包含 `claim_id`、`expected_amount` 和 `fe
 
 成功时原子执行 `G -= amount; Q += amount - fee; F += fee`，把领取高度与交易、nullifier、TCT、供应审计写入同一 JMT 批次。相同领取权的后续交易在授权阶段返回过期状态报价，不会再次释放资产。
 
+四节点真实 CometBFT 探针已广播带 Ed25519 领取授权、binding 签名和两个 Groth16 Output 证明的 ClaimGenesis。四个应用在精确领取高度返回相同的交易与领取 ICS23 证明，并核对 G/Q/F 容器增减、TCT 根和 app hash；另一笔密码学有效且 tx id 不同的同领取权交易被 BIT CheckTx 拒绝，成对重启应用和共识进程后历史领取记录保持不变。该探针使用公开测试领取权和缩短 epoch，不替代真实主网分配输入或独立故障域验收。
+
 `GET /v1/network` 返回 `genesis_manifest_hash`、`genesis_claims_hash` 及各自同高 ICS23 证明；`GET /v1/state/proof?key=meta/genesis_manifest_hash` 可独立取得身份哈希证明，`GET /v1/state/proof?key=genesis/claims/<claim_id>` 可取得单项成员或非成员证明。客户端必须针对已验证区块头的 app hash 校验证明，并按本节固定记录格式解码。
 
 ## 4. Identity manifest v1

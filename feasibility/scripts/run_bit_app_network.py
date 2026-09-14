@@ -1,7 +1,7 @@
 """Four CometBFT processes against the real BIT ABCI/JMT application.
 
 The node executable uses accelerated epochs and a deterministic public fixture,
-while exercising production transaction and block-artifact encodings.
+while exercising production Transfer, ClaimGenesis and block-artifact encodings.
 """
 
 from pathlib import Path
@@ -132,6 +132,24 @@ def wait_height(target, indices=range(4), seconds=90):
     raise TimeoutError(f"height {target} not reached: {heights}")
 
 
+def wait_height_remainder(remainder, modulus, seconds=30):
+    deadline = time.monotonic() + seconds
+    observed = 0
+    while time.monotonic() < deadline:
+        observed = height(0)
+        failed = [
+            name for name, process in PROCESSES.items() if process.poll() is not None
+        ]
+        if failed:
+            raise RuntimeError(f"processes exited while scheduling transaction: {failed}")
+        if observed > 0 and observed % modulus == remainder:
+            return observed
+        time.sleep(0.1)
+    raise TimeoutError(
+        f"height congruent to {remainder} mod {modulus} not observed; latest {observed}"
+    )
+
+
 def wait_quorum_halt(indices=(0, 1, 3), settle_seconds=3, observe_seconds=3, seconds=60):
     """Wait for live nodes to converge, then prove their height stays fixed."""
     deadline = time.monotonic() + seconds
@@ -214,7 +232,8 @@ def archived_artifact(index, height_value, name):
 
 def load_transfer_fixture():
     report_bytes = TRANSFER_SOURCE.read_bytes()
-    transfer = json.loads(report_bytes)["complete_transfer"]
+    report = json.loads(report_bytes)
+    transfer = report["complete_transfer"]
     envelope = bytes.fromhex(transfer["canonical_envelope_hex"])
     if len(envelope) != int(transfer["canonical_envelope_bytes"]):
         raise AssertionError("transfer fixture envelope length mismatch")
@@ -231,6 +250,37 @@ def load_transfer_fixture():
             raise AssertionError(f"transfer fixture {name} must contain two distinct values")
         if any(len(bytes.fromhex(value)) != 32 for value in values):
             raise AssertionError(f"transfer fixture {name} contains a non-32-byte value")
+    claim = report.get("complete_claim_genesis")
+    if not isinstance(claim, dict):
+        raise AssertionError("proof report is missing the ClaimGenesis fixture")
+    claim_envelope = bytes.fromhex(claim["canonical_envelope_hex"])
+    if len(claim_envelope) != int(claim["canonical_envelope_bytes"]):
+        raise AssertionError("ClaimGenesis fixture envelope length mismatch")
+    claim_tx_id = hashlib.sha256(claim_envelope).hexdigest()
+    if claim_tx_id != claim["tx_id"]:
+        raise AssertionError("ClaimGenesis fixture transaction ID mismatch")
+    if claim["anchor_hex"] != transfer["anchor_hex"] or claim["nullifiers_hex"]:
+        raise AssertionError("ClaimGenesis fixture must use the genesis anchor and no Spends")
+    for name in ("claim_id", "claim_pubkey"):
+        if len(bytes.fromhex(claim[name])) != 32:
+            raise AssertionError(f"ClaimGenesis fixture {name} must be 32 bytes")
+    if len(claim["output_commitments_hex"]) != 2 or any(
+        len(bytes.fromhex(value)) != 32 for value in claim["output_commitments_hex"]
+    ):
+        raise AssertionError("ClaimGenesis fixture must have two 32-byte outputs")
+    if int(claim["claim_amount_atomic"]) <= int(claim["fee_atomic"]):
+        raise AssertionError("ClaimGenesis fixture amount must exceed its fee")
+    replay = claim.get("distinct_spent_claim_replay")
+    if not isinstance(replay, dict):
+        raise AssertionError("proof report is missing the distinct spent-claim replay")
+    replay_envelope = bytes.fromhex(replay["canonical_envelope_hex"])
+    if len(replay_envelope) != int(replay["canonical_envelope_bytes"]):
+        raise AssertionError("spent-claim replay envelope length mismatch")
+    replay_tx_id = hashlib.sha256(replay_envelope).hexdigest()
+    if replay_tx_id != replay["tx_id"] or replay_tx_id == claim_tx_id:
+        raise AssertionError("spent-claim replay transaction ID is invalid or not distinct")
+    if not replay.get("stateless_authorization_verified"):
+        raise AssertionError("spent-claim replay was not statelessly verified")
     return {
         "envelope": envelope,
         "tx_id": tx_id,
@@ -238,19 +288,30 @@ def load_transfer_fixture():
         "genesis_commitments": transfer["genesis_commitments_hex"],
         "nullifiers": transfer["nullifiers_hex"],
         "output_commitments": transfer["output_commitments_hex"],
+        "claim": {
+            "envelope": claim_envelope,
+            "tx_id": claim_tx_id,
+            "claim_id": claim["claim_id"],
+            "claim_pubkey": claim["claim_pubkey"],
+            "amount": int(claim["claim_amount_atomic"]),
+            "fee": int(claim["fee_atomic"]),
+            "output_commitments": claim["output_commitments_hex"],
+            "spent_replay_envelope": replay_envelope,
+            "spent_replay_tx_id": replay_tx_id,
+        },
         "source_sha256": hashlib.sha256(report_bytes).hexdigest(),
     }
 
 
-def broadcast_transfer(fixture):
+def broadcast_transaction(fixture, label):
     response = rpc(0, "broadcast_tx_sync?tx=0x" + fixture["envelope"].hex())
     if int(response["code"]) != 0:
-        raise AssertionError(f"CheckTx rejected transfer: {response}")
+        raise AssertionError(f"CheckTx rejected {label}: {response}")
     if response["hash"].lower() != fixture["tx_id"]:
         raise AssertionError("CometBFT transaction hash differs from BIT transaction ID")
 
 
-def wait_transaction(fixture, first_height, seconds=90):
+def wait_transaction(fixture, first_height, label="transaction", seconds=90):
     deadline = time.monotonic() + seconds
     checked_through = first_height - 1
     pending = None
@@ -264,7 +325,7 @@ def wait_transaction(fixture, first_height, seconds=90):
                 continue
             tx_results = results.get("txs_results") or []
             if index >= len(tx_results) or int(tx_results[index]["code"]) != 0:
-                raise AssertionError("FinalizeBlock rejected the transfer")
+                raise AssertionError(f"FinalizeBlock rejected {label}")
             return block_height, index, results
         latest = height(0)
         for block_height in range(checked_through + 1, latest + 1):
@@ -279,7 +340,7 @@ def wait_transaction(fixture, first_height, seconds=90):
                 break
         checked_through = max(checked_through, latest)
         time.sleep(0.3)
-    raise TimeoutError(f"transfer was not included after height {first_height}")
+    raise TimeoutError(f"{label} was not included after height {first_height}")
 
 
 def block_artifact_event(results, block_height):
@@ -372,7 +433,12 @@ def configure_network(fixture):
     genesis["consensus_params"]["version"]["app"] = "1"
     genesis["consensus_params"]["abci"]["vote_extensions_enable_height"] = "0"
     genesis["app_state"] = {
-        "bit_app_network_probe": 2,
+        "bit_app_network_probe": 3,
+        "genesis_claim": {
+            "amount_atomic": str(fixture["claim"]["amount"]),
+            "claim_id_hex": fixture["claim"]["claim_id"],
+            "claim_pubkey_hex": fixture["claim"]["claim_pubkey"],
+        },
         "genesis_commitments_hex": fixture["genesis_commitments"],
         "genesis_manifest_hash_hex": GENESIS_MANIFEST_HASH_HEX,
     }
@@ -454,9 +520,9 @@ def main():
 
     wait_height(10)
     first_transfer_height = height(0) + 1
-    broadcast_transfer(fixture)
+    broadcast_transaction(fixture, "Transfer")
     transfer_height, transfer_index, transfer_results = wait_transaction(
-        fixture, first_transfer_height
+        fixture, first_transfer_height, "Transfer"
     )
     wait_height(transfer_height + 2)
     artifact_event = block_artifact_event(transfer_results, transfer_height)
@@ -535,6 +601,86 @@ def main():
     ):
         raise AssertionError(f"validator update missing at H+2: {powers}")
 
+    claim = fixture["claim"]
+    scheduled_from_height = wait_height_remainder(1, 5)
+    first_claim_height = scheduled_from_height + 1
+    broadcast_transaction(claim, "ClaimGenesis")
+    claim_height, claim_index, _ = wait_transaction(
+        claim, first_claim_height, "ClaimGenesis"
+    )
+    if claim_height % 5 == 1:
+        raise AssertionError("ClaimGenesis landed on an epoch settlement block")
+    wait_height(claim_height + 2)
+    claim_key = f"genesis/claims/{claim['claim_id']}"
+    claim_records = [
+        state_query(index, claim_key, claim_height) for index in range(4)
+    ]
+    expected_claim_record = b"".join(
+        [
+            b"\x01",
+            bytes.fromhex(claim["claim_pubkey"]),
+            claim["amount"].to_bytes(16, "big"),
+            b"\x01",
+            claim_height.to_bytes(8, "big"),
+        ]
+    )
+    if len(set(claim_records)) != 1 or claim_records[0] != expected_claim_record:
+        raise AssertionError("claimed genesis record differs across applications or from fixture")
+
+    container_keys = {
+        "unclaimed": "genesis/unclaimed_total",
+        "shielded": "supply/shielded_total",
+        "fees": "fees/reserve",
+    }
+    before_claim = {
+        name: int.from_bytes(state_query(0, key, claim_height - 1), "big")
+        for name, key in container_keys.items()
+    }
+    after_claim = {
+        name: [
+            int.from_bytes(state_query(index, key, claim_height), "big")
+            for index in range(4)
+        ]
+        for name, key in container_keys.items()
+    }
+    if any(len(set(values)) != 1 for values in after_claim.values()):
+        raise AssertionError("ClaimGenesis supply containers differ across applications")
+    expected_deltas = {
+        "unclaimed": -claim["amount"],
+        "shielded": claim["amount"] - claim["fee"],
+        "fees": claim["fee"],
+    }
+    for name, delta in expected_deltas.items():
+        if after_claim[name][0] - before_claim[name] != delta:
+            raise AssertionError(f"ClaimGenesis {name} delta is incorrect")
+    claim_transaction_records = [
+        state_query(index, f"transactions/applied/{claim['tx_id']}", claim_height)
+        for index in range(4)
+    ]
+    if not claim_transaction_records[0] or len(set(claim_transaction_records)) != 1:
+        raise AssertionError("ClaimGenesis transaction record differs across applications")
+    spent_claim_replay = rpc(
+        0, "broadcast_tx_sync?tx=0x" + claim["spent_replay_envelope"].hex()
+    )
+    if int(spent_claim_replay["code"]) == 0:
+        raise AssertionError("distinct transaction for an already spent claim was accepted")
+    if spent_claim_replay.get("hash", "").lower() != claim["spent_replay_tx_id"]:
+        raise AssertionError("spent-claim replay response has the wrong transaction ID")
+    claim_tree_roots = [
+        state_query(index, "shielded/tree_root", claim_height).hex()
+        for index in range(4)
+    ]
+    if len(set(claim_tree_roots)) != 1 or claim_tree_roots[0] == tree_roots[0]:
+        raise AssertionError("ClaimGenesis outputs did not advance a common shielded tree root")
+    claim_app_hashes = {
+        rpc(index, f"block?height={claim_height + 1}")["block"]["header"][
+            "app_hash"
+        ].lower()
+        for index in range(4)
+    }
+    if len(claim_app_hashes) != 1:
+        raise AssertionError("application hash diverged after ClaimGenesis")
+
     restart_height = height(0)
     stop("node0")
     stop("app0")
@@ -548,6 +694,8 @@ def main():
         0, f"compact/hash/{transfer_height:020}", transfer_height
     ).hex() != compact_hashes[0]:
         raise AssertionError("historical compact proof changed after application restart")
+    if state_query(0, claim_key, claim_height) != expected_claim_record:
+        raise AssertionError("ClaimGenesis record changed after application restart")
 
     common_height = min(resumed) - 1
     headers = [rpc(i, f"block?height={common_height}")["block"]["header"] for i in range(4)]
@@ -629,7 +777,7 @@ def main():
     recovered = wait_height(halted_height + 4)
 
     return {
-        "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, canonical block artifacts, staking and emission",
+        "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer and ClaimGenesis, canonical block artifacts, staking and emission",
         "runtime_dir": str(RUN),
         "toolchain": {
             "cometbft_module": comet_module_version,
@@ -670,6 +818,27 @@ def main():
                 "canonical_bytes": len(supply_audits[0]),
                 "sha256": hashlib.sha256(supply_audits[0]).hexdigest(),
                 "state_proved_on_nodes": 4,
+            },
+            "claim_genesis": {
+                "height": claim_height,
+                "index": claim_index,
+                "tx_id": claim["tx_id"],
+                "claim_id": claim["claim_id"],
+                "claim_amount_atomic": str(claim["amount"]),
+                "fee_atomic": str(claim["fee"]),
+                "output_commitments": claim["output_commitments"],
+                "transaction_and_claim_records_proved_on_nodes": 4,
+                "container_deltas": {
+                    name: str(delta) for name, delta in expected_deltas.items()
+                },
+                "post_claim_tree_root": claim_tree_roots[0],
+                "post_claim_app_hash": claim_app_hashes.pop(),
+                "distinct_spent_claim_replay": {
+                    "tx_id": claim["spent_replay_tx_id"],
+                    "check_tx_code": int(spent_claim_replay["code"]),
+                    "rejected_by_bit_app": True,
+                },
+                "historical_proof_after_restart": True,
             },
             "validator_powers_h6_h7_h8": powers,
             "h_plus_two_update": True,
@@ -714,7 +883,7 @@ if __name__ == "__main__":
             json.dumps(result, indent=2) + "\n", encoding="utf-8"
         )
         print(
-            "Real BIT app four-node H+2, duplicate-vote slashing, JMT restart and quorum checks passed"
+            "Real BIT app four-node Transfer, ClaimGenesis, H+2, slashing, restart and quorum checks passed"
         )
     except Exception as error:
         failure = {

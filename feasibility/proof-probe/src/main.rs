@@ -5,10 +5,17 @@ use bit_emission::FeePolicy;
 use bit_shielded::{
     validate_proof_bytes, verify_output, verify_output_public, verify_spend, verify_spend_public,
 };
-use bit_transaction::{Error as TransactionError, MemoryLedger};
-use bit_types::{chain_context, proof_hash, Action, Authorization, Envelope, Role, TxBody};
+use bit_transaction::{
+    verify_staking_stateless, ActionAuthorizationView, Error as TransactionError,
+    GenesisClaimAuthorization, MemoryLedger, StatelessVerificationContext, VerifiedStakingAction,
+};
+use bit_types::{
+    chain_context, ed25519_authorization_message, genesis_claim_id, proof_hash, Action,
+    Amount as BitAmount, Authorization, Envelope, FeeSource, Role, TxBody,
+};
 use decaf377::{Fq, Fr};
 use decaf377_rdsa::{Binding, SigningKey, VerificationKey};
+use ed25519_consensus::SigningKey as Ed25519SigningKey;
 use penumbra_sdk_asset::{asset, Balance, Value};
 use penumbra_sdk_keys::keys::{Bip44Path, SeedPhrase, SpendKey};
 use penumbra_sdk_keys::symmetric::{PayloadKind, WrappedMemoKey};
@@ -48,6 +55,26 @@ fn value(amount: u128, id: u64) -> Value {
     Value {
         amount: Amount::from(amount),
         asset_id: asset::Id(Fq::from(id)),
+    }
+}
+
+struct ClaimAuthorization {
+    claim_id: [u8; 32],
+    claim_pubkey: [u8; 32],
+    amount: BitAmount,
+}
+
+impl ActionAuthorizationView for ClaimAuthorization {
+    fn validator_operator(&self, _validator_id: &[u8; 32]) -> Option<[u8; 32]> {
+        None
+    }
+
+    fn genesis_claim(&self, claim_id: &[u8; 32]) -> Option<GenesisClaimAuthorization> {
+        (*claim_id == self.claim_id).then_some(GenesisClaimAuthorization {
+            claim_pubkey: self.claim_pubkey,
+            amount: self.amount,
+            claimed: false,
+        })
     }
 }
 
@@ -143,6 +170,7 @@ fn main() -> Result<()> {
     tree.end_block()?;
     let mut results = vec![];
     let mut complete_transfer = None;
+    let mut complete_claim_genesis = None;
     for sample in 0..samples {
         let mut proving_ms = 0.;
         let mut verifying_ms = 0.;
@@ -308,6 +336,208 @@ fn main() -> Result<()> {
             };
             let envelope_bytes = envelope.encode_canonical(50, 100)?;
             let native_asset_id = value(0, 1).asset_id.to_bytes();
+
+            let claim_key = Ed25519SigningKey::from([0x8c; 32]);
+            let claim_pubkey = claim_key.verification_key().to_bytes();
+            let claim_amount = BitAmount::new(100_000_000)?;
+            let claim_fee = BitAmount::new(1_000_000)?;
+            let claim_id = genesis_claim_id(&chain, &claim_pubkey, claim_amount);
+            let claim_memo_key = penumbra_sdk_keys::PayloadKey::random_key(&mut OsRng);
+            let mut claim_output_bodies = Vec::with_capacity(2);
+            let mut claim_output_proofs = Vec::with_capacity(2);
+            let mut claim_blinding_factor = Fr::from(0u64);
+            for (destination, amount) in [
+                (receiver_address.clone(), 80_000_000u128),
+                (sender_address.clone(), 19_000_000u128),
+            ] {
+                let note = Note::from_parts(destination, value(amount, 1), Rseed(secret()))?;
+                let blinding = fr();
+                claim_blinding_factor += blinding;
+                let public = OutputProofPublic {
+                    note_commitment: note.commit(),
+                    balance_commitment: (-Balance::from(note.value())).commit(blinding),
+                };
+                let proof = OutputProof::prove(
+                    fq(),
+                    fq(),
+                    &params::OUTPUT_PROOF_PROVING_KEY,
+                    public.clone(),
+                    OutputProofPrivate {
+                        note: note.clone(),
+                        balance_blinding: blinding,
+                    },
+                )?;
+                let encoded: pb::ZkOutputProof = proof.into();
+                claim_output_bodies.push(
+                    OutputBody {
+                        note_payload: note.payload(),
+                        balance_commitment: public.balance_commitment,
+                        ovk_wrapped_key: note
+                            .encrypt_key(fvk.outgoing(), public.balance_commitment),
+                        wrapped_memo_key: WrappedMemoKey::encrypt(
+                            &claim_memo_key,
+                            note.ephemeral_secret_key(),
+                            note.transmission_key(),
+                            &note.diversified_generator(),
+                        ),
+                    }
+                    .encode_to_vec(),
+                );
+                claim_output_proofs.push(encoded.inner);
+            }
+            let claim_body = TxBody {
+                version: 1,
+                chain_context: chain,
+                expiry_height: 100,
+                anchor,
+                fee: claim_fee,
+                spends: Vec::new(),
+                outputs: claim_output_bodies,
+                action: Action::ClaimGenesis {
+                    claim_id,
+                    expected_amount: claim_amount,
+                    fee_source: FeeSource::ReleasedValue,
+                },
+                proof_hashes: claim_output_proofs
+                    .iter()
+                    .map(|proof| proof_hash(proof))
+                    .collect(),
+                memo_ciphertext: Some(claim_memo_key.encrypt(
+                    {
+                        let mut plaintext = vec![0u8; 512];
+                        let return_address = sender_address.to_vec();
+                        plaintext[..return_address.len()].copy_from_slice(&return_address);
+                        plaintext
+                    },
+                    PayloadKind::Memo,
+                )),
+            };
+            let claim_effect_hash = claim_body.effect_hash()?;
+            let claim_authorization_message =
+                ed25519_authorization_message(Role::GenesisClaim, &claim_effect_hash)
+                    .expect("GenesisClaim has an Ed25519 signature domain");
+            let claim_envelope = Envelope {
+                envelope_version: 1,
+                canonical_body: claim_body.encode_canonical()?,
+                proofs: claim_output_proofs,
+                authorizations: vec![Authorization {
+                    role: Role::GenesisClaim,
+                    index: 0,
+                    signature: claim_key
+                        .sign(&claim_authorization_message)
+                        .to_bytes()
+                        .to_vec(),
+                }],
+                binding_signature: SigningKey::<Binding>::from(claim_blinding_factor)
+                    .sign_deterministic(&claim_effect_hash)
+                    .to_bytes()
+                    .to_vec(),
+            };
+            let claim_envelope_bytes = claim_envelope.encode_canonical(50, 100)?;
+            let claim_view = ClaimAuthorization {
+                claim_id,
+                claim_pubkey,
+                amount: claim_amount,
+            };
+            let claim_verified = verify_staking_stateless(
+                &claim_envelope_bytes,
+                &StatelessVerificationContext {
+                    expected_chain_context: chain,
+                    current_height: 50,
+                    max_lifetime: 100,
+                    max_envelope_bytes: 65_536,
+                    native_asset_id,
+                    fee_policy: FeePolicy::reference_testnet(),
+                },
+                &claim_view,
+            )?;
+            ensure!(
+                matches!(
+                    claim_verified.action,
+                    VerifiedStakingAction::ClaimGenesis {
+                        claim_id: verified_claim_id,
+                        expected_amount,
+                        fee_source: FeeSource::ReleasedValue,
+                    } if verified_claim_id == claim_id && expected_amount == claim_amount
+                ),
+                "ClaimGenesis fixture action was not preserved"
+            );
+            ensure!(
+                claim_verified.shielded.nullifiers.is_empty()
+                    && claim_verified.shielded.output_commitments.len() == 2,
+                "ClaimGenesis fixture shielded effects differ"
+            );
+            let mut duplicate_claim_body = claim_body.clone();
+            duplicate_claim_body.expiry_height = 99;
+            let duplicate_claim_effect_hash = duplicate_claim_body.effect_hash()?;
+            let duplicate_claim_authorization_message =
+                ed25519_authorization_message(Role::GenesisClaim, &duplicate_claim_effect_hash)
+                    .expect("GenesisClaim has an Ed25519 signature domain");
+            let duplicate_claim_envelope = Envelope {
+                envelope_version: 1,
+                canonical_body: duplicate_claim_body.encode_canonical()?,
+                proofs: claim_envelope.proofs.clone(),
+                authorizations: vec![Authorization {
+                    role: Role::GenesisClaim,
+                    index: 0,
+                    signature: claim_key
+                        .sign(&duplicate_claim_authorization_message)
+                        .to_bytes()
+                        .to_vec(),
+                }],
+                binding_signature: SigningKey::<Binding>::from(claim_blinding_factor)
+                    .sign_deterministic(&duplicate_claim_effect_hash)
+                    .to_bytes()
+                    .to_vec(),
+            };
+            let duplicate_claim_envelope_bytes =
+                duplicate_claim_envelope.encode_canonical(50, 100)?;
+            let duplicate_claim_verified = verify_staking_stateless(
+                &duplicate_claim_envelope_bytes,
+                &StatelessVerificationContext {
+                    expected_chain_context: chain,
+                    current_height: 50,
+                    max_lifetime: 100,
+                    max_envelope_bytes: 65_536,
+                    native_asset_id,
+                    fee_policy: FeePolicy::reference_testnet(),
+                },
+                &claim_view,
+            )?;
+            ensure!(
+                duplicate_claim_verified.shielded.tx_id != claim_verified.shielded.tx_id,
+                "second ClaimGenesis fixture must have a distinct transaction ID"
+            );
+            complete_claim_genesis = Some(json!({
+                "canonical_envelope_bytes": claim_envelope_bytes.len(),
+                "canonical_envelope_hex": hex::encode(&claim_envelope_bytes),
+                "tx_id": hex::encode(claim_verified.shielded.tx_id),
+                "effect_hash": hex::encode(claim_effect_hash),
+                "anchor_hex": hex::encode(anchor),
+                "claim_id": hex::encode(claim_id),
+                "claim_pubkey": hex::encode(claim_pubkey),
+                "claim_amount_atomic": claim_amount.to_string(),
+                "fee_atomic": claim_fee.to_string(),
+                "nullifiers_hex": Vec::<String>::new(),
+                "output_commitments_hex": claim_verified
+                    .shielded
+                    .output_commitments
+                    .iter()
+                    .map(hex::encode)
+                    .collect::<Vec<_>>(),
+                "outputs": 2,
+                "proofs": 2,
+                "genesis_claim_authorization_verified": true,
+                "binding_signature_verified": true,
+                "distinct_spent_claim_replay": {
+                    "canonical_envelope_bytes": duplicate_claim_envelope_bytes.len(),
+                    "canonical_envelope_hex": hex::encode(&duplicate_claim_envelope_bytes),
+                    "tx_id": hex::encode(duplicate_claim_verified.shielded.tx_id),
+                    "effect_hash": hex::encode(duplicate_claim_effect_hash),
+                    "stateless_authorization_verified": true,
+                },
+                "native_asset_id_hex": hex::encode(native_asset_id),
+            }));
             let mut ledger = MemoryLedger::new(
                 chain,
                 native_asset_id,
@@ -518,11 +748,12 @@ fn main() -> Result<()> {
         .count();
     let scan_ms = t.elapsed().as_secs_f64() * 1000.;
     ensure!(found == 10, "scan recovery count mismatch");
-    let report = json!({"scope":"desktop BIT Transfer cryptographic acceptance and upstream primitive measurements; not network/mainnet/mobile acceptance",
+    let report = json!({"scope":"desktop BIT Transfer and ClaimGenesis cryptographic acceptance plus upstream primitive measurements; not network/mainnet/mobile acceptance",
         "upstream_commit":"3a87ce786373113f9b82d3b6df9504998b7f44a7","parameter_load_ms":load_ms,
         "samples":results,"negative_checks":"wrong nullifier, wrong output, malformed/short proof, changed effect, foreign positive value, unfunded fee rejected",
-        "public_boundary_binding":"transfer, public lock, public release passed as primitive equations; chain authorization not tested",
+        "public_boundary_binding":"Transfer and ClaimGenesis public release/claim authorization verified; remaining public-lock actions are primitive-only",
         "complete_transfer":complete_transfer,
+        "complete_claim_genesis":complete_claim_genesis,
         "scan":{"payloads":scan_n,"owned":found,"elapsed_ms":scan_ms,"protobuf_bytes_total":wire_bytes},
         "mobile":"SKIPPED_BY_USER","limitations":["in-memory acceptance harness only; no persistent state or commitment-tree update", "not a formal single-asset closure proof", "no Tor, receipts, headers, database or phone in scan test", "fixture native asset ID only"]});
     println!("{}", serde_json::to_string_pretty(&report)?);

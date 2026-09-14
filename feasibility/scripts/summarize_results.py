@@ -42,6 +42,7 @@ if __name__ == '__main__':
             'not_measured_network_traffic': True,
         }
         metrics['complete_transfer'] = probe.get('complete_transfer')
+        metrics['complete_claim_genesis'] = probe.get('complete_claim_genesis')
     inputs = ['proof-result.json', 'network-result.json', 'consensus-unit.log',
               'proof-parameter-downloads.json']
     summary = {
@@ -52,7 +53,7 @@ if __name__ == '__main__':
         'integer_unit_tests': unit,
         'mobile': proof.get('probe', {}).get('mobile', 'NO_RESULT'),
         'metrics': metrics,
-        'unverified': ['non-Transfer action authorization and execution', 'single-asset closure across all actions',
+        'unverified': ['remaining non-Transfer/ClaimGenesis action authorization and execution', 'single-asset closure across all actions',
                        'JMT/RocksDB and state proofs', 'separate durable signer',
                        'staking/slashing/fees', 'Tor and mobile', 'production acceptance'],
         'inputs': [{'path': name, 'sha256': digest(REPORTS / name)} for name in inputs],

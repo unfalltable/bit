@@ -1,6 +1,6 @@
 # BIT D-005 ABCI 生命周期设计
 
-状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心，并通过真实 Transfer、规范区块摘要、精确历史证明、重启、证据处罚和投票权实验；正式 `bit-node` 已从两阶段批准的创世 bundle 重放状态并完成真实单节点 InitChain、出块、证明和重启。ABCI State Sync 已接入可验证快照、轻客户端可信 app hash 和隔离激活，真实联网 State Sync 仍未完成。
+状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心，并通过真实 Transfer、ClaimGenesis、规范区块摘要、精确历史证明、重启、证据处罚和投票权实验；正式 `bit-node` 已从两阶段批准的创世 bundle 重放状态并完成真实单节点 InitChain、出块、证明和重启。ABCI State Sync 已接入可验证快照、轻客户端可信 app hash 和隔离激活，真实联网 State Sync 仍未完成。
 
 ## 1. 单一执行入口
 
@@ -54,8 +54,8 @@ ABCI `bit.block.v1` 事件公开高度、两个摘要和 compact 字节数，状
 
 当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。State Sync 用例在两个独立应用间传输真实 RocksDB checkpoint，覆盖错误 format/app hash、超量 chunk、非空目标拒绝、manifest 延后到达、坏块定位与 peer 拒绝、恢复后的高度/app hash/ICS23 proof、活动标记临时文件恢复和损坏标记拒绝启动。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励，检查返回的 Ed25519 key/power 更新只在 H+2 集合生效且重启后保持一致；错误请求哈希、commit power、缺失 commit、错误地址、非正 power、未知 block-id flag，以及证据的未知类型、缺失字段、非法地址/power/height/time 均被拒绝。
 
-`comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。测试从两个创世承诺广播一笔冻结的 2 Spend/2 Output Groth16 Transfer，在链继续推进后按 Transfer 的精确高度核对交易/nullifier、TCT 根、供应审计和 execution/compact 状态证明、ABCI 事件及四节点 app hash；应用重启后再次查询同一旧高度证明。测试还确认奖励更新在 H+2 生效、应用从 durable JMT 状态重启并追块。集成注入器使用隔离网络的临时验证人密钥构造 CometBFT 可验证的冲突 prevote，通过标准 RPC 广播后，四个应用一致执行证据持久化、Burn 和 H+2 验证人移除。处罚后停止一个仍有投票权的验证者，剩余 power 恰为三分之二时链停止，恢复该验证者后继续出块。每次运行的精确高度和哈希写入 `feasibility/reports/bit-app-network-result.json`。
+`comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。测试从两个创世承诺广播一笔冻结的 2 Spend/2 Output Groth16 Transfer，在链继续推进后按 Transfer 的精确高度核对交易/nullifier、TCT 根、供应审计和 execution/compact 状态证明、ABCI 事件及四节点 app hash。随后广播带 Ed25519 领取授权、binding 签名和两个 Groth16 Output 证明的 ClaimGenesis，四节点逐字节核对领取记录与供应容器转换；另一笔密码学有效且 tx id 不同的同领取权交易会到达 BIT CheckTx，并按已领取状态拒绝。应用重启后再次查询 Transfer 和 ClaimGenesis 的旧高度证明。测试还确认奖励更新在 H+2 生效、应用从 durable JMT 状态重启并追块。集成注入器使用隔离网络的临时验证人密钥构造 CometBFT 可验证的冲突 prevote，通过标准 RPC 广播后，四个应用一致执行证据持久化、Burn 和 H+2 验证人移除。处罚后停止一个仍有投票权的验证者，剩余 power 恰为三分之二时链停止，恢复该验证者后继续出块。每次运行的精确高度和哈希写入 `feasibility/reports/bit-app-network-result.json`。
 
 `run-genesis-node-smoke.py` 使用 CometBFT 临时生成的真实 FilePV 共识密钥构造公开测试 identity，完成两阶段 2-of-2 签名、物化和独立重放，再启动正式 `bit-node`。测试要求真实 CometBFT 接受完整 InitChain，区块 1 header 提交物化 app hash，初始验证人 power 为 4，`meta/genesis_manifest_hash` 返回 ICS23 证明；随后成对重启应用和 CometBFT 并继续出块。结果与二进制 SHA-256 写入 `reports/genesis-node-smoke.json`。
 
-ClaimGenesis 已进入同一动作调度入口，执行创世领取公钥授权、精确金额、真实证明、供应转换和一次性状态提交。下一步把真实退出与创世领取放进四节点重放及崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人；D-022 继续完成头同步、广播与公网入口。
+ClaimGenesis 已完成四节点真实广播、一次性领取、供应转换和重启后历史证明。下一步把真实退出放进四节点重放及崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人；D-022 继续完成头同步、广播与公网入口。
