@@ -103,4 +103,4 @@ warning: function `previous` is never used
 warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo clippy --fix --lib -p penumbra-sdk-shielde
 d-pool -- -D warnings` to apply 1 suggestion)
     Checking bit-genesis v0.1.0 (D:\others\BIT\crates\bit-genesis)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.69s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.37s

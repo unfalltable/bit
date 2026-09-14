@@ -1,0 +1,20 @@
+{
+  "status": "PUBLIC_TEST_VECTOR_NOT_MAINNET_INPUT",
+  "materialized_genesis": {
+    "format": "BIT-GENESIS-BUNDLE",
+    "version": 1,
+    "identity_manifest_hash": "a0e670862a83d741706060e917dc5dd188a2f87cbc7f0f2f87e0d6906b095305",
+    "runtime_inputs_sha256": "805c16781cf0d28c948dea47ce1e68c2096b491358ca4ae4cb13f89e1e4c035c",
+    "derived_manifest_hash": "0fa8f38899efb1a0e9446d2b4769582e36d948ed0bec0bedd3efe7c2b844038c",
+    "derived_manifest_sha256": "c68197526340dcc26ce6aef446769ce276226dd07490e86b0f313a2e9652b71b",
+    "cometbft_genesis_sha256": "f3ebf6c84850b7a8d3e3994cebe5283041d94d4cc2df206e08b2db08843aea51",
+    "app_hash": "78434cb5c2a48b277a765cf3898de959a1fdacf473b15deea022e7f5dfe97fde",
+    "shielded_tree_root": "419b9ce67037aa082fa749bdf38441f857198b3effc5e7218f41cbc61131720a",
+    "genesis_execution_hash": "7bc6ef2410a5652ef36a15741b27f3c3dbe73dd94af756ea8d580141e605db3c",
+    "genesis_compact_hash": "1e63d5c5bd37f71d202d0607b4346bf1ddef544726bf097221f030b1c3b09a6e",
+    "identity_approval_count": 2,
+    "claim_count": 1,
+    "commitment_count": 1,
+    "validator_count": 1
+  }
+}

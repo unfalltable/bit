@@ -97,6 +97,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'feasibility/reports/bit-app-network-result.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\reports\bit-app-network-result.json') -Algorithm SHA256).Hash.ToLowerInvariant() }
     )
     inputs = @(
+        [ordered]@{ path = '.gitattributes'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot '.gitattributes') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'Cargo.lock'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'tests/vectors/emission-vectors.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\vectors\emission-vectors.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
@@ -104,6 +105,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'tests/vectors/block-artifact-vectors.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\vectors\block-artifact-vectors.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'tests/vectors/supply-audit-vectors.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\vectors\supply-audit-vectors.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'tests/vectors/genesis-identity-vectors.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\vectors\genesis-identity-vectors.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'tests/vectors/genesis-materialized-vectors.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\vectors\genesis-materialized-vectors.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crypto/manifest.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crypto\manifest.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-types/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-types\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-types/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-types\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
@@ -113,6 +115,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'crates/bit-types/src/envelope.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-types\src\envelope.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-genesis/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-genesis\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-genesis/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-genesis\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'crates/bit-genesis/src/materialize.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-genesis\src\materialize.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-genesis/src/main.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-genesis\src\main.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-shielded/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-shielded\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-shielded/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-shielded\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
@@ -137,9 +140,11 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'contracts/openapi.yaml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'contracts\openapi.yaml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'contracts/genesis_identity.cddl'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'contracts\genesis_identity.cddl') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'config/mainnet-inputs.schema.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'config\mainnet-inputs.schema.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'config/genesis-runtime-inputs.schema.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'config\genesis-runtime-inputs.schema.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'config/mainnet-inputs.template.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'config\mainnet-inputs.template.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'tests/fixtures/genesis-identity-input.test.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\fixtures\genesis-identity-input.test.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'tests/fixtures/genesis-derived-input.test.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\fixtures\genesis-derived-input.test.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'tests/fixtures/genesis-runtime-inputs.test.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\fixtures\genesis-runtime-inputs.test.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'justfile'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'justfile') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/examples/comet_network_probe.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\examples\comet_network_probe.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/examples/safety_halt_admin.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\examples\safety_halt_admin.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },

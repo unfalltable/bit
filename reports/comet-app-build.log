@@ -102,4 +102,4 @@ warning: function `previous` is never used
 
 warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo fix --lib -p penumbra-sdk-shielded-pool` t
 o apply 1 suggestion)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.36s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.38s

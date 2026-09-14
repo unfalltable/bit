@@ -4,6 +4,15 @@
 //! derived.  Human descriptions and derived identifiers are deliberately not
 //! part of this format.
 
+mod materialize;
+
+pub use materialize::{
+    materialize_bundle, CometBftRuntimeParameters, FeeRuntimeParameters, MaterializeError,
+    MaterializedGenesis, RuntimeInputDocument, StakingRuntimeParameters, ValidatorRuntimeInput,
+    MATERIALIZED_BUNDLE_FORMAT, MATERIALIZED_BUNDLE_VERSION, RUNTIME_INPUT_FORMAT,
+    RUNTIME_INPUT_VERSION,
+};
+
 use bit_types::{
     chain_context, genesis_claim_id, position_id, validator_id, Amount, MonetaryPolicy,
     MAX_SUPPLY_ATOMIC,
@@ -662,6 +671,11 @@ impl GenesisDerivedManifest {
         if self.identity_manifest_hash != identity_hash || self.chain_context != chain {
             return Err(Error::InvalidDerived(
                 "identity manifest hash or chain context mismatch",
+            ));
+        }
+        if self.runtime_inputs_sha256 != identity.consensus_parameters_sha256 {
+            return Err(Error::InvalidDerived(
+                "runtime inputs hash differs from signed consensus parameters hash",
             ));
         }
         for value in [
@@ -1510,7 +1524,7 @@ fn consensus_address(consensus_pubkey: &Hash32) -> [u8; 20] {
     address
 }
 
-fn genesis_commitments_hash(identity: &GenesisIdentityManifest) -> Hash32 {
+pub fn genesis_commitments_hash(identity: &GenesisIdentityManifest) -> Hash32 {
     let mut hash = Sha256::new();
     hash.update(b"BIT-GENESIS-COMMITMENTS-V1");
     hash.update((identity.commitments.len() as u64).to_be_bytes());
@@ -1520,7 +1534,7 @@ fn genesis_commitments_hash(identity: &GenesisIdentityManifest) -> Hash32 {
     hash.finalize().into()
 }
 
-fn genesis_claims_hash(
+pub fn genesis_claims_hash(
     identity: &GenesisIdentityManifest,
     derived_claims: &[DerivedClaim],
 ) -> Result<Hash32> {
@@ -1926,7 +1940,11 @@ mod tests {
             genesis_time_unix_seconds: 1_800_000_000,
             source_commit: vec![0x11; 20],
             crypto_manifest_sha256: [0x22; 32],
-            consensus_parameters_sha256: [0x33; 32],
+            consensus_parameters_sha256: [
+                0x80, 0x5c, 0x16, 0x78, 0x1c, 0xf0, 0xd2, 0x8c, 0x94, 0x8d, 0xea, 0x47, 0xce, 0x1e,
+                0x68, 0xc2, 0x09, 0x6b, 0x49, 0x13, 0x58, 0xca, 0x4a, 0xe4, 0xcb, 0x13, 0xf8, 0x9e,
+                0x1e, 0x4c, 0x03, 0x5c,
+            ],
             native_asset_id: [0x44; 32],
             key_derivation_version: "bit-kd-v1".to_owned(),
             address_encoding_version: "bit-address-v1".to_owned(),
@@ -1970,7 +1988,11 @@ mod tests {
             }],
             commitments: vec![CommitmentInput {
                 allocation_id: [0x20; 32],
-                commitment: [0x55; 32],
+                commitment: {
+                    let mut commitment = [0u8; 32];
+                    commitment[0] = 7;
+                    commitment
+                },
             }],
             validators: vec![ValidatorInput {
                 allocation_id: [0x30; 32],
@@ -2018,7 +2040,7 @@ mod tests {
         GenesisDerivedManifest {
             identity_manifest_hash: identity.hash().unwrap(),
             chain_context: chain,
-            runtime_inputs_sha256: [0x66; 32],
+            runtime_inputs_sha256: identity.consensus_parameters_sha256,
             genesis_commitments_hash: genesis_commitments_hash(identity),
             genesis_claims_hash: genesis_claims_hash(identity, &claims).unwrap(),
             claims,

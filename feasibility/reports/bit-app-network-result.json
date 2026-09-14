@@ -1,12 +1,12 @@
 {
   "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, canonical block artifacts, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T205041331382",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T213144308513",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
     "application_sha256": "53a1f1f4297ca7b6238dded6c96b0ef65983c2e22530107c36aea7ff34263435",
-    "evidence_injector_sha256": "904e3b91a338599f20a10e6e3ec2fbd9f65c2208eb19b8765c1ae4fe56535465"
+    "evidence_injector_sha256": "ded6610ff26002e3121a3f659c4c9c3f45fd95282b9b7cca8594ad0d20b62d13"
   },
   "checks": {
     "real_transfer": {
@@ -26,12 +26,12 @@
       "transaction_record_proved_on_nodes": 4,
       "nullifier_records_proved_on_nodes": 4,
       "post_transfer_tree_root": "c7c2a01a326fa450ea94e065adff45fa0d4d6c28c8280eab147dc0db288a0001",
-      "post_transfer_app_hash": "b9032cd6356821eb9e6a81983e2a01bb432ac690172ee461509cb023b42b285f"
+      "post_transfer_app_hash": "9c98e4fa0a638f7b764ae2ed7ddde980ea3429b05b1873dc77824381abcae7ee"
     },
     "canonical_block_artifacts": {
       "height": 12,
-      "execution_hash": "67eb16bebec18794479690a12856f4c6487cf62a2ce3cd6194b6d84b43e3d422",
-      "compact_hash": "be8e16d0efe8b144449701496d219b4190184a7ac65bc6e2985bc9d378a55a20",
+      "execution_hash": "6b11d10ff6abc33abdc8f48ee20cfc500929c8832c25729ae67347544396891c",
+      "compact_hash": "fe60ec8c02d24f4dc8b7cc1809f6402106e569b08a318d613d53945965661670",
       "execution_bytes": 237,
       "compact_bytes": 1577,
       "state_proofs_and_abci_event_match_on_nodes": 4,
@@ -42,27 +42,27 @@
     },
     "canonical_supply_audit": {
       "canonical_bytes": 309,
-      "sha256": "1ba362517ae30213f0a5048e88b2839c5f2f2193a054414d33d0d0ed80792102",
+      "sha256": "66f9a6b6d12b9503011a93dcbf5965c97f3a38e3e71502f76426e511048075ee",
       "state_proved_on_nodes": 4
     },
     "validator_powers_h6_h7_h8": {
       "6": {
-        "ba7a5e978fd80ef816d6825aa187371dd58b3860331021fcbe65e98cd5162c04": 10,
-        "1ab5a035512e2faa33dedfa5d3c2294a8b2eb1e8f572a633fdbc5cc20868c281": 10,
-        "4b27b293edeb5a419386507af450b11834abb6e09d9f28e4c205bb739c8da061": 10,
-        "abda5c98f1fcb5611bf68ead3b5cc9741d22795f506bfeaa59a8174699e7173c": 10
+        "f2069bd9ac36036478fec4cacc4f5a999577d07917af28374be81f301e75af4e": 10,
+        "da7b577da4f7f8f300da9253cea27b89136f9109d7041885be73762c35e65f49": 10,
+        "ea50307ac3c8c55f68a49cf41c3608f27daa86dde7de4c226ecea3aa91b89b2b": 10,
+        "14c80e504f5dfd7c273c147602417ee7ccdef40a2002e8882206a0c001450364": 10
       },
       "7": {
-        "ba7a5e978fd80ef816d6825aa187371dd58b3860331021fcbe65e98cd5162c04": 10,
-        "1ab5a035512e2faa33dedfa5d3c2294a8b2eb1e8f572a633fdbc5cc20868c281": 10,
-        "4b27b293edeb5a419386507af450b11834abb6e09d9f28e4c205bb739c8da061": 10,
-        "abda5c98f1fcb5611bf68ead3b5cc9741d22795f506bfeaa59a8174699e7173c": 10
+        "f2069bd9ac36036478fec4cacc4f5a999577d07917af28374be81f301e75af4e": 10,
+        "da7b577da4f7f8f300da9253cea27b89136f9109d7041885be73762c35e65f49": 10,
+        "ea50307ac3c8c55f68a49cf41c3608f27daa86dde7de4c226ecea3aa91b89b2b": 10,
+        "14c80e504f5dfd7c273c147602417ee7ccdef40a2002e8882206a0c001450364": 10
       },
       "8": {
-        "ba7a5e978fd80ef816d6825aa187371dd58b3860331021fcbe65e98cd5162c04": 3659,
-        "1ab5a035512e2faa33dedfa5d3c2294a8b2eb1e8f572a633fdbc5cc20868c281": 3659,
-        "4b27b293edeb5a419386507af450b11834abb6e09d9f28e4c205bb739c8da061": 3659,
-        "abda5c98f1fcb5611bf68ead3b5cc9741d22795f506bfeaa59a8174699e7173c": 2929
+        "f2069bd9ac36036478fec4cacc4f5a999577d07917af28374be81f301e75af4e": 3476,
+        "da7b577da4f7f8f300da9253cea27b89136f9109d7041885be73762c35e65f49": 3476,
+        "ea50307ac3c8c55f68a49cf41c3608f27daa86dde7de4c226ecea3aa91b89b2b": 3476,
+        "14c80e504f5dfd7c273c147602417ee7ccdef40a2002e8882206a0c001450364": 3476
       }
     },
     "h_plus_two_update": true,
@@ -74,23 +74,23 @@
       19
     ],
     "same_app_hash_height": 18,
-    "same_app_hash": "111b7228730652b81ac438c67165829e3a3d862555b8ff73a1da77bd6fb5d72b",
+    "same_app_hash": "0d7a1c8717ea926748594bafeffc50c76413834cd7eb6c79f284d9fb6d496350",
     "latest_and_historical_ics23_proofs": true,
     "real_duplicate_vote_evidence": {
-      "comet_evidence_hash": "ada0c682edac8162659f4cb19cde6cefc0242a373d79ec0eb1bc18f0f04a6875",
-      "validator_address": "6de8a67efcf364b961520a8a4afc174c49b22421",
-      "validator_power": 7307,
+      "comet_evidence_hash": "d9df6982ffcf774bace0a268414307f431c6a7f88b2a32396b29815b45fad29d",
+      "validator_address": "bcb33327bd529957a8b95284069c8ce28fc0294a",
+      "validator_power": 6943,
       "infraction_height": 17,
-      "infraction_time_seconds": 1789419067,
-      "infraction_time_nanos": 360948100,
+      "infraction_time_seconds": 1789421531,
+      "infraction_time_nanos": 609059200,
       "total_voting_power": 27772,
       "inclusion_height": 20,
-      "bit_evidence_hash": "b7b11d8f12ffdeae88ff63027128f0c7813dc84136b728f66cc1c1707ab47dc4",
+      "bit_evidence_hash": "0cc374f1001a10f30e5f0bd82f00914b9ba329b70c83ef0aebd4226dc4fd158d",
       "validator_present_at_h_plus_one": true,
       "validator_removed_at_h_plus_two": true,
       "post_evidence_validator_count": 3,
-      "burned_atomic": "5118756096912",
-      "same_app_hash": "16cbc8f791af6b6281242aa49b5561dd1221e4826fbdfa24f63a834b498b47e4",
+      "burned_atomic": "4858822721098",
+      "same_app_hash": "e739d7f3d1541fdb1a3a226b9684a64d4a5ef0babdf154911558949b26845195",
       "ics23_evidence_membership": true
     },
     "quorum_halt_height": 23,
@@ -107,6 +107,6 @@
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T20:50:41.331481+00:00",
-  "finished_at": "2026-09-14T20:51:26.707623+00:00"
+  "started_at": "2026-09-14T21:31:44.308626+00:00",
+  "finished_at": "2026-09-14T21:32:30.318284+00:00"
 }

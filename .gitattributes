@@ -3,3 +3,4 @@ third_party/cnidarium/src/gen/proto_descriptor.bin.no_lfs binary
 third_party/cnidarium/README.md -whitespace
 third_party/cnidarium/src/gen/*.serde.rs -whitespace
 third_party/cnidarium/src/store/multistore.rs -whitespace
+tests/fixtures/genesis-runtime-inputs.test.json text eol=lf

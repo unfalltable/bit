@@ -536,6 +536,10 @@ dependencies = [
 name = "bit-genesis"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "bit-emission",
+ "bit-staking",
+ "bit-state",
  "bit-types",
  "ed25519-consensus",
  "hex",
@@ -544,6 +548,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

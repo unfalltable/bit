@@ -1,7 +1,7 @@
 use bit_genesis::{
-    DerivedInputDocument, DerivedSignaturePackage, GenesisDerivedManifest, GenesisIdentityManifest,
-    IdentityInputDocument, SignaturePackage, APPROVAL_VERSION, DERIVED_APPROVAL_VERSION,
-    DERIVED_VERSION, IDENTITY_VERSION,
+    materialize_bundle, DerivedInputDocument, DerivedSignaturePackage, GenesisDerivedManifest,
+    GenesisIdentityManifest, IdentityInputDocument, RuntimeInputDocument, SignaturePackage,
+    APPROVAL_VERSION, DERIVED_APPROVAL_VERSION, DERIVED_VERSION, IDENTITY_VERSION,
 };
 use bit_types::{genesis_claim_id, position_id, validator_id};
 use serde_json::{json, Value};
@@ -35,6 +35,8 @@ fn run(args: Vec<String>) -> DynResult<()> {
             "verify-derived" => genesis_verify_derived(rest),
             "inspect-derived" => genesis_inspect_derived(rest),
             "sign-derived" => genesis_sign_derived(rest),
+            "inspect-runtime" | "validate-runtime" => genesis_inspect_runtime(rest),
+            "materialize" => genesis_materialize(rest),
             _ => Err(usage().into()),
         },
         [group, command, rest @ ..] if group == "release" && command == "preflight" => {
@@ -47,6 +49,48 @@ fn run(args: Vec<String>) -> DynResult<()> {
         }
         _ => Err(usage().into()),
     }
+}
+
+fn genesis_inspect_runtime(args: &[String]) -> DynResult<()> {
+    validate_options(args, &["--input"])?;
+    let input = required_path(args, "--input")?;
+    let bytes = fs::read(&input)?;
+    let document = RuntimeInputDocument::decode(&bytes)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "status": "validated",
+            "format": document.format,
+            "version": document.version,
+            "runtime_inputs_sha256": hex::encode(Sha256::digest(&bytes)),
+            "validator_count": document.validators.len(),
+            "input": input,
+        }))?
+    );
+    Ok(())
+}
+
+fn genesis_materialize(args: &[String]) -> DynResult<()> {
+    validate_options(
+        args,
+        &["--manifest", "--signatures", "--runtime-inputs", "--output"],
+    )?;
+    let manifest = required_path(args, "--manifest")?;
+    let signatures = required_path(args, "--signatures")?;
+    let runtime_inputs = required_path(args, "--runtime-inputs")?;
+    let output = required_path(args, "--output")?;
+    for input in [&manifest, &signatures, &runtime_inputs] {
+        reject_same_path(input, &output)?;
+    }
+    let runtime = tokio::runtime::Runtime::new()?;
+    let report = runtime.block_on(materialize_bundle(
+        &fs::read(&manifest)?,
+        &fs::read(&signatures)?,
+        &fs::read(&runtime_inputs)?,
+        &output,
+    ))?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
 }
 
 fn genesis_build(args: &[String]) -> DynResult<()> {
@@ -319,6 +363,7 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
     let derived_signatures_path = optional_path(args, "--derived-signatures")?;
     let runtime_inputs_path = optional_path(args, "--runtime-inputs")?;
     let cometbft_genesis_path = optional_path(args, "--cometbft-genesis")?;
+    let consensus_parameters_path = runtime_inputs_path.as_ref().or(parameters_path.as_ref());
     let mut manifest_hash = None;
     if let Some(identity) = identity.as_ref() {
         let expected = identity.hash()?;
@@ -380,9 +425,9 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
             &mut blockers,
         );
         verify_file_hash(
-            parameters_path,
+            consensus_parameters_path.cloned(),
             identity.consensus_parameters_sha256,
-            "--parameters",
+            "--runtime-inputs",
             &mut blockers,
         );
         validate_derived_evidence(
@@ -390,24 +435,25 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
             identity,
             derived_manifest_path.as_ref(),
             derived_signatures_path.as_ref(),
-            runtime_inputs_path.as_ref(),
+            consensus_parameters_path,
             cometbft_genesis_path.as_ref(),
             &mut blockers,
         );
     } else {
         for (path, flag) in [
-            (manifest_path, "--manifest"),
-            (signatures_path, "--signatures"),
-            (crypto_path, "--crypto-manifest"),
-            (parameters_path, "--parameters"),
-            (derived_manifest_path, "--derived-manifest"),
-            (derived_signatures_path, "--derived-signatures"),
-            (runtime_inputs_path, "--runtime-inputs"),
-            (cometbft_genesis_path, "--cometbft-genesis"),
+            (manifest_path.as_ref(), "--manifest"),
+            (signatures_path.as_ref(), "--signatures"),
+            (crypto_path.as_ref(), "--crypto-manifest"),
+            (derived_manifest_path.as_ref(), "--derived-manifest"),
+            (derived_signatures_path.as_ref(), "--derived-signatures"),
+            (cometbft_genesis_path.as_ref(), "--cometbft-genesis"),
         ] {
             if path.is_none() {
                 blockers.push(format!("missing {flag} evidence"));
             }
+        }
+        if consensus_parameters_path.is_none() {
+            blockers.push("missing --runtime-inputs evidence".to_owned());
         }
     }
 
@@ -864,18 +910,31 @@ fn validate_derived_evidence(
         },
         None => blockers.push("missing --derived-signatures evidence".to_owned()),
     }
-    verify_optional_path_hash(
-        runtime_inputs_path,
-        derived.runtime_inputs_sha256,
-        "--runtime-inputs",
-        blockers,
-    );
+    verify_runtime_input(runtime_inputs_path, derived.runtime_inputs_sha256, blockers);
     verify_optional_path_hash(
         cometbft_genesis_path,
         derived.cometbft_genesis_sha256,
         "--cometbft-genesis",
         blockers,
     );
+}
+
+fn verify_runtime_input(path: Option<&PathBuf>, expected: [u8; 32], blockers: &mut Vec<String>) {
+    let Some(path) = path else {
+        blockers.push("missing --runtime-inputs evidence".to_owned());
+        return;
+    };
+    match fs::read(path) {
+        Ok(bytes) if <[u8; 32]>::from(Sha256::digest(&bytes)) != expected => {
+            blockers.push("--runtime-inputs SHA-256 mismatch".to_owned());
+        }
+        Ok(bytes) => {
+            if let Err(error) = RuntimeInputDocument::decode(&bytes) {
+                blockers.push(format!("--runtime-inputs invalid: {error}"));
+            }
+        }
+        Err(error) => blockers.push(format!("--runtime-inputs unreadable: {error}")),
+    }
 }
 
 fn verify_optional_path_hash(
@@ -949,12 +1008,16 @@ fn validate_release_artifacts(root: &Value, base: Option<&Path>, blockers: &mut 
 }
 
 fn usage() -> &'static str {
-    "usage:\n  bit genesis build --input INPUT.json --output identity.cbor\n  bit genesis verify --manifest identity.cbor [--signatures approvals.cbor]\n  bit genesis inspect --manifest identity.cbor\n  bit genesis sign --manifest identity.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit genesis build-derived --manifest identity.cbor --input DERIVED.json --output derived.cbor\n  bit genesis verify-derived --manifest identity.cbor --derived derived.cbor [--signatures approvals.cbor]\n  bit genesis inspect-derived --manifest identity.cbor --derived derived.cbor\n  bit genesis sign-derived --manifest identity.cbor --derived derived.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit release preflight --input mainnet.json [--manifest identity.cbor --signatures approvals.cbor --crypto-manifest FILE --parameters FILE --derived-manifest derived.cbor --derived-signatures approvals.cbor --runtime-inputs FILE --cometbft-genesis genesis.json]"
+    "usage:\n  bit genesis build --input INPUT.json --output identity.cbor\n  bit genesis verify --manifest identity.cbor [--signatures approvals.cbor]\n  bit genesis inspect --manifest identity.cbor\n  bit genesis sign --manifest identity.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit genesis inspect-runtime --input runtime-inputs.json\n  bit genesis materialize --manifest identity.cbor --signatures approvals.cbor --runtime-inputs runtime-inputs.json --output BUNDLE_DIR\n  bit genesis build-derived --manifest identity.cbor --input DERIVED.json --output derived.cbor\n  bit genesis verify-derived --manifest identity.cbor --derived derived.cbor [--signatures approvals.cbor]\n  bit genesis inspect-derived --manifest identity.cbor --derived derived.cbor\n  bit genesis sign-derived --manifest identity.cbor --derived derived.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit release preflight --input mainnet.json [--manifest identity.cbor --signatures approvals.cbor --crypto-manifest FILE --derived-manifest derived.cbor --derived-signatures approvals.cbor --runtime-inputs FILE --cometbft-genesis genesis.json]"
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bit_genesis::{
+        genesis_claims_hash, genesis_commitments_hash, DerivedClaim, DerivedValidator,
+    };
+    use bit_staking::consensus_address;
 
     #[test]
     fn preflight_template_shape_reports_blockers_without_panicking() {
@@ -1000,30 +1063,55 @@ mod tests {
         let identity = read_identity(&identity_fixture).unwrap();
         let runtime_path = directory.path().join("runtime-inputs.json");
         let comet_path = directory.path().join("genesis.json");
-        fs::write(&runtime_path, b"canonical runtime inputs").unwrap();
+        let runtime_fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/genesis-runtime-inputs.test.json");
+        fs::write(&runtime_path, fs::read(runtime_fixture).unwrap()).unwrap();
         fs::write(&comet_path, b"canonical CometBFT genesis").unwrap();
-
-        let derived_fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/genesis-derived-input.test.json");
-        let mut derived_value: Value =
-            serde_json::from_slice(&fs::read(derived_fixture).unwrap()).unwrap();
-        let derived_object = derived_value
-            .get_mut("derived_genesis")
-            .and_then(Value::as_object_mut)
-            .unwrap();
-        derived_object.insert(
-            "runtime_inputs_sha256".to_owned(),
-            Value::String(hex::encode(Sha256::digest(
-                fs::read(&runtime_path).unwrap(),
-            ))),
-        );
-        derived_object.insert(
-            "cometbft_genesis_sha256".to_owned(),
-            Value::String(hex::encode(Sha256::digest(fs::read(&comet_path).unwrap()))),
-        );
-        let document: DerivedInputDocument =
-            serde_json::from_value(derived_value["derived_genesis"].clone()).unwrap();
-        let derived = document.into_manifest(&identity).unwrap();
+        let runtime_hash = Sha256::digest(fs::read(&runtime_path).unwrap()).into();
+        assert_eq!(identity.consensus_parameters_sha256, runtime_hash);
+        let identity_hash = identity.hash().unwrap();
+        let chain = identity.chain_context().unwrap();
+        let claims = identity
+            .claims
+            .iter()
+            .map(|claim| {
+                let amount = identity
+                    .allocations
+                    .iter()
+                    .find(|entry| entry.allocation_id == claim.allocation_id)
+                    .unwrap()
+                    .amount;
+                DerivedClaim {
+                    allocation_id: claim.allocation_id,
+                    claim_id: genesis_claim_id(&chain, &claim.claim_pubkey, amount),
+                }
+            })
+            .collect::<Vec<_>>();
+        let validators = identity
+            .validators
+            .iter()
+            .map(|validator| DerivedValidator {
+                allocation_id: validator.allocation_id,
+                validator_id: validator_id(&chain, &validator.operator_pubkey),
+                self_bond_position_id: position_id(&chain, &validator.owner_pubkey),
+                consensus_address: consensus_address(&validator.consensus_pubkey),
+                voting_power: 4,
+            })
+            .collect::<Vec<_>>();
+        let derived = GenesisDerivedManifest {
+            identity_manifest_hash: identity_hash,
+            chain_context: chain,
+            runtime_inputs_sha256: runtime_hash,
+            genesis_commitments_hash: genesis_commitments_hash(&identity),
+            genesis_claims_hash: genesis_claims_hash(&identity, &claims).unwrap(),
+            claims,
+            validators,
+            shielded_tree_root: [0x77; 32],
+            app_hash: [0x88; 32],
+            genesis_execution_hash: [0x99; 32],
+            genesis_compact_hash: [0xaa; 32],
+            cometbft_genesis_sha256: Sha256::digest(fs::read(&comet_path).unwrap()).into(),
+        };
         let derived_bytes = derived.encode_canonical(&identity).unwrap();
         let derived_path = directory.path().join("derived.cbor");
         fs::write(&derived_path, &derived_bytes).unwrap();

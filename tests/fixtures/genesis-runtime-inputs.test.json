@@ -1,0 +1,49 @@
+{
+  "format": "BIT-GENESIS-RUNTIME-INPUTS",
+  "version": 1,
+  "fees": {
+    "base_atomic": "1000",
+    "per_kib_atomic": "200",
+    "per_spend_proof_atomic": "500",
+    "per_output_proof_atomic": "500",
+    "new_position_surcharge_atomic": "100000",
+    "validator_registration_surcharge_atomic": "100000000"
+  },
+  "staking": {
+    "min_delegation_atomic": "1",
+    "min_self_bond_atomic": "100000000",
+    "max_validators": 64,
+    "power_unit_atomic": "100000000",
+    "max_total_voting_power": "1152921504606846975",
+    "max_pending_positions_per_activation_epoch": 1000,
+    "max_commission_bps": 2000,
+    "default_commission_bps": 500,
+    "max_commission_increase_bps": 100,
+    "jail_seconds": 7200,
+    "jail_blocks": 1440,
+    "commission_notice_seconds": 604800,
+    "commission_notice_blocks": 120960,
+    "evidence_max_age_seconds": 604800,
+    "evidence_max_age_blocks": 120960,
+    "downtime_window": 10000,
+    "min_signed_bps": 9500,
+    "unbonding_seconds": 1209600,
+    "unbonding_blocks": 241920,
+    "byzantine_slash_bps": 500,
+    "slash_cohorts_per_block": 128
+  },
+  "validators": [
+    {
+      "allocation_id": "3030303030303030303030303030303030303030303030303030303030303030",
+      "display_name": "BIT public fixture validator",
+      "website": "https://example.invalid/bit-fixture",
+      "description": "Public deterministic test fixture; prohibited for production use.",
+      "recovery_receipt": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+    }
+  ],
+  "cometbft": {
+    "max_gas": -1,
+    "evidence_max_bytes": 65536,
+    "vote_extensions_enable_height": 0
+  }
+}

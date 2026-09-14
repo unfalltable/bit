@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bit.invalid/schemas/genesis-runtime-inputs-v1.json",
+  "title": "BIT genesis runtime inputs v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "fees", "staking", "validators", "cometbft"],
+  "properties": {
+    "format": { "const": "BIT-GENESIS-RUNTIME-INPUTS" },
+    "version": { "const": 1 },
+    "fees": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_atomic", "per_kib_atomic", "per_spend_proof_atomic",
+        "per_output_proof_atomic", "new_position_surcharge_atomic",
+        "validator_registration_surcharge_atomic"
+      ],
+      "properties": {
+        "base_atomic": { "$ref": "#/$defs/amount" },
+        "per_kib_atomic": { "$ref": "#/$defs/amount" },
+        "per_spend_proof_atomic": { "$ref": "#/$defs/amount" },
+        "per_output_proof_atomic": { "$ref": "#/$defs/amount" },
+        "new_position_surcharge_atomic": { "$ref": "#/$defs/amount" },
+        "validator_registration_surcharge_atomic": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "staking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_delegation_atomic", "min_self_bond_atomic", "max_validators",
+        "power_unit_atomic", "max_total_voting_power",
+        "max_pending_positions_per_activation_epoch", "max_commission_bps",
+        "default_commission_bps", "max_commission_increase_bps", "jail_seconds",
+        "jail_blocks", "commission_notice_seconds", "commission_notice_blocks",
+        "evidence_max_age_seconds", "evidence_max_age_blocks", "downtime_window",
+        "min_signed_bps", "unbonding_seconds", "unbonding_blocks",
+        "byzantine_slash_bps", "slash_cohorts_per_block"
+      ],
+      "properties": {
+        "min_delegation_atomic": { "$ref": "#/$defs/positiveAmount" },
+        "min_self_bond_atomic": { "$ref": "#/$defs/positiveAmount" },
+        "max_validators": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "power_unit_atomic": { "$ref": "#/$defs/positiveAmount" },
+        "max_total_voting_power": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}$",
+          "description": "Canonical decimal u64; the decoder additionally caps this at 1152921504606846975."
+        },
+        "max_pending_positions_per_activation_epoch": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "max_commission_bps": { "$ref": "#/$defs/bps" },
+        "default_commission_bps": { "$ref": "#/$defs/bps" },
+        "max_commission_increase_bps": { "$ref": "#/$defs/bps" },
+        "jail_seconds": { "$ref": "#/$defs/positiveU64" },
+        "jail_blocks": { "$ref": "#/$defs/positiveU64" },
+        "commission_notice_seconds": { "$ref": "#/$defs/positiveU64" },
+        "commission_notice_blocks": { "$ref": "#/$defs/positiveU64" },
+        "evidence_max_age_seconds": { "$ref": "#/$defs/positiveU64" },
+        "evidence_max_age_blocks": { "$ref": "#/$defs/positiveU64" },
+        "downtime_window": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "min_signed_bps": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "unbonding_seconds": { "$ref": "#/$defs/positiveU64" },
+        "unbonding_blocks": { "$ref": "#/$defs/positiveU64" },
+        "byzantine_slash_bps": { "$ref": "#/$defs/bps" },
+        "slash_cohorts_per_block": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "validators": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["allocation_id", "display_name", "website", "description", "recovery_receipt"],
+        "properties": {
+          "allocation_id": { "$ref": "#/$defs/hash32" },
+          "display_name": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "website": { "type": "string", "maxLength": 256 },
+          "description": { "type": "string", "maxLength": 512 },
+          "recovery_receipt": { "type": "string", "pattern": "^[0-9a-f]{1024}$" }
+        }
+      }
+    },
+    "cometbft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_gas", "evidence_max_bytes", "vote_extensions_enable_height"],
+      "properties": {
+        "max_gas": { "type": "integer", "minimum": -1, "maximum": 9223372036854775807 },
+        "evidence_max_bytes": { "type": "integer", "minimum": 1, "maximum": 9223372036854775807 },
+        "vote_extensions_enable_height": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 }
+      }
+    }
+  },
+  "$defs": {
+    "hash32": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "amount": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,36})$" },
+    "positiveAmount": { "type": "string", "pattern": "^[1-9][0-9]{0,36}$" },
+    "positiveU64": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+    "bps": { "type": "integer", "minimum": 0, "maximum": 10000 }
+  }
+}
