@@ -1,0 +1,56 @@
+; BIT genesis identity and approval package, version 1.
+; Implementations additionally require shortest-form canonical CBOR, strict
+; sorting/uniqueness, bounded collection sizes, and semantic checks in D-025.
+
+hash32 = bytes .size 32
+signature64 = bytes .size 64
+amount = bytes .size 16
+source-commit = bytes .size 20 / bytes .size 32
+
+resource-limits = [
+  protocol-version: uint,
+  max-block-bytes: uint,
+  max-tx-lifetime-blocks: uint,
+  max-envelope-bytes: uint,
+  anchor-retention-blocks: uint,
+]
+
+allocation-kind = 1 / 2 / 3 / 4
+allocation = [allocation-id: hash32, allocation-kind, amount]
+claim-input = [allocation-id: hash32, claim-pubkey: hash32]
+commitment-input = [allocation-id: hash32, commitment: hash32]
+validator-input = [
+  allocation-id: hash32,
+  operator-pubkey: hash32,
+  consensus-pubkey: hash32,
+  owner-pubkey: hash32,
+  commission-bps: uint,
+]
+approval-policy = [threshold: uint, signers: [* hash32]]
+
+genesis-identity-v1 = [
+  "BIT-GENESIS-IDENTITY",
+  1,
+  chain-id: text,
+  genesis-time-unix-seconds: uint,
+  source-commit,
+  crypto-manifest-sha256: hash32,
+  consensus-parameters-sha256: hash32,
+  native-asset-id: hash32,
+  key-derivation-version: text,
+  address-encoding-version: text,
+  resource-limits,
+  monetary-policy-cbor: bytes,
+  allocations: [* allocation],
+  genesis-claims: [* claim-input],
+  genesis-commitments: [* commitment-input],
+  [initial-validators: [* validator-input], approval-policy],
+]
+
+approval = [signer-pubkey: hash32, signature: signature64]
+genesis-signature-package-v1 = [
+  "BIT-GENESIS-SIGNATURES",
+  1,
+  genesis-manifest-hash: hash32,
+  approvals: [* approval],
+]

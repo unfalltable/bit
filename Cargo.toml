@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/bit-types",
+    "crates/bit-genesis",
     "crates/bit-shielded",
     "crates/bit-transaction",
     "crates/bit-emission",

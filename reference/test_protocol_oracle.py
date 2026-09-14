@@ -17,7 +17,24 @@ class ProtocolOracleTests(unittest.TestCase):
         self.assertEqual(int(config["economics"]["max_supply_atomic"]), oracle.MAX_SUPPLY_ATOMIC)
         self.assertFalse(config["economics"]["mainnet_economic_policy_approved"])
         self.assertFalse(mainnet["mainnet_ready"])
-        self.assertIsNone(mainnet["monetary_policy"]["genesis_supply_atomic"])
+        self.assertIsNone(mainnet["identity"]["monetary_policy"]["genesis_supply_atomic"])
+
+    def test_genesis_identity_hash_domains(self):
+        vector = json.loads((ROOT / "tests/vectors/genesis-identity-vectors.json").read_text(
+            encoding="utf-8"))
+        identity = bytes.fromhex(vector["canonical_identity_cbor_hex"])
+        manifest_hash = hashlib.sha256(
+            b"BIT-GENESIS-IDENTITY-V1" + len(identity).to_bytes(8, "big") + identity
+        ).digest()
+        self.assertEqual(manifest_hash.hex(), vector["genesis_manifest_hash"])
+        self.assertEqual(
+            hashlib.sha256(b"bit/chain/v1" + manifest_hash).hexdigest(),
+            vector["chain_context"],
+        )
+        self.assertEqual(
+            (b"BIT-GENESIS-APPROVAL-V1" + manifest_hash).hex(),
+            vector["approval_message_hex"],
+        )
 
     def test_policy_bytes_and_hash(self):
         vector = json.loads((ROOT / "tests/vectors/emission-vectors.json").read_text(encoding="utf-8"))["reference_policy"]

@@ -23,3 +23,7 @@ supply-invariants: unit crypto-vectors
 
 baseline:
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-baseline-checks.ps1
+
+# Expected to fail closed until the real signed mainnet inputs are supplied.
+release-preflight:
+    . ./feasibility/scripts/rust_env.ps1; $env:CARGO_TARGET_DIR=[IO.Path]::GetFullPath('./feasibility/target'); $bitInput=if($env:BIT_MAINNET_INPUTS){$env:BIT_MAINNET_INPUTS}else{'config/mainnet-inputs.template.json'}; $bitArgs=@('run','-p','bit-genesis','--bin','bit','--locked','--','release','preflight','--input',$bitInput); foreach($bitEvidence in @(@('--manifest',$env:BIT_GENESIS_MANIFEST),@('--signatures',$env:BIT_GENESIS_SIGNATURES),@('--crypto-manifest',$env:BIT_CRYPTO_MANIFEST),@('--parameters',$env:BIT_CONSENSUS_PARAMETERS))){if($bitEvidence[1]){$bitArgs+=$bitEvidence}}; cargo @bitArgs

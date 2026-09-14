@@ -1,0 +1,82 @@
+{
+  "status": "PUBLIC_TEST_FIXTURE_NOT_MAINNET_INPUT",
+  "identity": {
+    "chain_id": "bit-test-genesis-v1",
+    "genesis_time_unix_seconds": 1800000000,
+    "source_commit": "1111111111111111111111111111111111111111",
+    "crypto_manifest_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "consensus_parameters_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "native_asset_id": "4444444444444444444444444444444444444444444444444444444444444444",
+    "key_derivation_version": "bit-kd-v1",
+    "address_encoding_version": "bit-address-v1",
+    "resource_limits": {
+      "protocol_version": 1,
+      "max_block_bytes": 1048576,
+      "max_tx_lifetime_blocks": 120,
+      "max_envelope_bytes": 65536,
+      "anchor_retention_blocks": 720
+    },
+    "monetary_policy": {
+      "policy_id": "BUDGET_HALVING_EPOCH_V1",
+      "max_supply_atomic": "10240000000000000000",
+      "decimals": 8,
+      "genesis_supply_atomic": "1000000000",
+      "epoch_blocks": 720,
+      "halving_interval_epochs": 35040,
+      "empty_set_policy": "FORFEIT_UNISSUED_NO_CATCHUP",
+      "burn_reopens_issuance": false,
+      "tail_emission_enabled": false,
+      "monetary_policy_hash": "4704b856bd8c4edd3c9ef8a02f8c0ce47d0a89fa2672c2c9cb79725b3ea3c824"
+    },
+    "allocations": [
+      {
+        "allocation_id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "kind": "GENESIS_CLAIM",
+        "amount_atomic": "400000000"
+      },
+      {
+        "allocation_id": "2020202020202020202020202020202020202020202020202020202020202020",
+        "kind": "SHIELDED_COMMITMENT",
+        "amount_atomic": "100000000"
+      },
+      {
+        "allocation_id": "3030303030303030303030303030303030303030303030303030303030303030",
+        "kind": "VALIDATOR_SELF_BOND",
+        "amount_atomic": "400000000"
+      },
+      {
+        "allocation_id": "4040404040404040404040404040404040404040404040404040404040404040",
+        "kind": "FEE_RESERVE",
+        "amount_atomic": "100000000"
+      }
+    ],
+    "genesis_claims": [
+      {
+        "allocation_id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "claim_pubkey": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c"
+      }
+    ],
+    "genesis_commitments": [
+      {
+        "allocation_id": "2020202020202020202020202020202020202020202020202020202020202020",
+        "commitment": "5555555555555555555555555555555555555555555555555555555555555555"
+      }
+    ],
+    "initial_validators": [
+      {
+        "allocation_id": "3030303030303030303030303030303030303030303030303030303030303030",
+        "operator_pubkey": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+        "consensus_pubkey": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+        "owner_pubkey": "ca93ac1705187071d67b83c7ff0efe8108e8ec4530575d7726879333dbdabe7c",
+        "commission_bps": 500
+      }
+    ],
+    "approval_policy": {
+      "threshold": 2,
+      "signers": [
+        "6e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf1",
+        "8a875fff1eb38451577acd5afee405456568dd7c89e090863a0557bc7af49f17"
+      ]
+    }
+  }
+}

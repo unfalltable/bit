@@ -2,32 +2,61 @@
   "network_type": "mainnet",
   "mainnet_ready": false,
   "status": "REQUIRES_REAL_EXTERNAL_INPUTS",
-  "chain_id": null,
-  "genesis_time": null,
-  "crypto_manifest_sha256": null,
-  "source_commit": null,
-  "native_asset_id": null,
-  "key_derivation_version": null,
-  "address_encoding_version": null,
-  "economic_policy_approved": false,
-  "allocations": [],
-  "genesis_claims": [],
-  "genesis_commitments": [],
-  "initial_validators": [],
+  "identity": {
+    "chain_id": null,
+    "genesis_time_unix_seconds": null,
+    "source_commit": null,
+    "crypto_manifest_sha256": null,
+    "consensus_parameters_sha256": null,
+    "native_asset_id": null,
+    "key_derivation_version": null,
+    "address_encoding_version": null,
+    "resource_limits": {
+      "protocol_version": null,
+      "max_block_bytes": null,
+      "max_tx_lifetime_blocks": null,
+      "max_envelope_bytes": null,
+      "anchor_retention_blocks": null
+    },
+    "monetary_policy": {
+      "policy_id": "BUDGET_HALVING_EPOCH_V1",
+      "max_supply_atomic": "10240000000000000000",
+      "decimals": 8,
+      "genesis_supply_atomic": null,
+      "epoch_blocks": null,
+      "halving_interval_epochs": null,
+      "empty_set_policy": "FORFEIT_UNISSUED_NO_CATCHUP",
+      "burn_reopens_issuance": false,
+      "tail_emission_enabled": false,
+      "monetary_policy_hash": null
+    },
+    "allocations": [],
+    "genesis_claims": [],
+    "genesis_commitments": [],
+    "initial_validators": [],
+    "approval_policy": {
+      "threshold": null,
+      "signers": []
+    }
+  },
+  "genesis_manifest_hash": null,
+  "genesis_signature_package_sha256": null,
+  "derived_genesis": {
+    "initial_state_root": null,
+    "app_hash": null,
+    "genesis_execution_hash": null,
+    "genesis_compact_hash": null
+  },
+  "initial_supply_state": {
+    "cumulative_minted_atomic": "0",
+    "burned_atomic": "0",
+    "forfeited_unissued_atomic": "0",
+    "completed_epochs": 0,
+    "future_budget_atomic": null
+  },
   "checkpoint_publishers": [],
   "independent_endpoints": [],
   "external_security_reviews": [],
   "platform_signing_certificates": [],
-  "release_signatures": [],
-  "monetary_policy": {
-    "max_supply_coins": "102400000000",
-    "max_supply_atomic": "10240000000000000000",
-    "decimals": 8,
-    "policy_id": "BUDGET_HALVING_EPOCH_V1",
-    "genesis_supply_atomic": null,
-    "epoch_blocks": null,
-    "halving_interval_epochs": null,
-    "monetary_policy_hash": null,
-    "confirmed_requirement": "TOTAL_SUPPLY_CAP_1024_YI_BIT"
-  }
+  "release_artifacts": []
 }
