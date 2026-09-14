@@ -15,7 +15,7 @@ BIT 是一条以私密支付和原生质押为核心的独立单币 PoS 链。�
 - `crates/bit-app`：确定性生命周期核心及固定 CometBFT ABCI v0.38 适配，严格解析实际 last commit 和 `next_validators_hash`，在 Prepare/Process/Finalize 统一执行“签名计分→发行/奖励→pending 激活→集合选择”，返回验证人 key/power 更新及自验后的 ICS23 ProofOps，并通过本机 TCP 协议往返测试。
 - `contracts`、`config`、`tests/vectors`：从 BIT v1.2 主规格抽出的活跃机器合同、参考测试网配置和共享向量。
 - `reference`：不依赖 Rust 的 Python 发行和编码 oracle。
-- `feasibility`：真实证明与四节点实验；不是生产应用。
+- `feasibility`：真实证明、简化共识探针，以及复用生产 `bit-app`/JMT 状态核心的四节点 CometBFT 集成实验；不是生产节点发布物。
 
 ## 本机验证
 
@@ -23,6 +23,6 @@ BIT 是一条以私密支付和原生质押为核心的独立单币 PoS 链。�
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-baseline-checks.ps1
 ```
 
-如已安装 `just`，也可运行 `just baseline`。报告写入 `reports/development-baseline.json`。Android 按用户要求跳过，基线命令不会访问手机。
+如已安装 `just`，也可运行 `just baseline`。基线同时启动四个本机 CometBFT/真实 BIT 应用进程验证 H+2、JMT 重启和投票权恢复；主报告写入 `reports/development-baseline.json`，网络证据写入 `feasibility/reports/bit-app-network-result.json`。Android 按用户要求跳过，基线命令不会访问手机。
 
-当前还没有生产 execution/compact 摘要编码、真实 CometBFT 多节点接入、退出/罚没动作、独立 signer、钱包或主网发布能力。应用已经持久化 H/H+1/H+2 实际集合，核对 last commit 成员/顺序/power 和请求中的 `next_validators_hash`，并阻止移除最后一个有效验证者；仍需在固定引擎进程中验证更新延迟和精确集合一致性。`supply/audit_snapshot` 的规范编码仍等待 SPEC-04 决议。持久化层仍需补故障注入、快照导入导出、历史证明和长期增长测试。`config/mainnet-inputs.template.json` 保持阻断状态。
+当前还没有生产 execution/compact 摘要编码、正式节点命令、退出/罚没动作、独立 signer、钱包或主网发布能力。应用已经持久化 H/H+1/H+2 实际集合，核对 last commit 成员/顺序/power 和请求中的 `next_validators_hash`，并阻止移除最后一个有效验证者；真实四节点 CometBFT 空块实验已验证 H+2、JMT 重启、app hash 一致、ICS23 查询与投票权停机/恢复。该实验仍使用加速 epoch 和临时域分离摘要，尚未覆盖多节点真实 Transfer。`supply/audit_snapshot` 的规范编码仍等待 SPEC-04 决议。持久化层仍需补故障注入、快照导入导出、历史证明和长期增长测试。`config/mainnet-inputs.template.json` 保持阻断状态。

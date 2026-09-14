@@ -1,13 +1,13 @@
 ﻿{
     "status":  "PASS",
     "scope":  "BIT active baseline only; not a complete chain or product acceptance",
-    "completed_at":  "2026-09-14T08:52:51.6297272+00:00",
+    "completed_at":  "2026-09-14T09:25:29.3894979+00:00",
     "toolchain":  "rustc 1.98.1 (48a229cea 2026-09-01)",
     "checks":  [
                    {
                        "name":  "fmt-check",
                        "command":  "cargo fmt --all -- --check",
-                       "started_at":  "2026-09-14T08:44:56.4284683+00:00",
+                       "started_at":  "2026-09-14T09:19:56.8152011+00:00",
                        "exit_code":  0,
                        "log":  "reports/fmt-check.log",
                        "log_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -15,26 +15,42 @@
                    {
                        "name":  "clippy",
                        "command":  "cargo clippy --workspace --all-targets --locked -- -D warnings",
-                       "started_at":  "2026-09-14T08:44:59.5107410+00:00",
+                       "started_at":  "2026-09-14T09:20:00.1803949+00:00",
                        "exit_code":  0,
                        "log":  "reports/clippy.log",
-                       "log_sha256":  "833722ce1b8debb97a2672566433c758e84e5f5a2416be9d05d3e4590449ebfb"
+                       "log_sha256":  "68d3d326eeedbaa7dd7e41eb75e512d2e428ec2ade90ec91c9c7827f7129713b"
                    },
                    {
                        "name":  "rust-unit",
                        "command":  "cargo test --workspace --locked",
-                       "started_at":  "2026-09-14T08:45:45.7166728+00:00",
+                       "started_at":  "2026-09-14T09:20:00.9611550+00:00",
                        "exit_code":  0,
                        "log":  "reports/rust-unit.log",
-                       "log_sha256":  "e39f26250cc446096220d44a9c51e5bc5961287061d34b09d4272307ace5487e"
+                       "log_sha256":  "45bf101295221439f12adc9667963d997fa07e3ba3df74fced707605e76774d9"
                    },
                    {
                        "name":  "python-oracle",
                        "command":  "py -B -m unittest discover -s reference -p test_*.py -v",
-                       "started_at":  "2026-09-14T08:52:51.1708429+00:00",
+                       "started_at":  "2026-09-14T09:24:51.2183546+00:00",
                        "exit_code":  0,
                        "log":  "reports/python-oracle.log",
-                       "log_sha256":  "24d7b2a4c8c6d2b327bfcbfe681fcffe5bed2b3495e699d08214e06e8f45805f"
+                       "log_sha256":  "bfe508e0e4965dffd8504a60e18d438cd1bdb27360f79b972590b1167f2f60af"
+                   },
+                   {
+                       "name":  "comet-app-build",
+                       "command":  "cargo build -p bit-app --example comet_network_probe --locked",
+                       "started_at":  "2026-09-14T09:24:51.4693078+00:00",
+                       "exit_code":  0,
+                       "log":  "reports/comet-app-build.log",
+                       "log_sha256":  "a1913d35f2c9390d5d71c9de02253d3f9820dc026e155186f321dd990430c6ae"
+                   },
+                   {
+                       "name":  "comet-app-network",
+                       "command":  "py -B feasibility/scripts/run_bit_app_network.py",
+                       "started_at":  "2026-09-14T09:24:52.2908024+00:00",
+                       "exit_code":  0,
+                       "log":  "reports/comet-app-network.log",
+                       "log_sha256":  "e6df396e0b96fa2e0843e78d0aa147a1aed5ed3d095d7371cfe2dd5456136492"
                    }
                ],
     "counts":  {
@@ -45,10 +61,16 @@
     "cargo_build_jobs":  1,
     "mobile":  "SKIPPED_BY_USER",
     "upstream_warnings":  "Present in pinned Penumbra dependencies; BIT crates pass clippy -D warnings",
+    "artifacts":  [
+                      {
+                          "path":  "feasibility/reports/bit-app-network-result.json",
+                          "sha256":  "ca852ac1201b3937e8dd1ba00b872ff8e1725ac475a124ed3304001f0015bbfb"
+                      }
+                  ],
     "inputs":  [
                    {
                        "path":  "Cargo.lock",
-                       "sha256":  "bb221e73c72aac3c127b40d6ca16d060a09be17e6e2daf7432af04185e313080"
+                       "sha256":  "097d8b9ea457ba238b6c9a1f3162a09657fc537153602926894937e965f99e3f"
                    },
                    {
                        "path":  "tests/vectors/emission-vectors.json",
@@ -116,7 +138,7 @@
                    },
                    {
                        "path":  "crates/bit-app/Cargo.toml",
-                       "sha256":  "5b10704a8525758ddcbe8a36705479fd3cf6571ef57a87805d6e72e2d003358e"
+                       "sha256":  "a4f67b8c27a98b2e3f305fb49af4def88b94124dced077a85ce51705a180dca5"
                    },
                    {
                        "path":  "crates/bit-app/src/lib.rs",
@@ -124,7 +146,15 @@
                    },
                    {
                        "path":  "crates/bit-app/src/abci.rs",
-                       "sha256":  "953f2f0a2a761010933a5497e16d359c42d9f2b57520777f9d62c180c2d9547e"
+                       "sha256":  "04a809b1a77baf83747fd924c9cd5426843d3ea6802dc5325aae6d6f1238b727"
+                   },
+                   {
+                       "path":  "crates/bit-app/examples/comet_network_probe.rs",
+                       "sha256":  "32010167e44349db79cf3290f1cad835a55b1a803f64802829ce1f20925bd319"
+                   },
+                   {
+                       "path":  "feasibility/scripts/run_bit_app_network.py",
+                       "sha256":  "583ba94e869dbaa6907e8e75ca7c2a712f2f30b21b9fa57721a5e2c3a4e48f90"
                    },
                    {
                        "path":  "feasibility/scripts/rust_env.ps1",

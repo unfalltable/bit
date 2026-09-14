@@ -61,10 +61,10 @@ ABCI PrepareProposal、ProcessProposal 和 FinalizeBlock 使用请求中的规�
 
 状态层在同一候选副本中验证 commitment tree、nullifier/tx_id、供应容器和质押账本，任一检查失败都不修改区块 overlay。Prepare 同时验证 `sum(pool.P)=供应容器 P` 与全部 pending/refundable 本金之和等于供应容器 D。持久内存镜像仅在 RocksDB batch 成功提交后替换，重启从逐项记录重建并重跑全部不变量。
 
-测试覆盖 ID、委托/自质押、延后激活、奖励份额、U256 大数、滑点、资不抵债池、容量、候选排序、投票权上限、签名窗口边界、downtime jail、epoch score 消费、严格编码、账本篡改与失败原子性。缩短 epoch 的状态和应用集成测试以连续真实 commit power 自动完成发行/奖励/集合选择，验证 ValidatorUpdates 只在 H+2 生效、集合在 Commit 和重启后保持一致，并拒绝错误请求哈希和 power；单验证者测试确认集合变空时明确停机且系统阶段原子回滚。ABCI 测试拒绝缺失 commit、错误地址、非正 power、错误长度的哈希和未知 flag。
+测试覆盖 ID、委托/自质押、延后激活、奖励份额、U256 大数、滑点、资不抵债池、容量、候选排序、投票权上限、签名窗口边界、downtime jail、epoch score 消费、严格编码、账本篡改与失败原子性。缩短 epoch 的状态和应用集成测试以连续真实 commit power 自动完成发行/奖励/集合选择，验证 ValidatorUpdates 只在 H+2 生效、集合在 Commit 和重启后保持一致，并拒绝错误请求哈希和 power；单验证者测试确认集合变空时明确停机且系统阶段原子回滚。ABCI 测试拒绝缺失 commit、错误地址、非正 power、错误长度的哈希和未知 flag。真实四节点 CometBFT 实验进一步验证同一规则在独立 JMT 实例、应用重启和投票权中断/恢复下成立。
 
 ## 6. 完成 D-007 还需要
 
-1. 把唯一 `effective_set_at(height)`、last commit、`next_validators_hash` 和返回更新接入真实 CometBFT 四节点进程核验。
-2. 实现增量候选索引，避免边界扫描全部历史验证人。
-3. 进入 D-008 退出 cohort、ticket、证据去重与 SlashJob。
+1. 实现增量候选索引，避免边界扫描全部历史验证人。
+2. 进入 D-008 退出 cohort、ticket、证据去重与 SlashJob。
+3. 在正式节点命令和生产摘要完成后，把真实质押交易加入多节点崩溃重放。

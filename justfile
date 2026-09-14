@@ -16,6 +16,9 @@ unit:
 crypto-vectors:
     py -B -m unittest discover -s reference -p 'test_*.py' -v
 
+comet-app-network:
+    . ./feasibility/scripts/rust_env.ps1; cargo build -p bit-app --example comet_network_probe --locked; py -B feasibility/scripts/run_bit_app_network.py
+
 supply-invariants: unit crypto-vectors
 
 baseline:

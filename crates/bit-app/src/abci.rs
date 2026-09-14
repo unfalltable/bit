@@ -411,8 +411,23 @@ impl AbciApplication {
         panic!("BIT ABCI fatal error: {reason}");
     }
 
-    fn init_chain_matches(&self, request: &RequestInitChain) -> bool {
-        request == &self.inner.config.expected_init_chain
+    fn init_chain_mismatch(&self, request: &RequestInitChain) -> Option<&'static str> {
+        let expected = &self.inner.config.expected_init_chain;
+        if request.time != expected.time {
+            Some("time")
+        } else if request.chain_id != expected.chain_id {
+            Some("chain_id")
+        } else if request.consensus_params != expected.consensus_params {
+            Some("consensus_params")
+        } else if request.validators != expected.validators {
+            Some("validators")
+        } else if request.app_state_bytes != expected.app_state_bytes {
+            Some("app_state_bytes")
+        } else if request.initial_height != expected.initial_height {
+            Some("initial_height")
+        } else {
+            None
+        }
     }
 
     fn query_rejection(code: QueryCode, log: &'static str) -> ResponseQuery {
@@ -508,8 +523,10 @@ impl Application for AbciApplication {
 
     fn init_chain(&self, request: RequestInitChain) -> ResponseInitChain {
         self.ensure_live();
-        if !self.init_chain_matches(&request) {
-            self.halt("InitChain request differs from the configured genesis");
+        if let Some(field) = self.init_chain_mismatch(&request) {
+            self.halt(format!(
+                "InitChain {field} differs from the configured genesis"
+            ));
         }
         let _guard = self.execution_guard();
         let summary = match self.inner.runtime.block_on(self.inner.core.state_summary()) {
@@ -1057,10 +1074,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let app = application(&dir, 1_000_000);
         let expected = init_chain(1_000_000);
-        assert!(app.init_chain_matches(&expected));
+        assert_eq!(app.init_chain_mismatch(&expected), None);
         let mut changed = expected.clone();
         changed.chain_id.push_str("-other");
-        assert!(!app.init_chain_matches(&changed));
+        assert_eq!(app.init_chain_mismatch(&changed), Some("chain_id"));
 
         let response = Application::init_chain(&app, expected.clone());
         assert_eq!(response.consensus_params, expected.consensus_params);

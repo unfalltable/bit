@@ -76,7 +76,7 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 ## 6. 完成 D-006 还需要
 
-1. 将已持久化的 H/H+1/H+2 实际集合、last commit power 和请求哈希接入固定 CometBFT 四节点进程向量。
+1. 四节点空块向量已验证 H/H+1/H+2 实际集合、last commit power、请求哈希和奖励后投票权；下一步加入真实 Transfer 与费用池变化。
 2. 为钱包和网关提供带证明的费率、在线率、奖励和佣金报价接口。
 3. 接入 GenesisClaim、Unbond、ClaimExit 和 Slash 等剩余容器转换；Delegate 和 ClaimCommission 已接入。
 4. 冻结 SPEC-04 后实现 `supply/audit_snapshot` 的规范编码、查询路由、共享测试向量和跨语言读取器。

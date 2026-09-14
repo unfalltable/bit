@@ -1,6 +1,6 @@
 # BIT D-005 ABCI 生命周期设计
 
-状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。可用快照、生产摘要编码器和真实多节点接线仍未完成。
+状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心并通过空块、重启和投票权实验；可用快照、生产摘要编码器、正式节点命令和多节点真实 Transfer 仍未完成。
 
 ## 1. 单一执行入口
 
@@ -44,10 +44,12 @@ FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`�
 
 `BlockRequest` 要求上层业务执行器显式提供 `execution_hash` 和 `compact_hash`。目前没有用零值或临时 JSON 替代 compact block，因为 SPEC-03 尚未冻结。D-006 与 compact 编码任务完成后，两类摘要必须由唯一规范编码器产生，并在 ProcessProposal 与 FinalizeBlock 中得到相同结果。
 
-ABCI 适配通过 `FinalizeDigestProvider` 强制注入两个摘要来源；没有默认零值或用区块 hash 代替 compact hash 的降级路径。摘要生成失败会让应用进入 halted 状态。
+ABCI 适配通过 `FinalizeDigestProvider` 强制注入两个摘要来源；没有默认零值或用区块 hash 代替 compact hash 的降级路径。摘要生成失败会让应用进入 halted 状态。四节点实验使用明确标记的域分离请求摘要，只用于在 SPEC-03 冻结前驱动真实应用状态机，不能作为生产 compact 编码。
 
 ## 6. 当前验证与下一切片
 
 当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励，检查返回的 Ed25519 key/power 更新只在 H+2 集合生效且重启后保持一致；错误请求哈希、commit power、缺失 commit、错误地址、非正 power 和未知 block-id flag 均被拒绝。
 
-下一步实现版本化 execution/compact 编码器及创世语义校验，然后把生产 `bit-app`、真实 Transfer 和集合更新放进 CometBFT 四节点重放与崩溃恢复实验。D-004 同步补快照导入导出和历史高度证明。
+`comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。实测高度 6 返回的更新在高度 6、7 保持 power 10，高度 8 变为 3476；一个应用从 durable JMT 状态重启并追块，四节点在同一固定高度的 app hash 相同，最新状态返回 ICS23 proof。停止两个验证者后链停止，恢复第三个验证者后继续出块。每次运行的精确高度写入 `feasibility/reports/bit-app-network-result.json`。
+
+下一步实现版本化 execution/compact 编码器及创世语义校验，形成正式节点命令，再把真实 Transfer 放进四节点重放与崩溃恢复实验。D-004 同步补快照导入导出和历史高度证明。

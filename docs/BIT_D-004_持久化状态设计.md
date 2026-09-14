@@ -102,4 +102,4 @@ Prepare 结果被丢弃时，数据库版本不变。重启后从最后 durable 
 
 ## 6. 后续工作
 
-D-004 仍需完成 RocksDB 磁盘满、fsync 失败、文件损坏和版本回退的故障注入；快照分块导出/隔离导入；重启后的历史证明服务；长期 nullifier、frontier 与 JMT 增长测试。D-005 已把同一执行器接到 CheckTx、ProcessProposal、FinalizeBlock、Commit 和 Query，后续还需真实 CometBFT 多节点集成。
+D-004 仍需完成 RocksDB 磁盘满、fsync 失败、文件损坏和版本回退的故障注入；快照分块导出/隔离导入；重启后的历史证明服务；长期 nullifier、frontier 与 JMT 增长测试。D-005 已把同一执行器接到 CheckTx、ProcessProposal、FinalizeBlock、Commit 和 Query，并完成真实四节点空块/JMT 重启实验；后续还需生产摘要、正式节点命令和多节点真实 Transfer。

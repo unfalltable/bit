@@ -472,15 +472,22 @@ dependencies = [
 name = "bit-app"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "base64 0.22.1",
  "bit-emission",
  "bit-staking",
  "bit-state",
  "bit-transaction",
  "bit-types",
  "decaf377",
+ "hex",
  "ics23",
  "prost",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "tempfile",
+ "tendermint",
  "tendermint-abci",
  "tendermint-proto",
  "thiserror 1.0.69",

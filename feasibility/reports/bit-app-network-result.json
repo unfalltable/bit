@@ -1,0 +1,59 @@
+{
+  "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, staking and emission",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T092452496575",
+  "toolchain": {
+    "cometbft_module": "v0.38.23",
+    "cometbft_self_reported": "0.38.22",
+    "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
+    "application_sha256": "402f68f9a653f5d545430d2c04753f05aabeb3ead796ddc2122dbaac0318a918"
+  },
+  "checks": {
+    "validator_powers_h6_h7_h8": {
+      "6": {
+        "b0092a0f81d133522b6d579d10b6be8008fb0171f31e9e0171e46bb93c5c93bc": 10,
+        "ce80f69d1f6902291c2f76af6e7abb8af7358d9ef0500ea2d2f554cde6e81cc3": 10,
+        "257e0c6d1ef54f47878b7c8805cce2fa730f60ca268f45bfe14f38ad3a797081": 10,
+        "8073a7ab873b7399bc619c51f4118e38b747dc16b596ff2058d1d3b202bb7224": 10
+      },
+      "7": {
+        "b0092a0f81d133522b6d579d10b6be8008fb0171f31e9e0171e46bb93c5c93bc": 10,
+        "ce80f69d1f6902291c2f76af6e7abb8af7358d9ef0500ea2d2f554cde6e81cc3": 10,
+        "257e0c6d1ef54f47878b7c8805cce2fa730f60ca268f45bfe14f38ad3a797081": 10,
+        "8073a7ab873b7399bc619c51f4118e38b747dc16b596ff2058d1d3b202bb7224": 10
+      },
+      "8": {
+        "b0092a0f81d133522b6d579d10b6be8008fb0171f31e9e0171e46bb93c5c93bc": 3476,
+        "ce80f69d1f6902291c2f76af6e7abb8af7358d9ef0500ea2d2f554cde6e81cc3": 3476,
+        "257e0c6d1ef54f47878b7c8805cce2fa730f60ca268f45bfe14f38ad3a797081": 3476,
+        "8073a7ab873b7399bc619c51f4118e38b747dc16b596ff2058d1d3b202bb7224": 3476
+      }
+    },
+    "h_plus_two_update": true,
+    "process_restart_from_durable_jmt_height": 10,
+    "resumed_heights": [
+      15,
+      15,
+      15,
+      15
+    ],
+    "same_app_hash_height": 14,
+    "same_app_hash": "befeeaa324030e001829141c6686028b850a924056c71ce51f2ab7aa248a3a6a",
+    "latest_ics23_proof": true,
+    "quorum_halt_height": 15,
+    "quorum_recovery_heights": [
+      19,
+      19,
+      19
+    ]
+  },
+  "limitations": [
+    "accelerated five-block epochs and deterministic probe genesis",
+    "temporary domain-separated request digests pending SPEC-03",
+    "empty blocks; real transfer remains covered by in-process and TCP tests",
+    "upstream CometBFT FilePV signer, not the future independent BIT signer",
+    "same physical host, not independent failure domains"
+  ],
+  "status": "PASS",
+  "started_at": "2026-09-14T09:24:52.496746+00:00",
+  "finished_at": "2026-09-14T09:25:29.197707+00:00"
+}
