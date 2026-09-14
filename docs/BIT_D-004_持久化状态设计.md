@@ -81,9 +81,9 @@ TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。�
 3. 所有 nullifier、output commitment 和费用会计都通过后才写入 delta。TCT 与供应状态均在副本上完成变更，任何失败都不会留下部分更新。
 4. 每块系统阶段先要求请求中的 `next_validators_hash` 等于持久化 H+1 集合哈希；H>1 时 last commit 必须逐项匹配 H-1 集合。随后验证和去重 Byzantine evidence、墓碑化及创建 SlashJob；epoch 首块再结算发行、激活 pending 和选择集合，然后在全局 cohort 上限内推进处罚与退出队列，并把更新应用为 H+2 集合。
 5. `prepare()` 重新验证供应、质押恒等式及质押逻辑集合与 H+2 实际集合一致，关闭当前 TCT block，把新根、frontier、anchor、供应字段、触及的质押记录、三高度集合日程、执行摘要、compact 摘要和高度写入同一个 delta，并调用 Cnidarium `prepare_commit` 计算下一 JMT 根。
-6. `commit()` 调用 `commit_batch`，用单个 RocksDB WriteBatch 落盘全部 JMT、索引和值。返回的 app hash 必须等于 prepare 阶段的根；成功后才替换进程内质押镜像。
+6. `commit()` 调用固定 Cnidarium 0.83.0 的 BIT 补丁：先解析并验证完整 RocksDB WriteBatch 的头部、记录数量、列族 put/delete 标签、varint 和每个 key/value 边界，再以 WAL 开启且 `WriteOptions.sync=true` 的单次写入落盘全部 JMT、索引和值。写入或 fsync 错误通过 `Result` 返回停机路径；返回的 app hash 必须等于 prepare 阶段的根，成功后才替换进程内质押镜像。
 
-Prepare 结果被丢弃时，数据库版本不变。重启后从最后 durable 高度重新执行相同输入，必须产生同一个 app hash。测试已覆盖这条边界。
+Prepare 结果被丢弃或批次在写前失败时，数据库版本不变。重启后从最后 durable 高度重新执行相同输入，必须产生同一个 app hash。若同步写入已经完成、但进程在发布新内存快照前退出，当前进程保持旧视图并停止服务；重启会从 WAL 中恢复完整的新版本。测试用仅在测试构建启用的一次性故障点覆盖这三条边界。
 
 ## 4. 查询证明
 
@@ -97,6 +97,8 @@ Prepare 结果被丢弃时，数据库版本不变。重启后从最后 durable 
 - 状态高度与 Cnidarium 版本严格相等，倒退或缺键时停止打开，不自动清库。
 - schema 回退、无法解码的 TCT frontier、非法或重复创世承诺均拒绝启动或初始化。
 - Commit 前崩溃不产生 durable 写入；相同区块重放得到相同 app hash。
+- 截断的原生 RocksDB WriteBatch 会在触碰 WAL 前被解析器拒绝，处罚高度、EvidenceRecord、SlashJob、tombstone 和 Burn 均不产生部分状态；同一批次重放得到相同 app hash。
+- RocksDB Commit 开启 WAL 同步并传播写入/fsync 错误。同步写入完成但内存快照发布前的故障会让进程保持旧视图；关闭并重启后恢复完整新版本及同一 app hash，不会重复处罚。
 - 同交易、同块和跨块 nullifier 冲突均被拒绝，失败交易不写 tx_id、不写 nullifier、不推进 TCT。
 - anchor 只在配置窗口内有效；裁剪 anchor 不裁剪 nullifier 或当前状态。
 - 主存储、子存储的 ICS23 成员和非成员证明都能针对返回的 app hash 验证。
@@ -113,4 +115,4 @@ Prepare 结果被丢弃时，数据库版本不变。重启后从最后 durable 
 
 ## 6. 后续工作
 
-D-004 仍需完成 RocksDB 磁盘满、fsync 失败、文件损坏和版本回退的故障注入；快照分块导出/隔离导入；重启后的历史证明服务；长期 nullifier、frontier 与 JMT 增长测试。D-005 已把同一执行器接到 CheckTx、ProcessProposal、FinalizeBlock、Commit 和 Query，并完成真实四节点空块/JMT 重启实验；后续还需生产摘要、正式节点命令和多节点真实 Transfer。
+D-004 仍需完成真实磁盘配额耗尽、操作系统 fsync 失败、数据库文件损坏和版本回退的进程级故障注入；快照分块导出/隔离导入；重启后的历史证明服务；长期 nullifier、frontier 与 JMT 增长测试。D-005 已把同一执行器接到 CheckTx、ProcessProposal、FinalizeBlock、Commit 和 Query，并完成真实四节点/JMT 重启及重复投票处罚实验；后续还需生产摘要、正式节点命令和多节点真实 Transfer。

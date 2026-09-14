@@ -49,7 +49,7 @@ ABCI v0.38 `FinalizeBlock.misbehavior` 只接受重复投票和轻客户端攻�
 
 SlashJob 在证据接受时冻结当时已有的 validator-local cohort 范围，保存结束键、当前游标、已处理数量及 P/X 累计罚没。所有未完成任务按 validator_id 和 exit_epoch/cohort_id 稳定排序，共享每块最多 `slash_cohorts_per_block` 项的全局上限。游标也跨过不在责任范围或已经成熟的记录，避免重复扫描；任务未完成时拒绝相关 Unbond 和 ClaimExit，pending 激活会转为可退款状态。任务、被修改 cohort、供应 Burn、证据记录和集合日程在同一个 JMT/RocksDB 批次提交。
 
-测试覆盖池份额退出、尾差、双成熟边界、两类费用、epoch 交错、证据字段/责任/power 校验、两个年龄维度的单独超限与同时超限、永久 tombstone、重复证据、供应守恒、全局处理上限、跨块游标、FinalizeBlock 已 prepare 但 Commit 前中断后的确定性重放、每块关闭并重启后的继续执行，以及 evidence/job/cohort 的 ICS23 证明。真实 Unbond/ClaimExit 信封继续使用 Groth16、PositionOwner Ed25519、binding 和正式交易分发入口。
+测试覆盖池份额退出、尾差、双成熟边界、两类费用、epoch 交错、证据字段/责任/power 校验、两个年龄维度的单独超限与同时超限、永久 tombstone、重复证据、供应守恒、全局处理上限、跨块游标、FinalizeBlock 已 prepare 但 Commit 前中断后的确定性重放、损坏 RocksDB WriteBatch 的写前拒绝、同步写入后但内存快照发布前的重启恢复、每块关闭并重启后的继续执行，以及 evidence/job/cohort 的 ICS23 证明。真实 Unbond/ClaimExit 信封继续使用 Groth16、PositionOwner Ed25519、binding 和正式交易分发入口。
 
 四节点集成测试另外使用 CometBFT v0.38.23 原生类型和临时 FilePV 密钥构造两个同高度、同轮次、同类型但 BlockID 冲突的已签名 prevote，并通过 `/broadcast_evidence` 提交。测试从区块读取与目标验证人地址匹配的证据，确认该验证人在包含证据后的 H+1 仍存在、H+2 被移除，四个独立应用的 `staking/evidence/<hash>` ICS23 查询值完全相同、`supply/burned` 非零且相同，并在处罚后只保留三个验证人。随后停止其中一个仍有投票权的节点，剩余 power 恰为三分之二时链停止，节点恢复后四节点继续出块。
 
@@ -70,6 +70,6 @@ cargo run -p bit-app --example safety_halt_admin -- acknowledge <STATE_DIR> <REC
 
 ## 6. 下一切片
 
-1. 对 JMT/RocksDB 处罚提交增加磁盘满、fsync 失败和底层批次损坏故障注入；停签日志本身已覆盖临时文件恢复、损坏、路径不可写、冲突防覆盖和精确摘要确认。
+1. 在现有同步 WriteBatch、预写编码校验和确定性提交边界故障测试之外，增加真实磁盘配额耗尽与操作系统 fsync 失败的进程级注入；停签日志本身已覆盖临时文件恢复、损坏、路径不可写、冲突防覆盖和精确摘要确认。
 2. 为需要人工修复最后验证人集合的极端网络冻结正式治理/升级恢复规程；现有确认操作不会修改共识状态或跳过证据。
 3. 接入公开事件、gateway/indexer 和钱包的“处罚结算中”状态。

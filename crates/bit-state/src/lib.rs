@@ -4839,7 +4839,11 @@ mod tests {
             .any(|update| update.consensus_pubkey == consensus_pubkey && update.power == 0));
         let abandoned = second.prepare().await.unwrap();
         let abandoned_app_hash = abandoned.app_hash;
-        drop(abandoned);
+        state
+            .storage
+            .inject_commit_fault_once(cnidarium::CommitFault::CorruptWriteBatch);
+        let corrupt_batch_error = state.commit(abandoned).unwrap_err();
+        assert!(matches!(corrupt_batch_error, Error::Storage(_)));
         assert_eq!(state.summary().await.unwrap().state_height, 1);
         assert_eq!(state.supply_audit().await.unwrap().burned, Amount::ZERO);
         assert!(state
@@ -4873,8 +4877,34 @@ mod tests {
         assert_eq!(replayed.evidence, system.evidence);
         let replayed = second.prepare().await.unwrap();
         assert_eq!(replayed.app_hash, abandoned_app_hash);
-        let second_receipt = state.commit(replayed).unwrap();
-        assert_eq!(second_receipt.supply.burned, expected_slash);
+        state
+            .storage
+            .inject_commit_fault_once(cnidarium::CommitFault::AfterWriteBeforeCachePublication);
+        let after_write_error = state.commit(replayed).unwrap_err();
+        assert!(matches!(after_write_error, Error::Storage(_)));
+        assert!(after_write_error
+            .to_string()
+            .contains("injected process failure after durable write before cache publication"));
+        assert_eq!(state.summary().await.unwrap().state_height, 1);
+        assert_eq!(state.supply_audit().await.unwrap().burned, Amount::ZERO);
+        assert_eq!(
+            state
+                .staking_book()
+                .unwrap()
+                .validator(&validator_id)
+                .unwrap()
+                .status,
+            ValidatorStatus::Active
+        );
+        state.close().await;
+
+        state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+        let recovered = state.summary().await.unwrap();
+        assert_eq!(recovered.state_height, 2);
+        assert_eq!(recovered.app_hash, abandoned_app_hash);
+        assert_eq!(recovered.supply.burned, expected_slash);
         assert_eq!(
             state
                 .staking_book()

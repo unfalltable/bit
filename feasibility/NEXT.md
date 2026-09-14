@@ -16,6 +16,6 @@ CometBFT 通过 Go module v0.38.23 构建，实际源码 feb2aea4dc271d612129afc
 
 报告已写入 docs/BIT_第一轮技术验证报告.md，复跑命令见本目录 README.md。原始结果保存在 reports，运行进程已结束。summarize_results.py 仅从实际结果汇总，capture_evidence.py 保存源码、锁、二进制和报告摘要。
 
-后续正式开发已经完成持久化 commitment tree、nullifier/anchor 索引、原子提交、ICS23 状态证明，并把 Transfer、九类质押信封、退出和罚没资金闭环接入 ABCI/JMT。最新四节点实验还通过标准 CometBFT RPC 注入真实重复投票证据，验证规范证据记录、Burn、H+2 移除、同高度 app hash 和处罚后的投票权停止/恢复。当前下一阶段是 JMT/RocksDB 底层故障注入、快照/历史证明、生产摘要与正式节点命令；独立 signer 仍未实现。
+后续正式开发已经完成持久化 commitment tree、nullifier/anchor 索引、原子提交、ICS23 状态证明，并把 Transfer、九类质押信封、退出和罚没资金闭环接入 ABCI/JMT。最新四节点实验还通过标准 CometBFT RPC 注入真实重复投票证据，验证规范证据记录、Burn、H+2 移除、同高度 app hash 和处罚后的投票权停止/恢复。状态 Commit 已启用同步 WAL、错误传播和 WriteBatch 预写校验，并覆盖处罚提交两侧的确定性故障恢复。当前下一阶段是真实磁盘耗尽/fsync 失败、快照/历史证明、生产摘要与正式节点命令；独立 signer 仍未实现。
 
 总体仍只是部分开发验证；已有完整 Transfer 密码学交易、链上原生授权和生产状态核心，但没有钱包、独立 signer、完整节点发布物或主网审查。手机和 Tor、多平台验证仍未完成。不要把实验通过转记为原规格 30 项任务完成，也不要重新访问手机。

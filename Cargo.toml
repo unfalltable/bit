@@ -8,7 +8,7 @@ members = [
     "crates/bit-state",
     "crates/bit-app",
 ]
-exclude = ["feasibility/proof-probe", "feasibility/consensus-probe", "feasibility/upstream/penumbra"]
+exclude = ["feasibility/proof-probe", "feasibility/consensus-probe", "feasibility/upstream/penumbra", "third_party/cnidarium"]
 resolver = "2"
 
 [workspace.package]
@@ -20,3 +20,6 @@ rust-version = "1.83"
 [profile.release]
 overflow-checks = true
 lto = "thin"
+
+[patch.crates-io]
+cnidarium = { path = "third_party/cnidarium" }

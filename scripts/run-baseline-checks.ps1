@@ -9,6 +9,19 @@ $env:CARGO_BUILD_JOBS = '1'
 $env:GOMODCACHE = Join-Path $bitRoot 'feasibility\.tools\go-mod-cache'
 $env:GOCACHE = Join-Path $bitRoot 'feasibility\.tools\go-cache'
 
+$bitCnidariumRoot = Join-Path $bitRoot 'third_party\cnidarium'
+$bitCnidariumManifest = Join-Path $bitCnidariumRoot 'UPSTREAM_SHA256SUMS'
+foreach ($bitManifestLine in Get-Content -LiteralPath $bitCnidariumManifest) {
+    if ($bitManifestLine -notmatch '^(?<hash>[0-9a-f]{64})  (?<path>.+)$') {
+        throw "invalid Cnidarium source manifest line: $bitManifestLine"
+    }
+    $bitVendoredPath = Join-Path $bitCnidariumRoot $Matches.path
+    $bitVendoredHash = (Get-FileHash -LiteralPath $bitVendoredPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($bitVendoredHash -cne $Matches.hash) {
+        throw "vendored Cnidarium source hash mismatch: $($Matches.path)"
+    }
+}
+
 $bitChecks = @()
 function Invoke-BitCheck {
     param([string]$Name, [string]$Program, [string[]]$Arguments)
@@ -17,6 +30,9 @@ function Invoke-BitCheck {
     New-Item -ItemType File -Force -Path $bitLog | Out-Null
     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
     $bitCode = $LASTEXITCODE
+    $bitLogText = [IO.File]::ReadAllText($bitLog).TrimEnd("`r", "`n")
+    if ($bitLogText.Length -gt 0) { $bitLogText += "`r`n" }
+    [IO.File]::WriteAllText($bitLog, $bitLogText, [Text.UTF8Encoding]::new($false))
     $script:bitChecks += [ordered]@{
         name = $Name
         command = "$Program $($Arguments -join ' ')"
@@ -31,6 +47,18 @@ function Invoke-BitCheck {
 Push-Location $bitRoot
 try {
     Invoke-BitCheck 'fmt-check' 'cargo' @('fmt', '--all', '--', '--check')
+    Invoke-BitCheck 'cnidarium-fmt' 'rustfmt' @('--edition', '2021', '--check', 'third_party/cnidarium/src/lib.rs', 'third_party/cnidarium/src/storage.rs')
+    Invoke-BitCheck 'cnidarium-clippy' 'cargo' @(
+        'clippy', '--manifest-path', 'third_party/cnidarium/Cargo.toml',
+        '--lib', '--no-default-features', '--features', 'bit-fault-injection', '--locked',
+        '--', '-D', 'warnings',
+        '-A', 'clippy::doc_lazy_continuation',
+        '-A', 'clippy::needless_lifetimes',
+        '-A', 'clippy::map_clone',
+        '-A', 'clippy::unnecessary_get_then_check',
+        '-A', 'clippy::question_mark'
+    )
+    Invoke-BitCheck 'cnidarium-unit' 'cargo' @('test', '--manifest-path', 'third_party/cnidarium/Cargo.toml', '--no-default-features', '--features', 'bit-fault-injection', '--locked')
     Invoke-BitCheck 'clippy' 'cargo' @('clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings')
     Invoke-BitCheck 'rust-unit' 'cargo' @('test', '--workspace', '--locked')
     Invoke-BitCheck 'python-oracle' 'py' @('-B', '-m', 'unittest', 'discover', '-s', 'reference', '-p', 'test_*.py', '-v')
@@ -42,10 +70,15 @@ try {
 }
 
 $bitRustLog = Get-Content -LiteralPath (Join-Path $bitReports 'rust-unit.log') -Raw
+$bitCnidariumLog = Get-Content -LiteralPath (Join-Path $bitReports 'cnidarium-unit.log') -Raw
 $bitPythonLog = Get-Content -LiteralPath (Join-Path $bitReports 'python-oracle.log') -Raw
 $bitRustPassed = 0
 foreach ($bitMatch in [regex]::Matches($bitRustLog, 'test result: ok\. (\d+) passed;')) {
     $bitRustPassed += [int]$bitMatch.Groups[1].Value
+}
+$bitCnidariumPassed = 0
+foreach ($bitMatch in [regex]::Matches($bitCnidariumLog, 'test result: ok\. (\d+) passed;')) {
+    $bitCnidariumPassed += [int]$bitMatch.Groups[1].Value
 }
 $bitPythonPassed = if ($bitPythonLog -match 'Ran (\d+) tests') { [int]$Matches[1] } else { 0 }
 $bitReport = [ordered]@{
@@ -54,7 +87,7 @@ $bitReport = [ordered]@{
     completed_at = [DateTimeOffset]::UtcNow.ToString('o')
     toolchain = (& rustc --version)
     checks = $bitChecks
-    counts = [ordered]@{ rust_tests = $bitRustPassed; python_oracle_tests = $bitPythonPassed }
+    counts = [ordered]@{ rust_tests = $bitRustPassed; cnidarium_tests = $bitCnidariumPassed; python_oracle_tests = $bitPythonPassed }
     rayon_threads = 4
     cargo_build_jobs = 1
     mobile = 'SKIPPED_BY_USER'
@@ -63,6 +96,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'feasibility/reports/bit-app-network-result.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\reports\bit-app-network-result.json') -Algorithm SHA256).Hash.ToLowerInvariant() }
     )
     inputs = @(
+        [ordered]@{ path = 'Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'Cargo.lock'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'tests/vectors/emission-vectors.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\vectors\emission-vectors.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'tests/vectors/transaction-vectors.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\vectors\transaction-vectors.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
@@ -89,10 +123,16 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'feasibility/evidence-injector/go.mod'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\evidence-injector\go.mod') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/evidence-injector/go.sum'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\evidence-injector\go.sum') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/evidence-injector/main.go'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\evidence-injector\main.go') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'third_party/cnidarium/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'third_party/cnidarium/Cargo.lock'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'third_party/cnidarium/BIT_PATCH.md'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\BIT_PATCH.md') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'third_party/cnidarium/UPSTREAM_SHA256SUMS'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\UPSTREAM_SHA256SUMS') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'third_party/cnidarium/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'third_party/cnidarium/src/storage.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\src\storage.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/run_bit_app_network.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\run_bit_app_network.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/rust_env.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\rust_env.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/bootstrap_tools.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\bootstrap_tools.py') -Algorithm SHA256).Hash.ToLowerInvariant() }
     )
 }
 $bitReport | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $bitReports 'development-baseline.json') -Encoding utf8
-Write-Host "BIT baseline checks passed: $bitRustPassed Rust tests, $bitPythonPassed Python oracle tests"
+Write-Host "BIT baseline checks passed: $bitRustPassed BIT Rust tests, $bitCnidariumPassed Cnidarium tests, $bitPythonPassed Python oracle tests"
