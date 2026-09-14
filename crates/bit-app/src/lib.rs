@@ -6,21 +6,23 @@
 
 pub mod abci;
 mod safety;
+mod state_sync;
 
 pub use safety::{
     acknowledge_safety_halt, decode_hash_hex, encode_hex, read_safety_halt,
     safety_halt_journal_path, SafetyHaltError, SafetyHaltReason, SafetyHaltRecord,
 };
+pub use state_sync::{StateSyncConfig, STATE_SYNC_SNAPSHOT_FORMAT};
 
 use bit_staking::{CommitVote, ConsensusPowerUpdate};
 use bit_state::{
     ByzantineEvidence, CommitReceipt, GenesisConfig, PersistentState, PreparedBlock, QueryProof,
-    StateSummary,
+    StateSnapshotManifest, StateSummary,
 };
 use bit_transaction::Error as TransactionError;
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 pub type Hash32 = [u8; 32];
 
@@ -37,6 +39,8 @@ pub enum Error {
     },
     #[error("state operation failed: {0}")]
     State(#[from] bit_state::Error),
+    #[error("state sync operation failed: {0}")]
+    StateSync(String),
     #[error("FinalizeBlock already produced an uncommitted block")]
     PendingBlockExists,
     #[error("Commit called without a finalized block")]
@@ -142,7 +146,7 @@ pub struct FinalizeOutcome {
 }
 
 pub struct ApplicationCore {
-    state: PersistentState,
+    state: RwLock<PersistentState>,
     protocol_version: u64,
     max_block_bytes: u64,
     pending: Mutex<Option<PreparedBlock>>,
@@ -154,7 +158,7 @@ impl ApplicationCore {
         let max_block_bytes = genesis.max_block_bytes;
         let state = PersistentState::open(state_path, genesis).await?;
         Ok(Self {
-            state,
+            state: RwLock::new(state),
             protocol_version,
             max_block_bytes,
             pending: Mutex::new(None),
@@ -162,7 +166,7 @@ impl ApplicationCore {
     }
 
     pub async fn info(&self) -> Result<AppInfo> {
-        let summary = self.state.summary().await?;
+        let summary = self.state.read().await.summary().await?;
         Ok(AppInfo {
             protocol_version: self.protocol_version,
             last_block_height: summary.state_height,
@@ -171,23 +175,23 @@ impl ApplicationCore {
     }
 
     pub async fn state_summary(&self) -> Result<StateSummary> {
-        Ok(self.state.summary().await?)
+        Ok(self.state.read().await.summary().await?)
     }
 
     pub async fn expected_next_validators_hash(&self, block_height: u64) -> Result<Hash32> {
         Ok(self
             .state
+            .read()
+            .await
             .expected_next_validators_hash(block_height)
             .await?)
     }
 
     /// Check a transaction against the latest committed state without writes.
     pub async fn check_tx(&self, transaction: &[u8]) -> Result<TxResult> {
-        let height = next_height(self.state.summary().await?.state_height)?;
-        let mut block = self
-            .state
-            .begin_block_preview(height, [0; 32], [0; 32])
-            .await?;
+        let state = self.state.read().await;
+        let height = next_height(state.summary().await?.state_height)?;
+        let mut block = state.begin_block_preview(height, [0; 32], [0; 32]).await?;
         match block.verify_and_stage_transaction(transaction).await {
             Ok(tx_id) => Ok(TxResult::accepted(tx_id)),
             Err(error) => rejection_or_state_error(error),
@@ -201,7 +205,7 @@ impl ApplicationCore {
         candidates: Vec<Vec<u8>>,
         requested_max_tx_bytes: u64,
     ) -> Result<PreparedProposal> {
-        let summary = self.state.summary().await?;
+        let summary = self.state.read().await.summary().await?;
         let block_time_seconds = summary
             .block_time_seconds
             .checked_add(1)
@@ -244,8 +248,8 @@ impl ApplicationCore {
         next_validators_hash: Hash32,
     ) -> Result<PreparedProposal> {
         let limit = requested_max_tx_bytes.min(self.max_block_bytes);
-        let mut block = self
-            .state
+        let state = self.state.read().await;
+        let mut block = state
             .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
             .await?;
         block
@@ -288,7 +292,7 @@ impl ApplicationCore {
 
     /// Re-execute a proposal in order. Any invalid transaction rejects it.
     pub async fn process_proposal(&self, height: u64, transactions: &[Vec<u8>]) -> Result<bool> {
-        let summary = self.state.summary().await?;
+        let summary = self.state.read().await.summary().await?;
         let block_time_seconds = summary
             .block_time_seconds
             .checked_add(1)
@@ -325,8 +329,8 @@ impl ApplicationCore {
         if total_bytes(transactions)? > self.max_block_bytes {
             return Ok(false);
         }
-        let mut block = self
-            .state
+        let state = self.state.read().await;
+        let mut block = state
             .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
             .await?;
         block
@@ -362,8 +366,8 @@ impl ApplicationCore {
         if pending.is_some() {
             return Err(Error::PendingBlockExists);
         }
-        let mut block = self
-            .state
+        let state = self.state.read().await;
+        let mut block = state
             .begin_block_at(
                 request.height,
                 request.block_time_seconds,
@@ -410,15 +414,35 @@ impl ApplicationCore {
             .await
             .take()
             .ok_or(Error::NoPendingBlock)?;
-        Ok(self.state.commit(prepared)?)
+        Ok(self.state.read().await.commit(prepared)?)
     }
 
     pub async fn query_latest_with_proof(&self, key: &str) -> Result<QueryProof> {
-        Ok(self.state.query_latest_with_proof(key).await?)
+        Ok(self.state.read().await.query_latest_with_proof(key).await?)
+    }
+
+    pub(crate) async fn export_state_snapshot(
+        &self,
+        destination: PathBuf,
+    ) -> Result<StateSnapshotManifest> {
+        Ok(self.state.read().await.export_snapshot(destination).await?)
+    }
+
+    pub(crate) async fn replace_state(&self, replacement: PersistentState) -> Result<()> {
+        let pending = self.pending.lock().await;
+        if pending.is_some() {
+            return Err(Error::PendingBlockExists);
+        }
+        let mut state = self.state.write().await;
+        let previous = std::mem::replace(&mut *state, replacement);
+        drop(state);
+        drop(pending);
+        previous.close().await;
+        Ok(())
     }
 
     pub async fn close(self) {
-        self.state.close().await;
+        self.state.into_inner().close().await;
     }
 }
 
@@ -751,6 +775,8 @@ mod tests {
         );
         let validator = app
             .state
+            .read()
+            .await
             .staking_book()
             .unwrap()
             .validator(&validator_id)
@@ -760,10 +786,22 @@ mod tests {
         assert_eq!(validator.signed_window_count, 2);
         assert_eq!(validator.epoch_score, 0);
         for height in [3, 4] {
-            let set = app.state.effective_validator_set_at(height).await.unwrap();
+            let set = app
+                .state
+                .read()
+                .await
+                .effective_validator_set_at(height)
+                .await
+                .unwrap();
             assert_eq!(set.validators()[0].power, power);
         }
-        let h_plus_two = app.state.effective_validator_set_at(5).await.unwrap();
+        let h_plus_two = app
+            .state
+            .read()
+            .await
+            .effective_validator_set_at(5)
+            .await
+            .unwrap();
         assert_eq!(h_plus_two.validators()[0].power, updated_power);
         app.close().await;
 
@@ -773,6 +811,8 @@ mod tests {
         assert_eq!(
             reopened
                 .state
+                .read()
+                .await
                 .staking_book()
                 .unwrap()
                 .validator(&validator_id)

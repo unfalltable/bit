@@ -322,6 +322,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
         application_version: env!("CARGO_PKG_VERSION").to_owned(),
         expected_init_chain,
         retain_height: 0,
+        state_sync: None,
     };
     Ok((genesis, config))
 }

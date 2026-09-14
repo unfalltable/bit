@@ -12,6 +12,6 @@ test_transaction_body_effect_and_envelope (test_protocol_oracle.ProtocolOracleTe
 velope) ... ok
 
 ----------------------------------------------------------------------
-Ran 4 tests in 0.001s
+Ran 4 tests in 0.002s
 
 OK

@@ -4499,6 +4499,55 @@ mod tests {
             manifest
         );
 
+        let transport_directory = root.path().join("transport-chunks");
+        std::fs::create_dir(&transport_directory).unwrap();
+        let transport_count = manifest.state_sync_chunk_count().unwrap();
+        assert_eq!(
+            transport_count,
+            u32::try_from(manifest.total_chunks).unwrap() + 1
+        );
+        let mut transport_paths = Vec::new();
+        for index in 0..transport_count {
+            let chunk = manifest
+                .load_state_sync_chunk(&snapshot_path, index)
+                .unwrap();
+            assert!(chunk.len() <= STATE_SNAPSHOT_CHUNK_BYTES);
+            manifest.validate_state_sync_chunk(index, &chunk).unwrap();
+            let path = transport_directory.join(format!("{index:08x}.chunk"));
+            std::fs::write(&path, chunk).unwrap();
+            transport_paths.push(path);
+        }
+        assert_eq!(
+            StateSnapshotManifest::from_state_sync_manifest_chunk(
+                &std::fs::read(&transport_paths[0]).unwrap()
+            )
+            .unwrap(),
+            manifest
+        );
+        let mut corrupt_transport_chunk = std::fs::read(&transport_paths[1]).unwrap();
+        corrupt_transport_chunk[0] ^= 1;
+        assert!(manifest
+            .validate_state_sync_chunk(1, &corrupt_transport_chunk)
+            .is_err());
+
+        let materialized_path = root.path().join("materialized-snapshot");
+        manifest
+            .materialize_state_sync_snapshot(&transport_paths, &materialized_path)
+            .unwrap();
+        assert_eq!(
+            StateSnapshotManifest::read_from(&materialized_path).unwrap(),
+            manifest
+        );
+        let transport_restored = PersistentState::import_snapshot(
+            materialized_path,
+            root.path().join("transport-restored"),
+            genesis_config.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(transport_restored.summary().await.unwrap(), expected);
+        transport_restored.close().await;
+
         let nested_import = snapshot_path.join("nested-database");
         let error = match PersistentState::import_snapshot(
             snapshot_path.clone(),

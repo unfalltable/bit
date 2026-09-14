@@ -5,21 +5,26 @@
 //! on a private Tokio runtime. Consensus-critical failures set a shared halted
 //! flag before terminating the current ABCI request.
 
+use crate::state_sync::{
+    active_state_path, persist_active_state_marker, read_active_state_marker,
+    validate_active_state_path, validate_active_summary, ActiveStateMarker, ApplyDecision,
+    CompletedIncomingSnapshot, StateSyncManager,
+};
 use crate::{
     encode_hex, read_safety_halt, safety_halt_journal_path, ApplicationCore, BlockRequest,
     Error as CoreError, FinalizeOutcome, Hash32, LastCommit, SafetyHaltError, SafetyHaltRecord,
-    TxResult,
+    StateSyncConfig, TxResult,
 };
 use bit_staking::{CommitVote, ValidatorStatus, COMETBFT_ADDRESS_BYTES};
-use bit_state::{ByzantineEvidence, ByzantineEvidenceKind, GenesisConfig};
+use bit_state::{ByzantineEvidence, ByzantineEvidenceKind, GenesisConfig, PersistentState};
 use ics23::commitment_proof::Proof;
 use prost::Message;
 use std::{
     collections::BTreeSet,
     fmt::Display,
-    io,
+    fs, io,
     net::{SocketAddr, ToSocketAddrs},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, MutexGuard,
@@ -37,7 +42,7 @@ use tendermint_proto::v0_38::{
         ResponseExtendVote, ResponseFinalizeBlock, ResponseInfo, ResponseInitChain,
         ResponseListSnapshots, ResponseLoadSnapshotChunk, ResponseOfferSnapshot,
         ResponsePrepareProposal, ResponseProcessProposal, ResponseQuery,
-        ResponseVerifyVoteExtension, ValidatorUpdate as ProtoValidatorUpdate,
+        ResponseVerifyVoteExtension, Snapshot, ValidatorUpdate as ProtoValidatorUpdate,
     },
     crypto::{public_key, ProofOp, ProofOps},
     types::BlockIdFlag,
@@ -110,6 +115,8 @@ pub struct AbciConfig {
     pub expected_init_chain: RequestInitChain,
     /// Zero retains all CometBFT blocks. Pruning policy will set this later.
     pub retain_height: i64,
+    /// Local snapshot repository and retention policy. `None` disables State Sync.
+    pub state_sync: Option<StateSyncConfig>,
 }
 
 impl AbciConfig {
@@ -317,9 +324,11 @@ struct Inner {
     runtime: tokio::runtime::Runtime,
     execution: Mutex<()>,
     config: AbciConfig,
+    genesis: GenesisConfig,
     state_path: PathBuf,
     chain_context: Hash32,
     digest_provider: Arc<dyn FinalizeDigestProvider>,
+    state_sync: StateSyncManager,
     initialized: AtomicBool,
     halted: AtomicBool,
 }
@@ -350,22 +359,50 @@ impl AbciApplication {
                 record_hash: encode_hex(&record.record_hash()),
             });
         }
+        let marker = read_active_state_marker(&state_path)?;
+        if marker
+            .as_ref()
+            .is_some_and(|marker| marker.chain_context != chain_context)
+        {
+            return Err(CoreError::StateSync(
+                "active state marker belongs to another chain context".to_owned(),
+            ));
+        }
+        let active_path = match marker.as_ref() {
+            Some(marker) => active_state_path(&state_path, &marker.snapshot_id)?,
+            None => state_path.clone(),
+        };
+        if marker.is_some() {
+            validate_active_state_path(&active_path)?;
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
             .build()
             .map_err(|_| CoreError::InvalidConfig("failed to create ABCI runtime"))?;
-        let core = runtime.block_on(ApplicationCore::open(state_path.clone(), genesis))?;
+        let core = runtime.block_on(ApplicationCore::open(active_path.clone(), genesis.clone()))?;
+        if let Some(marker) = marker.as_ref() {
+            let summary = runtime.block_on(core.state_summary())?;
+            validate_active_summary(marker, &summary, &genesis)?;
+        }
         let initialized = runtime.block_on(core.info())?.last_block_height > 0;
+        let state_sync = StateSyncManager::new(
+            &active_path,
+            &state_path,
+            chain_context,
+            config.state_sync.clone(),
+        )?;
         Ok(Self {
             inner: Arc::new(Inner {
                 core,
                 runtime,
                 execution: Mutex::new(()),
                 config,
+                genesis,
                 state_path,
                 chain_context,
                 digest_provider,
+                state_sync,
                 initialized: AtomicBool::new(initialized),
                 halted: AtomicBool::new(false),
             }),
@@ -397,6 +434,73 @@ impl AbciApplication {
 
     pub fn is_halted(&self) -> bool {
         self.inner.halted.load(Ordering::Acquire)
+    }
+
+    /// Export the current committed state into the configured State Sync repository.
+    pub fn create_state_sync_snapshot(&self) -> crate::Result<Snapshot> {
+        let _guard = self.execution_guard();
+        let summary = self
+            .inner
+            .runtime
+            .block_on(self.inner.core.state_summary())?;
+        if summary.state_height == 0 {
+            return Err(CoreError::StateSync(
+                "cannot publish a height-zero state-sync snapshot".to_owned(),
+            ));
+        }
+        if let Some(existing) = self.inner.state_sync.existing_snapshot(&summary)? {
+            return Ok(existing);
+        }
+        let destination = self
+            .inner
+            .state_sync
+            .snapshot_destination(summary.state_height)?;
+        self.inner
+            .runtime
+            .block_on(self.inner.core.export_state_snapshot(destination.clone()))?;
+        self.inner
+            .state_sync
+            .register_created_snapshot(&destination, &summary)
+    }
+
+    fn complete_state_sync(&self, incoming: CompletedIncomingSnapshot) -> crate::Result<()> {
+        let chunk_paths = incoming.chunk_paths()?;
+        let materialized = incoming.materialized_path();
+        incoming
+            .manifest
+            .materialize_state_sync_snapshot(&chunk_paths, &materialized)?;
+        let active_path =
+            active_state_path(&self.inner.state_path, &incoming.manifest.snapshot_id)?;
+        remove_orphan_active_state(&active_path)?;
+        let replacement = self
+            .inner
+            .runtime
+            .block_on(PersistentState::import_snapshot(
+                materialized,
+                active_path,
+                self.inner.genesis.clone(),
+            ))?;
+        let summary = self.inner.runtime.block_on(replacement.summary())?;
+        let marker = ActiveStateMarker {
+            snapshot_id: incoming.manifest.snapshot_id,
+            state_height: incoming.manifest.state_height,
+            app_hash: incoming.manifest.app_hash,
+            chain_context: incoming.manifest.chain_context,
+        };
+        validate_active_summary(&marker, &summary, &self.inner.genesis)?;
+        persist_active_state_marker(&self.inner.state_path, &marker)?;
+        if let Err(error) = self
+            .inner
+            .runtime
+            .block_on(self.inner.core.replace_state(replacement))
+        {
+            self.halt(format!(
+                "state-sync marker was published but state activation failed: {error}"
+            ));
+        }
+        self.inner.initialized.store(true, Ordering::Release);
+        incoming.finish();
+        Ok(())
     }
 
     fn ensure_live(&self) {
@@ -821,35 +925,120 @@ impl Application for AbciApplication {
 
     fn list_snapshots(&self) -> ResponseListSnapshots {
         self.ensure_live();
-        ResponseListSnapshots {
-            snapshots: Vec::new(),
-        }
+        let _guard = self.execution_guard();
+        let snapshots = self.inner.state_sync.list_snapshots().unwrap_or_default();
+        ResponseListSnapshots { snapshots }
     }
 
-    fn offer_snapshot(&self, _request: RequestOfferSnapshot) -> ResponseOfferSnapshot {
+    fn offer_snapshot(&self, request: RequestOfferSnapshot) -> ResponseOfferSnapshot {
         self.ensure_live();
+        let _guard = self.execution_guard();
+        let summary = self.inner.runtime.block_on(self.inner.core.state_summary());
+        let pristine_summary = match summary {
+            Ok(summary) if !self.is_initialized() && summary.state_height == 0 => Some(summary),
+            Ok(_) => None,
+            Err(_) => {
+                return ResponseOfferSnapshot {
+                    result: response_offer_snapshot::Result::Abort as i32,
+                };
+            }
+        };
+        let result = self
+            .inner
+            .state_sync
+            .offer(
+                request.snapshot.as_ref(),
+                &request.app_hash,
+                pristine_summary.as_ref(),
+            )
+            .unwrap_or(response_offer_snapshot::Result::Abort);
         ResponseOfferSnapshot {
-            result: response_offer_snapshot::Result::RejectFormat as i32,
+            result: result as i32,
         }
     }
 
-    fn load_snapshot_chunk(&self, _request: RequestLoadSnapshotChunk) -> ResponseLoadSnapshotChunk {
+    fn load_snapshot_chunk(&self, request: RequestLoadSnapshotChunk) -> ResponseLoadSnapshotChunk {
         self.ensure_live();
+        let _guard = self.execution_guard();
+        let chunk = self
+            .inner
+            .state_sync
+            .load_chunk(request.height, request.format, request.chunk)
+            .unwrap_or_default();
         ResponseLoadSnapshotChunk {
-            chunk: Vec::new().into(),
+            chunk: chunk.into(),
         }
     }
 
     fn apply_snapshot_chunk(
         &self,
-        _request: RequestApplySnapshotChunk,
+        request: RequestApplySnapshotChunk,
     ) -> ResponseApplySnapshotChunk {
         self.ensure_live();
-        ResponseApplySnapshotChunk {
-            result: response_apply_snapshot_chunk::Result::Abort as i32,
-            refetch_chunks: Vec::new(),
-            reject_senders: Vec::new(),
+        let _guard = self.execution_guard();
+        match self
+            .inner
+            .state_sync
+            .apply_chunk(request.index, &request.chunk, &request.sender)
+        {
+            Ok(ApplyDecision::Response {
+                result,
+                refetch_chunks,
+                reject_senders,
+            }) => ResponseApplySnapshotChunk {
+                result: result as i32,
+                refetch_chunks,
+                reject_senders,
+            },
+            Ok(ApplyDecision::Complete(incoming)) => match self.complete_state_sync(*incoming) {
+                Ok(()) => ResponseApplySnapshotChunk {
+                    result: response_apply_snapshot_chunk::Result::Accept as i32,
+                    refetch_chunks: Vec::new(),
+                    reject_senders: Vec::new(),
+                },
+                Err(_) => ResponseApplySnapshotChunk {
+                    result: response_apply_snapshot_chunk::Result::RejectSnapshot as i32,
+                    refetch_chunks: Vec::new(),
+                    reject_senders: reject_sender(&request.sender),
+                },
+            },
+            Err(_) => ResponseApplySnapshotChunk {
+                result: response_apply_snapshot_chunk::Result::Abort as i32,
+                refetch_chunks: Vec::new(),
+                reject_senders: Vec::new(),
+            },
         }
+    }
+}
+
+fn reject_sender(sender: &str) -> Vec<String> {
+    (!sender.is_empty())
+        .then(|| sender.to_owned())
+        .into_iter()
+        .collect()
+}
+
+fn remove_orphan_active_state(path: &Path) -> crate::Result<()> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CoreError::StateSync(format!(
+            "cannot inspect orphan state-sync database {}: {error}",
+            path.display()
+        ))),
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(CoreError::StateSync(format!(
+            "orphan state-sync database is a symlink: {}",
+            path.display()
+        ))),
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).map_err(|error| {
+            CoreError::StateSync(format!(
+                "cannot remove orphan state-sync database {}: {error}",
+                path.display()
+            ))
+        }),
+        Ok(_) => Err(CoreError::StateSync(format!(
+            "orphan state-sync database is not a directory: {}",
+            path.display()
+        ))),
     }
 }
 
@@ -1176,6 +1365,36 @@ mod tests {
                 application_version: env!("CARGO_PKG_VERSION").to_owned(),
                 expected_init_chain,
                 retain_height: 0,
+                state_sync: None,
+            },
+            Arc::new(provider),
+        )
+        .unwrap()
+    }
+
+    fn state_sync_application(
+        state_path: PathBuf,
+        snapshot_directory: PathBuf,
+        max_block_bytes: u64,
+    ) -> AbciApplication {
+        let provider = |_: &RequestFinalizeBlock| {
+            Ok(FinalizeDigests {
+                execution_hash: [4; 32],
+                compact_hash: [5; 32],
+            })
+        };
+        AbciApplication::open(
+            state_path,
+            genesis(max_block_bytes),
+            AbciConfig {
+                application_name: "bit-app".to_owned(),
+                application_version: env!("CARGO_PKG_VERSION").to_owned(),
+                expected_init_chain: init_chain(max_block_bytes as i64),
+                retain_height: 0,
+                state_sync: Some(StateSyncConfig {
+                    snapshot_directory,
+                    keep_recent: 2,
+                }),
             },
             Arc::new(provider),
         )
@@ -1231,6 +1450,7 @@ mod tests {
                     application_version: "0.1.0".to_owned(),
                     expected_init_chain: mismatched_init,
                     retain_height: 0,
+                    state_sync: None,
                 },
                 Arc::new(provider),
             ),
@@ -1261,6 +1481,7 @@ mod tests {
                 application_version: "0.1.0".to_owned(),
                 expected_init_chain: bad_init,
                 retain_height: 0,
+                state_sync: None,
             },
             Arc::new(provider),
         );
@@ -1391,6 +1612,287 @@ mod tests {
             Application::apply_snapshot_chunk(&app, RequestApplySnapshotChunk::default()).result,
             response_apply_snapshot_chunk::Result::Abort as i32
         );
+    }
+
+    #[test]
+    fn state_sync_restores_unordered_chunks_refetches_corruption_and_restarts() {
+        let root = TempDir::new().unwrap();
+        let source = state_sync_application(
+            root.path().join("source-state"),
+            root.path().join("source-snapshots"),
+            1_000_000,
+        );
+        Application::init_chain(&source, init_chain(1_000_000));
+        let finalized = Application::finalize_block(
+            &source,
+            RequestFinalizeBlock {
+                hash: vec![9; 32].into(),
+                height: 1,
+                time: Some(Timestamp {
+                    seconds: 1_800_000_001,
+                    nanos: 0,
+                }),
+                next_validators_hash: genesis_next_validators_hash().into(),
+                ..Default::default()
+            },
+        );
+        Application::commit(&source);
+        let expected_app_hash = finalized.app_hash.to_vec();
+
+        let snapshot = source.create_state_sync_snapshot().unwrap();
+        assert_eq!(snapshot.height, 1);
+        assert_eq!(snapshot.format, crate::STATE_SYNC_SNAPSHOT_FORMAT);
+        assert!(snapshot.chunks >= 2);
+        assert_eq!(source.create_state_sync_snapshot().unwrap(), snapshot);
+        assert_eq!(
+            Application::list_snapshots(&source).snapshots,
+            vec![snapshot.clone()]
+        );
+        let chunks = (0..snapshot.chunks)
+            .map(|index| {
+                Application::load_snapshot_chunk(
+                    &source,
+                    RequestLoadSnapshotChunk {
+                        height: snapshot.height,
+                        format: snapshot.format,
+                        chunk: index,
+                    },
+                )
+                .chunk
+                .to_vec()
+            })
+            .collect::<Vec<_>>();
+        assert!(chunks.iter().all(|chunk| !chunk.is_empty()));
+
+        let target_state = root.path().join("target-state");
+        let target_snapshots = root.path().join("target-snapshots");
+        let target =
+            state_sync_application(target_state.clone(), target_snapshots.clone(), 1_000_000);
+        let mut unsupported = snapshot.clone();
+        unsupported.format += 1;
+        assert_eq!(
+            Application::offer_snapshot(
+                &target,
+                RequestOfferSnapshot {
+                    snapshot: Some(unsupported),
+                    app_hash: expected_app_hash.clone().into(),
+                },
+            )
+            .result,
+            response_offer_snapshot::Result::RejectFormat as i32
+        );
+        let mut excessive = snapshot.clone();
+        excessive.chunks = 100_001;
+        let mut excessive_metadata = excessive.metadata.to_vec();
+        excessive_metadata[28..32].copy_from_slice(&100_001u32.to_be_bytes());
+        excessive.metadata = excessive_metadata.into();
+        assert_eq!(
+            Application::offer_snapshot(
+                &target,
+                RequestOfferSnapshot {
+                    snapshot: Some(excessive),
+                    app_hash: expected_app_hash.clone().into(),
+                },
+            )
+            .result,
+            response_offer_snapshot::Result::Reject as i32
+        );
+        let mut wrong_app_hash = expected_app_hash.clone();
+        wrong_app_hash[0] ^= 1;
+        assert_eq!(
+            Application::offer_snapshot(
+                &target,
+                RequestOfferSnapshot {
+                    snapshot: Some(snapshot.clone()),
+                    app_hash: wrong_app_hash.into(),
+                },
+            )
+            .result,
+            response_offer_snapshot::Result::Reject as i32
+        );
+        assert_eq!(
+            Application::offer_snapshot(
+                &source,
+                RequestOfferSnapshot {
+                    snapshot: Some(snapshot.clone()),
+                    app_hash: expected_app_hash.clone().into(),
+                },
+            )
+            .result,
+            response_offer_snapshot::Result::Abort as i32
+        );
+        let offer = Application::offer_snapshot(
+            &target,
+            RequestOfferSnapshot {
+                snapshot: Some(snapshot.clone()),
+                app_hash: expected_app_hash.clone().into(),
+            },
+        );
+        assert_eq!(offer.result, response_offer_snapshot::Result::Accept as i32);
+
+        let manifest_first = Application::apply_snapshot_chunk(
+            &target,
+            RequestApplySnapshotChunk {
+                index: 0,
+                chunk: chunks[0].clone().into(),
+                sender: "manifest-peer".to_owned(),
+            },
+        );
+        assert_eq!(
+            manifest_first.result,
+            response_apply_snapshot_chunk::Result::Accept as i32
+        );
+        let mut corrupt = chunks[1].clone();
+        corrupt[0] ^= 1;
+        let incremental_corruption = Application::apply_snapshot_chunk(
+            &target,
+            RequestApplySnapshotChunk {
+                index: 1,
+                chunk: corrupt.clone().into(),
+                sender: "bad-peer".to_owned(),
+            },
+        );
+        assert_eq!(
+            incremental_corruption.result,
+            response_apply_snapshot_chunk::Result::Accept as i32
+        );
+        assert_eq!(incremental_corruption.refetch_chunks, vec![1]);
+        assert_eq!(incremental_corruption.reject_senders, vec!["bad-peer"]);
+        assert_eq!(
+            Application::offer_snapshot(
+                &target,
+                RequestOfferSnapshot {
+                    snapshot: Some(snapshot.clone()),
+                    app_hash: expected_app_hash.clone().into(),
+                },
+            )
+            .result,
+            response_offer_snapshot::Result::Accept as i32
+        );
+        let early = Application::apply_snapshot_chunk(
+            &target,
+            RequestApplySnapshotChunk {
+                index: 1,
+                chunk: corrupt.into(),
+                sender: "bad-peer".to_owned(),
+            },
+        );
+        assert_eq!(
+            early.result,
+            response_apply_snapshot_chunk::Result::Accept as i32
+        );
+        for index in (2..snapshot.chunks).rev() {
+            let response = Application::apply_snapshot_chunk(
+                &target,
+                RequestApplySnapshotChunk {
+                    index,
+                    chunk: chunks[usize::try_from(index).unwrap()].clone().into(),
+                    sender: "good-peer".to_owned(),
+                },
+            );
+            assert_eq!(
+                response.result,
+                response_apply_snapshot_chunk::Result::Accept as i32
+            );
+        }
+        let manifest_response = Application::apply_snapshot_chunk(
+            &target,
+            RequestApplySnapshotChunk {
+                index: 0,
+                chunk: chunks[0].clone().into(),
+                sender: "manifest-peer".to_owned(),
+            },
+        );
+        assert_eq!(
+            manifest_response.result,
+            response_apply_snapshot_chunk::Result::Accept as i32
+        );
+        assert_eq!(manifest_response.refetch_chunks, vec![1]);
+        assert_eq!(manifest_response.reject_senders, vec!["bad-peer"]);
+
+        let completed = Application::apply_snapshot_chunk(
+            &target,
+            RequestApplySnapshotChunk {
+                index: 1,
+                chunk: chunks[1].clone().into(),
+                sender: "good-peer".to_owned(),
+            },
+        );
+        assert_eq!(
+            completed.result,
+            response_apply_snapshot_chunk::Result::Accept as i32
+        );
+        assert!(completed.refetch_chunks.is_empty());
+        assert_eq!(
+            Application::info(&target, RequestInfo::default()).last_block_height,
+            1
+        );
+        let query = Application::query(
+            &target,
+            RequestQuery {
+                data: b"meta/height".to_vec().into(),
+                path: STATE_QUERY_PATH.to_owned(),
+                height: 1,
+                prove: true,
+            },
+        );
+        assert_eq!(query.code, QueryCode::Ok as u32);
+        assert_eq!(query.value.as_ref(), 1u64.to_be_bytes());
+        query.proof_ops.unwrap().ops.iter().for_each(|proof| {
+            ics23::CommitmentProof::decode(proof.data.as_slice()).unwrap();
+        });
+        assert_eq!(
+            Application::offer_snapshot(
+                &target,
+                RequestOfferSnapshot {
+                    snapshot: Some(snapshot),
+                    app_hash: expected_app_hash.into(),
+                },
+            )
+            .result,
+            response_offer_snapshot::Result::Abort as i32
+        );
+
+        drop(target);
+        let marker = root.path().join("target-state.active-state-v1");
+        let temporary_marker = root.path().join("target-state.active-state-v1.tmp");
+        std::fs::rename(&marker, &temporary_marker).unwrap();
+        let reopened =
+            state_sync_application(target_state.clone(), target_snapshots.clone(), 1_000_000);
+        assert_eq!(
+            Application::info(&reopened, RequestInfo::default()).last_block_height,
+            1
+        );
+        assert!(marker.is_file());
+        assert!(!temporary_marker.exists());
+        drop(reopened);
+
+        let mut marker_bytes = std::fs::read(&marker).unwrap();
+        let last_marker_byte = marker_bytes.len() - 1;
+        marker_bytes[last_marker_byte] ^= 1;
+        std::fs::write(&marker, marker_bytes).unwrap();
+        let provider = |_: &RequestFinalizeBlock| {
+            Ok(FinalizeDigests {
+                execution_hash: [4; 32],
+                compact_hash: [5; 32],
+            })
+        };
+        let corrupt_reopen = AbciApplication::open(
+            target_state,
+            genesis(1_000_000),
+            AbciConfig {
+                application_name: "bit-app".to_owned(),
+                application_version: env!("CARGO_PKG_VERSION").to_owned(),
+                expected_init_chain: init_chain(1_000_000),
+                retain_height: 0,
+                state_sync: Some(StateSyncConfig {
+                    snapshot_directory: target_snapshots,
+                    keep_recent: 2,
+                }),
+            },
+            Arc::new(provider),
+        );
+        assert!(matches!(corrupt_reopen, Err(CoreError::StateSync(_))));
     }
 
     #[test]
@@ -1570,6 +2072,7 @@ mod tests {
                     application_version: env!("CARGO_PKG_VERSION").to_owned(),
                     expected_init_chain: init_chain(1_000_000),
                     retain_height: 0,
+                    state_sync: None,
                 },
                 Arc::new(provider),
             ),
@@ -1594,6 +2097,7 @@ mod tests {
                 application_version: env!("CARGO_PKG_VERSION").to_owned(),
                 expected_init_chain: init_chain(1_000_000),
                 retain_height: 0,
+                state_sync: None,
             },
             Arc::new(provider),
         )

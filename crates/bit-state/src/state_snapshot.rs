@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     fs::{self, File, OpenOptions},
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -15,11 +15,13 @@ const SNAPSHOT_FORMAT_VERSION: u32 = 1;
 const MANIFEST_NAME: &str = "manifest.bit";
 const MANIFEST_HASH_NAME: &str = "manifest.sha256";
 const DATABASE_DIRECTORY: &str = "db";
+const STATE_SYNC_MANIFEST_MAGIC: [u8; 16] = *b"BIT-SYNC-CHUNK1\0";
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_SNAPSHOT_FILES: usize = 100_000;
 const MAX_SNAPSHOT_ENTRIES: usize = 200_000;
 const MAX_SNAPSHOT_DEPTH: usize = 16;
 const MAX_SNAPSHOT_BYTES: u64 = 16 * 1024 * 1024 * 1024 * 1024;
+const MAX_STATE_SYNC_CHUNKS: u64 = 100_000;
 pub const STATE_SNAPSHOT_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
 static STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
@@ -73,6 +75,237 @@ impl StateSnapshotManifest {
             return Err(snapshot_error("manifest checksum is missing or differs"));
         }
         Ok(manifest)
+    }
+
+    /// Number of ABCI State Sync chunks used by this snapshot.
+    ///
+    /// Chunk zero contains the canonical manifest. Every later transport
+    /// chunk maps one-to-one to a database chunk already committed by it.
+    pub fn state_sync_chunk_count(&self) -> Result<u32> {
+        let manifest_chunk_length = encode_manifest(self)?
+            .len()
+            .checked_add(STATE_SYNC_MANIFEST_MAGIC.len() + 4)
+            .ok_or_else(|| snapshot_error("state-sync manifest chunk length overflow"))?;
+        if manifest_chunk_length > STATE_SNAPSHOT_CHUNK_BYTES {
+            return Err(snapshot_error(
+                "snapshot manifest does not fit the 4 MiB state-sync chunk",
+            ));
+        }
+        let count = self
+            .total_chunks
+            .checked_add(1)
+            .ok_or_else(|| snapshot_error("state-sync chunk count overflow"))?;
+        if count > MAX_STATE_SYNC_CHUNKS {
+            return Err(snapshot_error(
+                "snapshot exceeds the 100000 state-sync chunk limit",
+            ));
+        }
+        u32::try_from(count).map_err(|_| snapshot_error("state-sync chunk count does not fit u32"))
+    }
+
+    /// Encode transport chunk zero containing the canonical snapshot manifest.
+    pub fn state_sync_manifest_chunk(&self) -> Result<Vec<u8>> {
+        let manifest = encode_manifest(self)?;
+        let manifest_length = u32::try_from(manifest.len())
+            .map_err(|_| snapshot_error("state-sync manifest length does not fit u32"))?;
+        let mut chunk = Vec::with_capacity(STATE_SYNC_MANIFEST_MAGIC.len() + 4 + manifest.len());
+        chunk.extend_from_slice(&STATE_SYNC_MANIFEST_MAGIC);
+        chunk.extend_from_slice(&manifest_length.to_be_bytes());
+        chunk.extend_from_slice(&manifest);
+        if chunk.len() > STATE_SNAPSHOT_CHUNK_BYTES {
+            return Err(snapshot_error(
+                "snapshot manifest does not fit the 4 MiB state-sync chunk",
+            ));
+        }
+        Ok(chunk)
+    }
+
+    /// Decode and validate transport chunk zero.
+    pub fn from_state_sync_manifest_chunk(chunk: &[u8]) -> Result<Self> {
+        if chunk.len() > STATE_SNAPSHOT_CHUNK_BYTES {
+            return Err(snapshot_error("state-sync manifest chunk exceeds 4 MiB"));
+        }
+        let mut decoder = ManifestDecoder::new(chunk);
+        if decoder.take_array::<16>()? != STATE_SYNC_MANIFEST_MAGIC {
+            return Err(snapshot_error("state-sync manifest chunk magic differs"));
+        }
+        let manifest_length = usize::try_from(decoder.take_u32()?)
+            .map_err(|_| snapshot_error("state-sync manifest length does not fit usize"))?;
+        let manifest = decode_manifest(decoder.take(manifest_length)?)?;
+        if decoder.remaining() != 0 {
+            return Err(snapshot_error(
+                "state-sync manifest chunk has trailing bytes",
+            ));
+        }
+        manifest.state_sync_chunk_count()?;
+        Ok(manifest)
+    }
+
+    /// Read and verify one transport chunk from an exported snapshot directory.
+    pub fn load_state_sync_chunk(&self, snapshot_directory: &Path, index: u32) -> Result<Vec<u8>> {
+        if index == 0 {
+            return self.state_sync_manifest_chunk();
+        }
+        let (file, file_chunk_index, expected_hash, expected_length) =
+            self.state_sync_data_chunk(index)?;
+        let database = snapshot_directory.join(DATABASE_DIRECTORY);
+        let path = join_portable_path(&database, &file.path)?;
+        if file_length(&path)? != file.length {
+            return Err(snapshot_error(format!(
+                "snapshot file length differs for {}",
+                file.path
+            )));
+        }
+        let offset = u64::try_from(file_chunk_index)
+            .map_err(|_| snapshot_error("state-sync file chunk index does not fit u64"))?
+            .checked_mul(STATE_SNAPSHOT_CHUNK_BYTES as u64)
+            .ok_or_else(|| snapshot_error("state-sync file chunk offset overflow"))?;
+        let mut input = File::open(&path)
+            .map_err(|error| snapshot_io("open state-sync snapshot file", &path, error))?;
+        input
+            .seek(SeekFrom::Start(offset))
+            .map_err(|error| snapshot_io("seek state-sync snapshot file", &path, error))?;
+        let mut chunk = vec![0u8; expected_length];
+        input
+            .read_exact(&mut chunk)
+            .map_err(|error| snapshot_io("read state-sync snapshot chunk", &path, error))?;
+        let actual_hash: Hash32 = Sha256::digest(&chunk).into();
+        if actual_hash != *expected_hash {
+            return Err(snapshot_error(format!(
+                "snapshot chunk hash differs for {}",
+                file.path
+            )));
+        }
+        Ok(chunk)
+    }
+
+    /// Validate one received transport chunk against this manifest.
+    pub fn validate_state_sync_chunk(&self, index: u32, chunk: &[u8]) -> Result<()> {
+        if index == 0 {
+            if &Self::from_state_sync_manifest_chunk(chunk)? != self {
+                return Err(snapshot_error(
+                    "received state-sync manifest differs from the offered snapshot",
+                ));
+            }
+            return Ok(());
+        }
+        let (file, _, expected_hash, expected_length) = self.state_sync_data_chunk(index)?;
+        if chunk.len() != expected_length {
+            return Err(snapshot_error(format!(
+                "state-sync chunk length differs for {}",
+                file.path
+            )));
+        }
+        let actual_hash: Hash32 = Sha256::digest(chunk).into();
+        if actual_hash != *expected_hash {
+            return Err(snapshot_error(format!(
+                "state-sync chunk hash differs for {}",
+                file.path
+            )));
+        }
+        Ok(())
+    }
+
+    /// Rebuild an ordinary snapshot directory from ordered transport chunk files.
+    /// The destination is atomically published only after every chunk is verified.
+    pub fn materialize_state_sync_snapshot(
+        &self,
+        chunk_paths: &[PathBuf],
+        destination: &Path,
+    ) -> Result<()> {
+        let expected_count = usize::try_from(self.state_sync_chunk_count()?)
+            .map_err(|_| snapshot_error("state-sync chunk count does not fit usize"))?;
+        if chunk_paths.len() != expected_count {
+            return Err(snapshot_error("state-sync chunk file count differs"));
+        }
+        let manifest_chunk = fs::read(&chunk_paths[0]).map_err(|error| {
+            snapshot_io(
+                "read received state-sync manifest chunk",
+                &chunk_paths[0],
+                error,
+            )
+        })?;
+        self.validate_state_sync_chunk(0, &manifest_chunk)?;
+
+        ensure_destination_absent(destination)?;
+        let mut staging = StagingDirectory::create_for(destination, "materialize")?;
+        let database = staging.path().join(DATABASE_DIRECTORY);
+        fs::create_dir(&database).map_err(|error| {
+            snapshot_io("create materialized snapshot database", &database, error)
+        })?;
+        write_new_synced(&staging.path().join(MANIFEST_NAME), &encode_manifest(self)?)?;
+        let checksum = format!("{}\n", hex::encode(self.snapshot_id));
+        write_new_synced(
+            &staging.path().join(MANIFEST_HASH_NAME),
+            checksum.as_bytes(),
+        )?;
+
+        let mut transport_index = 1usize;
+        for file in &self.files {
+            let output_path = join_portable_path(&database, &file.path)?;
+            if let Some(parent) = output_path.parent() {
+                fs::create_dir_all(parent).map_err(|error| {
+                    snapshot_io("create materialized snapshot file parent", parent, error)
+                })?;
+            }
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&output_path)
+                .map_err(|error| {
+                    snapshot_io("create materialized snapshot file", &output_path, error)
+                })?;
+            for _ in &file.chunks {
+                let chunk_path = &chunk_paths[transport_index];
+                let chunk = fs::read(chunk_path).map_err(|error| {
+                    snapshot_io("read received state-sync data chunk", chunk_path, error)
+                })?;
+                let index = u32::try_from(transport_index)
+                    .map_err(|_| snapshot_error("state-sync transport index does not fit u32"))?;
+                self.validate_state_sync_chunk(index, &chunk)?;
+                output.write_all(&chunk).map_err(|error| {
+                    snapshot_io("write materialized snapshot chunk", &output_path, error)
+                })?;
+                transport_index += 1;
+            }
+            output.sync_all().map_err(|error| {
+                snapshot_io("sync materialized snapshot file", &output_path, error)
+            })?;
+        }
+        if transport_index != chunk_paths.len() {
+            return Err(snapshot_error("state-sync transport has unused chunks"));
+        }
+        if StateSnapshotManifest::read_from(staging.path())? != *self {
+            return Err(snapshot_error(
+                "materialized snapshot manifest changed during publication",
+            ));
+        }
+        publish_directory(staging.path(), destination)?;
+        staging.disarm();
+        Ok(())
+    }
+
+    fn state_sync_data_chunk(&self, index: u32) -> Result<(&SnapshotFile, usize, &Hash32, usize)> {
+        let mut remaining = usize::try_from(index - 1)
+            .map_err(|_| snapshot_error("state-sync chunk index does not fit usize"))?;
+        for file in &self.files {
+            if remaining < file.chunks.len() {
+                let offset = u64::try_from(remaining)
+                    .map_err(|_| snapshot_error("state-sync chunk offset does not fit u64"))?
+                    .checked_mul(STATE_SNAPSHOT_CHUNK_BYTES as u64)
+                    .ok_or_else(|| snapshot_error("state-sync chunk offset overflow"))?;
+                let length = usize::try_from(
+                    file.length
+                        .checked_sub(offset)
+                        .ok_or_else(|| snapshot_error("state-sync file chunk offset is invalid"))?
+                        .min(STATE_SNAPSHOT_CHUNK_BYTES as u64),
+                )
+                .map_err(|_| snapshot_error("state-sync chunk length does not fit usize"))?;
+                return Ok((file, remaining, &file.chunks[remaining], length));
+            }
+            remaining -= file.chunks.len();
+        }
+        Err(snapshot_error("state-sync chunk index is out of range"))
     }
 }
 
