@@ -1,6 +1,7 @@
 use bit_genesis::{
-    GenesisIdentityManifest, IdentityInputDocument, SignaturePackage, APPROVAL_VERSION,
-    IDENTITY_VERSION,
+    DerivedInputDocument, DerivedSignaturePackage, GenesisDerivedManifest, GenesisIdentityManifest,
+    IdentityInputDocument, SignaturePackage, APPROVAL_VERSION, DERIVED_APPROVAL_VERSION,
+    DERIVED_VERSION, IDENTITY_VERSION,
 };
 use bit_types::{genesis_claim_id, position_id, validator_id};
 use serde_json::{json, Value};
@@ -30,6 +31,10 @@ fn run(args: Vec<String>) -> DynResult<()> {
             "verify" | "validate" => genesis_verify(rest),
             "inspect" => genesis_inspect(rest),
             "sign" => genesis_sign(rest),
+            "build-derived" => genesis_build_derived(rest),
+            "verify-derived" => genesis_verify_derived(rest),
+            "inspect-derived" => genesis_inspect_derived(rest),
+            "sign-derived" => genesis_sign_derived(rest),
             _ => Err(usage().into()),
         },
         [group, command, rest @ ..] if group == "release" && command == "preflight" => {
@@ -117,6 +122,104 @@ fn genesis_sign(args: &[String]) -> DynResult<()> {
     Ok(())
 }
 
+fn genesis_build_derived(args: &[String]) -> DynResult<()> {
+    validate_options(args, &["--manifest", "--input", "--output"])?;
+    let manifest_path = required_path(args, "--manifest")?;
+    let input = required_path(args, "--input")?;
+    let output = required_path(args, "--output")?;
+    reject_same_path(&manifest_path, &output)?;
+    reject_same_path(&input, &output)?;
+    let identity = read_manifest(&manifest_path)?;
+    let derived = read_derived_input(&input, &identity)?;
+    write_new(&output, &derived.encode_canonical(&identity)?)?;
+    print_derived_report("built", &identity, &derived, Some(&output), None)?;
+    Ok(())
+}
+
+fn genesis_verify_derived(args: &[String]) -> DynResult<()> {
+    validate_options(args, &["--manifest", "--derived", "--signatures"])?;
+    let manifest_path = required_path(args, "--manifest")?;
+    let derived_path = required_path(args, "--derived")?;
+    let identity = read_manifest(&manifest_path)?;
+    let derived = read_derived(&derived_path, &identity)?;
+    let signatures = optional_path(args, "--signatures")?;
+    let approval_count = if let Some(path) = signatures {
+        let package = DerivedSignaturePackage::decode_canonical(&fs::read(path)?)?;
+        Some(package.verify(&identity, &derived)?)
+    } else {
+        None
+    };
+    print_derived_report(
+        "verified",
+        &identity,
+        &derived,
+        Some(&derived_path),
+        approval_count,
+    )?;
+    Ok(())
+}
+
+fn genesis_inspect_derived(args: &[String]) -> DynResult<()> {
+    validate_options(args, &["--manifest", "--derived"])?;
+    let manifest_path = required_path(args, "--manifest")?;
+    let derived_path = required_path(args, "--derived")?;
+    let identity = read_manifest(&manifest_path)?;
+    let derived = read_derived(&derived_path, &identity)?;
+    print_derived_report("inspected", &identity, &derived, Some(&derived_path), None)?;
+    Ok(())
+}
+
+fn genesis_sign_derived(args: &[String]) -> DynResult<()> {
+    validate_options(
+        args,
+        &[
+            "--manifest",
+            "--derived",
+            "--key-file",
+            "--output",
+            "--append",
+        ],
+    )?;
+    let manifest_path = required_path(args, "--manifest")?;
+    let derived_path = required_path(args, "--derived")?;
+    let key_path = required_path(args, "--key-file")?;
+    let output = required_path(args, "--output")?;
+    reject_same_path(&manifest_path, &output)?;
+    reject_same_path(&derived_path, &output)?;
+    reject_same_path(&key_path, &output)?;
+    let identity = read_manifest(&manifest_path)?;
+    let derived = read_derived(&derived_path, &identity)?;
+    let mut secret_key = read_secret_key(&key_path)?;
+    let mut package = if let Some(path) = optional_path(args, "--append")? {
+        DerivedSignaturePackage::decode_canonical(&fs::read(path)?)?
+    } else {
+        DerivedSignaturePackage {
+            identity_manifest_hash: identity.hash()?,
+            derived_manifest_hash: derived.hash(&identity)?,
+            approvals: Vec::new(),
+        }
+    };
+    let signer_result = package.add_signature(&identity, &derived, secret_key);
+    secret_key.fill(0);
+    let signer = signer_result?;
+    write_new(&output, &package.encode_canonical()?)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "status": "signed",
+            "derived_signature_package_version": DERIVED_APPROVAL_VERSION,
+            "identity_manifest_hash": hex::encode(package.identity_manifest_hash),
+            "derived_manifest_hash": hex::encode(package.derived_manifest_hash),
+            "signer_pubkey": hex::encode(signer),
+            "approval_count": package.approvals.len(),
+            "threshold": identity.approval_policy.threshold,
+            "threshold_satisfied": package.approvals.len() >= usize::from(identity.approval_policy.threshold),
+            "output": output,
+        }))?
+    );
+    Ok(())
+}
+
 fn release_preflight(args: &[String]) -> DynResult<()> {
     validate_options(
         args,
@@ -126,6 +229,10 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
             "--signatures",
             "--crypto-manifest",
             "--parameters",
+            "--derived-manifest",
+            "--derived-signatures",
+            "--runtime-inputs",
+            "--cometbft-genesis",
         ],
     )?;
     let input_path = required_path(args, "--input")?;
@@ -135,6 +242,12 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
     require_json_string(&root, "status", None, &mut blockers);
     require_json_hash(&root, "genesis_manifest_hash", &mut blockers);
     require_json_hash(&root, "genesis_signature_package_sha256", &mut blockers);
+    require_json_hash(&root, "genesis_derived_manifest_sha256", &mut blockers);
+    require_json_hash(
+        &root,
+        "genesis_derived_signature_package_sha256",
+        &mut blockers,
+    );
     for field in [
         "checkpoint_publishers",
         "independent_endpoints",
@@ -147,7 +260,19 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
     require_hash_object(
         &root,
         "derived_genesis",
-        "initial_state_root",
+        "derived_manifest_hash",
+        &mut blockers,
+    );
+    require_hash_object(
+        &root,
+        "derived_genesis",
+        "runtime_inputs_sha256",
+        &mut blockers,
+    );
+    require_hash_object(
+        &root,
+        "derived_genesis",
+        "shielded_tree_root",
         &mut blockers,
     );
     require_hash_object(&root, "derived_genesis", "app_hash", &mut blockers);
@@ -161,6 +286,12 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
         &root,
         "derived_genesis",
         "genesis_compact_hash",
+        &mut blockers,
+    );
+    require_hash_object(
+        &root,
+        "derived_genesis",
+        "cometbft_genesis_sha256",
         &mut blockers,
     );
     validate_initial_supply(&root, &mut blockers);
@@ -184,6 +315,10 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
     let signatures_path = optional_path(args, "--signatures")?;
     let crypto_path = optional_path(args, "--crypto-manifest")?;
     let parameters_path = optional_path(args, "--parameters")?;
+    let derived_manifest_path = optional_path(args, "--derived-manifest")?;
+    let derived_signatures_path = optional_path(args, "--derived-signatures")?;
+    let runtime_inputs_path = optional_path(args, "--runtime-inputs")?;
+    let cometbft_genesis_path = optional_path(args, "--cometbft-genesis")?;
     let mut manifest_hash = None;
     if let Some(identity) = identity.as_ref() {
         let expected = identity.hash()?;
@@ -250,12 +385,25 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
             "--parameters",
             &mut blockers,
         );
+        validate_derived_evidence(
+            &root,
+            identity,
+            derived_manifest_path.as_ref(),
+            derived_signatures_path.as_ref(),
+            runtime_inputs_path.as_ref(),
+            cometbft_genesis_path.as_ref(),
+            &mut blockers,
+        );
     } else {
         for (path, flag) in [
             (manifest_path, "--manifest"),
             (signatures_path, "--signatures"),
             (crypto_path, "--crypto-manifest"),
             (parameters_path, "--parameters"),
+            (derived_manifest_path, "--derived-manifest"),
+            (derived_signatures_path, "--derived-signatures"),
+            (runtime_inputs_path, "--runtime-inputs"),
+            (cometbft_genesis_path, "--cometbft-genesis"),
         ] {
             if path.is_none() {
                 blockers.push(format!("missing {flag} evidence"));
@@ -285,6 +433,30 @@ fn release_preflight(args: &[String]) -> DynResult<()> {
 fn read_identity(path: &PathBuf) -> DynResult<GenesisIdentityManifest> {
     let root: Value = serde_json::from_slice(&fs::read(path)?)?;
     Ok(identity_from_value(&root)?.into_manifest()?)
+}
+
+fn read_manifest(path: &PathBuf) -> DynResult<GenesisIdentityManifest> {
+    Ok(GenesisIdentityManifest::decode_canonical(&fs::read(path)?)?)
+}
+
+fn read_derived_input(
+    path: &PathBuf,
+    identity: &GenesisIdentityManifest,
+) -> DynResult<GenesisDerivedManifest> {
+    let root: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let value = root.get("derived_genesis").unwrap_or(&root).clone();
+    let document: DerivedInputDocument = serde_json::from_value(value)?;
+    Ok(document.into_manifest(identity)?)
+}
+
+fn read_derived(
+    path: &PathBuf,
+    identity: &GenesisIdentityManifest,
+) -> DynResult<GenesisDerivedManifest> {
+    Ok(GenesisDerivedManifest::decode_canonical(
+        &fs::read(path)?,
+        identity,
+    )?)
 }
 
 fn identity_from_value(root: &Value) -> DynResult<IdentityInputDocument> {
@@ -353,6 +525,39 @@ fn print_manifest_report(
             "derived_validators": validators,
             "approval_threshold": manifest.approval_policy.threshold,
             "authorized_signer_count": manifest.approval_policy.signers.len(),
+            "verified_approval_count": approval_count,
+        }))?
+    );
+    Ok(())
+}
+
+fn print_derived_report(
+    status: &str,
+    identity: &GenesisIdentityManifest,
+    derived: &GenesisDerivedManifest,
+    path: Option<&PathBuf>,
+    approval_count: Option<usize>,
+) -> DynResult<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "status": status,
+            "derived_version": DERIVED_VERSION,
+            "path": path,
+            "identity_manifest_hash": hex::encode(derived.identity_manifest_hash),
+            "derived_manifest_hash": hex::encode(derived.hash(identity)?),
+            "chain_context": hex::encode(derived.chain_context),
+            "runtime_inputs_sha256": hex::encode(derived.runtime_inputs_sha256),
+            "genesis_commitments_hash": hex::encode(derived.genesis_commitments_hash),
+            "genesis_claims_hash": hex::encode(derived.genesis_claims_hash),
+            "shielded_tree_root": hex::encode(derived.shielded_tree_root),
+            "app_hash": hex::encode(derived.app_hash),
+            "genesis_execution_hash": hex::encode(derived.genesis_execution_hash),
+            "genesis_compact_hash": hex::encode(derived.genesis_compact_hash),
+            "cometbft_genesis_sha256": hex::encode(derived.cometbft_genesis_sha256),
+            "claim_count": derived.claims.len(),
+            "validator_count": derived.validators.len(),
+            "approval_threshold": identity.approval_policy.threshold,
             "verified_approval_count": approval_count,
         }))?
     );
@@ -567,6 +772,128 @@ fn validate_future_budget(
     }
 }
 
+fn validate_derived_evidence(
+    root: &Value,
+    identity: &GenesisIdentityManifest,
+    derived_manifest_path: Option<&PathBuf>,
+    derived_signatures_path: Option<&PathBuf>,
+    runtime_inputs_path: Option<&PathBuf>,
+    cometbft_genesis_path: Option<&PathBuf>,
+    blockers: &mut Vec<String>,
+) {
+    let Some(derived_path) = derived_manifest_path else {
+        blockers.push("missing --derived-manifest evidence".to_owned());
+        if derived_signatures_path.is_none() {
+            blockers.push("missing --derived-signatures evidence".to_owned());
+        }
+        if runtime_inputs_path.is_none() {
+            blockers.push("missing --runtime-inputs evidence".to_owned());
+        }
+        if cometbft_genesis_path.is_none() {
+            blockers.push("missing --cometbft-genesis evidence".to_owned());
+        }
+        return;
+    };
+    let derived_bytes = match fs::read(derived_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            blockers.push(format!("derived manifest unreadable: {error}"));
+            return;
+        }
+    };
+    let expected_file_hash = root
+        .get("genesis_derived_manifest_sha256")
+        .and_then(Value::as_str);
+    let actual_file_hash = hex::encode(Sha256::digest(&derived_bytes));
+    if expected_file_hash != Some(actual_file_hash.as_str()) {
+        blockers.push("genesis_derived_manifest_sha256 mismatch".to_owned());
+    }
+    let derived = match GenesisDerivedManifest::decode_canonical(&derived_bytes, identity) {
+        Ok(derived) => derived,
+        Err(error) => {
+            blockers.push(format!("derived manifest invalid: {error}"));
+            return;
+        }
+    };
+    let derived_hash = match derived.hash(identity) {
+        Ok(value) => value,
+        Err(error) => {
+            blockers.push(format!("derived manifest hash failed: {error}"));
+            return;
+        }
+    };
+    for (field, actual) in [
+        ("derived_manifest_hash", derived_hash),
+        ("runtime_inputs_sha256", derived.runtime_inputs_sha256),
+        ("shielded_tree_root", derived.shielded_tree_root),
+        ("app_hash", derived.app_hash),
+        ("genesis_execution_hash", derived.genesis_execution_hash),
+        ("genesis_compact_hash", derived.genesis_compact_hash),
+        ("cometbft_genesis_sha256", derived.cometbft_genesis_sha256),
+    ] {
+        if root
+            .get("derived_genesis")
+            .and_then(|value| value.get(field))
+            .and_then(Value::as_str)
+            != Some(hex::encode(actual).as_str())
+        {
+            blockers.push(format!("derived_genesis.{field} mismatch"));
+        }
+    }
+
+    match derived_signatures_path {
+        Some(path) => match fs::read(path) {
+            Ok(bytes) => {
+                let expected = root
+                    .get("genesis_derived_signature_package_sha256")
+                    .and_then(Value::as_str);
+                let actual = hex::encode(Sha256::digest(&bytes));
+                if expected != Some(actual.as_str()) {
+                    blockers.push("genesis_derived_signature_package_sha256 mismatch".to_owned());
+                }
+                match DerivedSignaturePackage::decode_canonical(&bytes)
+                    .and_then(|package| package.verify(identity, &derived))
+                {
+                    Ok(_) => {}
+                    Err(error) => {
+                        blockers.push(format!("derived approvals invalid: {error}"));
+                    }
+                }
+            }
+            Err(error) => blockers.push(format!("derived approvals unreadable: {error}")),
+        },
+        None => blockers.push("missing --derived-signatures evidence".to_owned()),
+    }
+    verify_optional_path_hash(
+        runtime_inputs_path,
+        derived.runtime_inputs_sha256,
+        "--runtime-inputs",
+        blockers,
+    );
+    verify_optional_path_hash(
+        cometbft_genesis_path,
+        derived.cometbft_genesis_sha256,
+        "--cometbft-genesis",
+        blockers,
+    );
+}
+
+fn verify_optional_path_hash(
+    path: Option<&PathBuf>,
+    expected: [u8; 32],
+    flag: &str,
+    blockers: &mut Vec<String>,
+) {
+    match path {
+        Some(path) => match fs::read(path) {
+            Ok(bytes) if <[u8; 32]>::from(Sha256::digest(&bytes)) == expected => {}
+            Ok(_) => blockers.push(format!("{flag} SHA-256 mismatch")),
+            Err(error) => blockers.push(format!("{flag} unreadable: {error}")),
+        },
+        None => blockers.push(format!("missing {flag} evidence")),
+    }
+}
+
 fn verify_source_checkout(expected: &[u8], blockers: &mut Vec<String>) {
     let head = Command::new("git").args(["rev-parse", "HEAD"]).output();
     match head {
@@ -622,7 +949,7 @@ fn validate_release_artifacts(root: &Value, base: Option<&Path>, blockers: &mut 
 }
 
 fn usage() -> &'static str {
-    "usage:\n  bit genesis build --input INPUT.json --output identity.cbor\n  bit genesis verify --manifest identity.cbor [--signatures approvals.cbor]\n  bit genesis inspect --manifest identity.cbor\n  bit genesis sign --manifest identity.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit release preflight --input mainnet.json [--manifest identity.cbor --signatures approvals.cbor --crypto-manifest FILE --parameters FILE]"
+    "usage:\n  bit genesis build --input INPUT.json --output identity.cbor\n  bit genesis verify --manifest identity.cbor [--signatures approvals.cbor]\n  bit genesis inspect --manifest identity.cbor\n  bit genesis sign --manifest identity.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit genesis build-derived --manifest identity.cbor --input DERIVED.json --output derived.cbor\n  bit genesis verify-derived --manifest identity.cbor --derived derived.cbor [--signatures approvals.cbor]\n  bit genesis inspect-derived --manifest identity.cbor --derived derived.cbor\n  bit genesis sign-derived --manifest identity.cbor --derived derived.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit release preflight --input mainnet.json [--manifest identity.cbor --signatures approvals.cbor --crypto-manifest FILE --parameters FILE --derived-manifest derived.cbor --derived-signatures approvals.cbor --runtime-inputs FILE --cometbft-genesis genesis.json]"
 }
 
 #[cfg(test)]
@@ -666,17 +993,95 @@ mod tests {
     }
 
     #[test]
+    fn preflight_verifies_derived_files_and_second_stage_threshold() {
+        let directory = tempfile::tempdir().unwrap();
+        let identity_fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/genesis-identity-input.test.json");
+        let identity = read_identity(&identity_fixture).unwrap();
+        let runtime_path = directory.path().join("runtime-inputs.json");
+        let comet_path = directory.path().join("genesis.json");
+        fs::write(&runtime_path, b"canonical runtime inputs").unwrap();
+        fs::write(&comet_path, b"canonical CometBFT genesis").unwrap();
+
+        let derived_fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/genesis-derived-input.test.json");
+        let mut derived_value: Value =
+            serde_json::from_slice(&fs::read(derived_fixture).unwrap()).unwrap();
+        let derived_object = derived_value
+            .get_mut("derived_genesis")
+            .and_then(Value::as_object_mut)
+            .unwrap();
+        derived_object.insert(
+            "runtime_inputs_sha256".to_owned(),
+            Value::String(hex::encode(Sha256::digest(
+                fs::read(&runtime_path).unwrap(),
+            ))),
+        );
+        derived_object.insert(
+            "cometbft_genesis_sha256".to_owned(),
+            Value::String(hex::encode(Sha256::digest(fs::read(&comet_path).unwrap()))),
+        );
+        let document: DerivedInputDocument =
+            serde_json::from_value(derived_value["derived_genesis"].clone()).unwrap();
+        let derived = document.into_manifest(&identity).unwrap();
+        let derived_bytes = derived.encode_canonical(&identity).unwrap();
+        let derived_path = directory.path().join("derived.cbor");
+        fs::write(&derived_path, &derived_bytes).unwrap();
+
+        let mut package = DerivedSignaturePackage {
+            identity_manifest_hash: identity.hash().unwrap(),
+            derived_manifest_hash: derived.hash(&identity).unwrap(),
+            approvals: Vec::new(),
+        };
+        package.add_signature(&identity, &derived, [5; 32]).unwrap();
+        package.add_signature(&identity, &derived, [6; 32]).unwrap();
+        let signature_bytes = package.encode_canonical().unwrap();
+        let signatures_path = directory.path().join("derived-signatures.cbor");
+        fs::write(&signatures_path, &signature_bytes).unwrap();
+
+        let root = json!({
+            "genesis_derived_manifest_sha256": hex::encode(Sha256::digest(&derived_bytes)),
+            "genesis_derived_signature_package_sha256": hex::encode(Sha256::digest(&signature_bytes)),
+            "derived_genesis": {
+                "derived_manifest_hash": hex::encode(derived.hash(&identity).unwrap()),
+                "runtime_inputs_sha256": hex::encode(derived.runtime_inputs_sha256),
+                "shielded_tree_root": hex::encode(derived.shielded_tree_root),
+                "app_hash": hex::encode(derived.app_hash),
+                "genesis_execution_hash": hex::encode(derived.genesis_execution_hash),
+                "genesis_compact_hash": hex::encode(derived.genesis_compact_hash),
+                "cometbft_genesis_sha256": hex::encode(derived.cometbft_genesis_sha256),
+            }
+        });
+        let mut blockers = Vec::new();
+        validate_derived_evidence(
+            &root,
+            &identity,
+            Some(&derived_path),
+            Some(&signatures_path),
+            Some(&runtime_path),
+            Some(&comet_path),
+            &mut blockers,
+        );
+        assert!(blockers.is_empty(), "unexpected blockers: {blockers:?}");
+    }
+
+    #[test]
     fn cli_build_verify_and_incremental_signing_round_trip() {
         let directory = tempfile::tempdir().unwrap();
         let manifest = directory.path().join("identity.cbor");
         let first_package = directory.path().join("approval-one.cbor");
         let threshold_package = directory.path().join("approvals.cbor");
+        let derived_manifest = directory.path().join("derived.cbor");
+        let first_derived_package = directory.path().join("derived-approval-one.cbor");
+        let threshold_derived_package = directory.path().join("derived-approvals.cbor");
         let first_key = directory.path().join("key-one");
         let second_key = directory.path().join("key-two");
         fs::write(&first_key, [5; 32]).unwrap();
         fs::write(&second_key, hex::encode([6; 32])).unwrap();
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/fixtures/genesis-identity-input.test.json");
+        let derived_fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/genesis-derived-input.test.json");
 
         run(vec![
             "genesis".to_owned(),
@@ -720,6 +1125,56 @@ mod tests {
             threshold_package.display().to_string(),
         ])
         .unwrap();
+        run(vec![
+            "genesis".to_owned(),
+            "build-derived".to_owned(),
+            "--manifest".to_owned(),
+            manifest.display().to_string(),
+            "--input".to_owned(),
+            derived_fixture.display().to_string(),
+            "--output".to_owned(),
+            derived_manifest.display().to_string(),
+        ])
+        .unwrap();
+        run(vec![
+            "genesis".to_owned(),
+            "sign-derived".to_owned(),
+            "--manifest".to_owned(),
+            manifest.display().to_string(),
+            "--derived".to_owned(),
+            derived_manifest.display().to_string(),
+            "--key-file".to_owned(),
+            first_key.display().to_string(),
+            "--output".to_owned(),
+            first_derived_package.display().to_string(),
+        ])
+        .unwrap();
+        run(vec![
+            "genesis".to_owned(),
+            "sign-derived".to_owned(),
+            "--manifest".to_owned(),
+            manifest.display().to_string(),
+            "--derived".to_owned(),
+            derived_manifest.display().to_string(),
+            "--key-file".to_owned(),
+            second_key.display().to_string(),
+            "--append".to_owned(),
+            first_derived_package.display().to_string(),
+            "--output".to_owned(),
+            threshold_derived_package.display().to_string(),
+        ])
+        .unwrap();
+        run(vec![
+            "genesis".to_owned(),
+            "verify-derived".to_owned(),
+            "--manifest".to_owned(),
+            manifest.display().to_string(),
+            "--derived".to_owned(),
+            derived_manifest.display().to_string(),
+            "--signatures".to_owned(),
+            threshold_derived_package.display().to_string(),
+        ])
+        .unwrap();
 
         assert_eq!(
             hex::encode(fs::read(manifest).unwrap()),
@@ -727,6 +1182,15 @@ mod tests {
                 "../../../tests/vectors/genesis-identity-vectors.json"
             ))
             .unwrap()["canonical_identity_cbor_hex"]
+                .as_str()
+                .unwrap()
+        );
+        assert_eq!(
+            hex::encode(fs::read(derived_manifest).unwrap()),
+            serde_json::from_str::<Value>(include_str!(
+                "../../../tests/vectors/genesis-identity-vectors.json"
+            ))
+            .unwrap()["canonical_derived_cbor_hex"]
                 .as_str()
                 .unwrap()
         );

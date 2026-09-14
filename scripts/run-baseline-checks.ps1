@@ -139,6 +139,8 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'config/mainnet-inputs.schema.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'config\mainnet-inputs.schema.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'config/mainnet-inputs.template.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'config\mainnet-inputs.template.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'tests/fixtures/genesis-identity-input.test.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\fixtures\genesis-identity-input.test.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'tests/fixtures/genesis-derived-input.test.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'tests\fixtures\genesis-derived-input.test.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'justfile'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'justfile') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/examples/comet_network_probe.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\examples\comet_network_probe.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/examples/safety_halt_admin.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\examples\safety_halt_admin.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'reference/protocol_oracle.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'reference\protocol_oracle.py') -Algorithm SHA256).Hash.ToLowerInvariant() },

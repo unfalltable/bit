@@ -7,6 +7,8 @@ At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
 
 test_empty_block_artifact_encoding_and_domain_hashes (test_protocol_oracle.ProtocolOracleTests.test_empty_block_artifac
 t_encoding_and_domain_hashes) ... ok
+test_genesis_derived_manifest_hash_domains (test_protocol_oracle.ProtocolOracleTests.test_genesis_derived_manifest_hash
+_domains) ... ok
 test_genesis_identity_hash_domains (test_protocol_oracle.ProtocolOracleTests.test_genesis_identity_hash_domains) ... ok
 test_policy_bytes_and_hash (test_protocol_oracle.ProtocolOracleTests.test_policy_bytes_and_hash) ... ok
 test_reference_config_keeps_mainnet_unapproved (test_protocol_oracle.ProtocolOracleTests.test_reference_config_keeps_ma
@@ -17,6 +19,6 @@ test_transaction_body_effect_and_envelope (test_protocol_oracle.ProtocolOracleTe
 velope) ... ok
 
 ----------------------------------------------------------------------
-Ran 7 tests in 0.003s
+Ran 8 tests in 0.001s
 
 OK

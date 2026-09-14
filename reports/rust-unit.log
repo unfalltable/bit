@@ -102,49 +102,47 @@ warning: function `previous` is never used
 
 warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo fix --lib -p penumbra-sdk-shielded-pool` t
 o apply 1 suggestion)
-   Compiling bit-state v0.1.0 (D:\others\BIT\crates\bit-state)
-   Compiling bit-app v0.1.0 (D:\others\BIT\crates\bit-app)
-   Compiling bit-gateway v0.1.0 (D:\others\BIT\crates\bit-gateway)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 49.31s
+   Compiling bit-genesis v0.1.0 (D:\others\BIT\crates\bit-genesis)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.58s
      Running unittests src\lib.rs (feasibility\target\debug\deps\bit_app-72ae7cb665d2fe47.exe)
 
 running 20 tests
 test abci::tests::block_timestamp_validation_rejects_missing_and_malformed_values ... ok
-test abci::tests::byzantine_evidence_normalization_is_strict ... ok
 test abci::tests::decided_commit_decoding_is_strict_and_preserves_commit_flags ... ok
+test abci::tests::byzantine_evidence_normalization_is_strict ... ok
 test safety::tests::record_hash_hex_codec_is_exact ... ok
 test safety::tests::unavailable_journal_path_fails_closed ... ok
 test safety::tests::journal_roundtrip_restart_lock_and_acknowledgement_are_strict ... ok
 test safety::tests::valid_crash_temporary_is_promoted_and_corruption_fails_closed ... ok
 test artifact_archive::tests::stage_is_hidden_publish_is_immutable_and_reads_are_validated ... ok
+test abci::tests::v038_mapping_covers_lifecycle_queries_votes_and_snapshots ... ok
 test abci::tests::config_and_init_chain_are_strict ... ok
 test abci::tests::v038_socket_roundtrip_commits_and_returns_proof ... ok
 test tests::proposal_paths_reject_invalid_transactions_without_writes ... ok
 test tests::consensus_context_mismatch_is_rejected_without_staging_state ... ok
-test abci::tests::v038_mapping_covers_lifecycle_queries_votes_and_snapshots ... ok
 test tests::finalize_reports_invalid_transaction_and_commits_clean_block ... ok
-test abci::tests::unsafe_validator_removal_writes_restart_lock_and_replay_halts_again ... ok
 test tests::committed_artifact_stage_is_published_after_restart ... ok
-test tests::actual_commits_automatically_settle_epoch_and_emit_power_update ... ok
 test tests::empty_finalize_is_invisible_until_commit ... ok
+test tests::actual_commits_automatically_settle_epoch_and_emit_power_update ... ok
+test abci::tests::unsafe_validator_removal_writes_restart_lock_and_replay_halts_again ... ok
 test tests::uncommitted_artifact_stage_is_removed_after_restart ... ok
 test abci::tests::state_sync_restores_unordered_chunks_refetches_corruption_and_restarts ... ok
 
-test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.91s
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.42s
 
      Running unittests src\lib.rs (feasibility\target\debug\deps\bit_emission-15834050b3d8b081.exe)
 
 running 10 tests
-test tests::reference_fee_policy_uses_ceiling_kibibytes_and_action_surcharges ... ok
 test tests::failed_delegation_accounting_is_atomic ... ok
-test tests::completed_epoch_count_changes_only_on_the_next_epoch_first_block ... ok
 test tests::burn_does_not_reopen_issuance_and_tampering_is_detected ... ok
-test tests::genesis_requires_exact_container_sum ... ok
-test tests::transfer_fee_is_an_atomic_container_move ... ok
+test tests::delegation_moves_follow_q_d_p_and_f_accounting ... ok
+test tests::reference_fee_policy_uses_ceiling_kibibytes_and_action_surcharges ... ok
 test tests::issuance_and_forfeiture_follow_the_exact_schedule_without_catchup ... ok
 test tests::shielded_fee_can_exceed_released_value_when_private_pool_covers_it ... ok
+test tests::transfer_fee_is_an_atomic_container_move ... ok
+test tests::completed_epoch_count_changes_only_on_the_next_epoch_first_block ... ok
 test tests::unbond_and_claim_move_value_through_exit_container_atomically ... ok
-test tests::delegation_moves_follow_q_d_p_and_f_accounting ... ok
+test tests::genesis_requires_exact_container_sum ... ok
 
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -153,66 +151,69 @@ test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 running 1 test
 test tests::routes_return_bounded_proof_bearing_data ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.33s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.36s
 
      Running unittests src\lib.rs (feasibility\target\debug\deps\bit_genesis-cae2cd30ae47c505.exe)
 
-running 5 tests
+running 7 tests
 test tests::canonical_decoders_reject_oversized_inputs_before_parsing ... ok
 test tests::canonical_decoder_rejects_trailing_bytes ... ok
-test tests::allocation_mapping_prevents_double_counting_and_gaps ... ok
 test tests::canonical_identity_round_trip_and_hash_are_stable ... ok
+test tests::allocation_mapping_prevents_double_counting_and_gaps ... ok
+test tests::derived_manifest_rejects_identity_and_output_tampering ... ok
 test tests::signature_package_requires_authorized_threshold ... ok
+test tests::derived_manifest_and_second_stage_approvals_are_strict ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
      Running unittests src\main.rs (feasibility\target\debug\deps\bit-3042f05f8f0b58c5.exe)
 
-running 4 tests
+running 5 tests
 test tests::cli_rejects_unknown_or_missing_option_values ... ok
 test tests::preflight_template_shape_reports_blockers_without_panicking ... ok
 test tests::secret_key_reader_rejects_ambiguous_text ... ok
+test tests::preflight_verifies_derived_files_and_second_stage_threshold ... ok
 test tests::cli_build_verify_and_incremental_signing_round_trip ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 
      Running unittests src\lib.rs (feasibility\target\debug\deps\bit_shielded-f9747b23d00707bc.exe)
 
 running 3 tests
-test tests::malformed_proofs_fail_before_upstream_verification ... ok
 test tests::malformed_bodies_are_rejected ... ok
+test tests::malformed_proofs_fail_before_upstream_verification ... ok
 test tests::binding_signature_binds_the_full_effect_hash ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
      Running unittests src\lib.rs (feasibility\target\debug\deps\bit_staking-0b2aabf8d9a19493.exe)
 
 running 23 tests
-test tests::ineligible_validator_makes_pending_refundable ... ok
 test tests::failed_mutation_does_not_leave_partial_state ... ok
-test tests::canceled_pending_releases_epoch_capacity ... ok
 test tests::consensus_rotation_preserves_responsibility_history_and_key_uniqueness ... ok
+test tests::canceled_pending_releases_epoch_capacity ... ok
+test tests::ineligible_validator_makes_pending_refundable ... ok
+test tests::effective_set_is_canonical_hashed_and_applies_exact_updates ... ok
 test tests::insolvent_pool_does_not_trap_an_accepted_pending_deposit ... ok
-test tests::invariant_detects_share_tampering ... ok
+test tests::epoch_batch_activates_self_bond_before_ordinary_delegation ... ok
+test tests::activation_slippage_failure_becomes_refundable ... ok
+test tests::epoch_rewards_split_by_score_and_commission_with_remainder_retained ... ok
 test tests::actual_commit_power_drives_epoch_score_and_sliding_downtime_jail ... ok
 test tests::candidate_set_sorts_stake_then_identifier_and_checks_power ... ok
-test tests::registration_and_position_ids_are_enforced ... ok
-test tests::activation_slippage_failure_becomes_refundable ... ok
-test tests::pending_activates_after_epoch_and_does_not_receive_old_reward ... ok
-test tests::epoch_batch_activates_self_bond_before_ordinary_delegation ... ok
 test tests::pool_math_uses_u256_and_final_redemption_drains_residual ... ok
-test tests::epoch_rewards_split_by_score_and_commission_with_remainder_retained ... ok
-test tests::zero_value_and_inconsistent_pools_fail_closed ... ok
 test tests::unjail_requires_both_chain_time_and_block_waits ... ok
+test tests::invariant_detects_share_tampering ... ok
 test tests::zero_share_quote_becomes_refundable ... ok
+test tests::registration_and_position_ids_are_enforced ... ok
 test tests::validator_updates_enforce_sequence_notice_and_disable_state ... ok
+test tests::zero_value_and_inconsistent_pools_fail_closed ... ok
+test tests::pending_activates_after_epoch_and_does_not_receive_old_reward ... ok
+test tests::byzantine_slash_is_one_time_bounded_and_freezes_exit_actions ... ok
 test tests::persistent_records_roundtrip_and_reject_noncanonical_bytes ... ok
 test tests::unbond_uses_cohort_units_and_claim_requires_both_maturity_bounds ... ok
-test tests::byzantine_slash_is_one_time_bounded_and_freezes_exit_actions ... ok
 test tests::slash_cohort_limit_is_global_across_jobs ... ok
-test tests::effective_set_is_canonical_hashed_and_applies_exact_updates ... ok
 
-test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
      Running unittests src\lib.rs (feasibility\target\debug\deps\bit_state-9e948d0f141bc7d9.exe)
 
@@ -243,7 +244,7 @@ test tests::real_claim_exit_envelope_releases_the_persisted_quote ... ok
 test tests::real_two_spend_two_output_transfer_survives_restart ... ok
 test tests::real_enabled_staking_envelopes_persist_atomically ... ok
 
-test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 341.17s
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 338.56s
 
      Running unittests src\lib.rs (feasibility\target\debug\deps\bit_transaction-58d23f96cbb6f28c.exe)
 
@@ -251,39 +252,39 @@ running 8 tests
 test tests::failed_commit_does_not_partially_mutate_state ... ok
 test tests::cancel_pending_uses_current_owner_and_exact_state_quote ... ok
 test tests::genesis_claim_binds_live_claim_key_amount_and_status ... ok
-test tests::self_bond_binds_owner_and_registered_operator ... ok
 test tests::unbond_and_exit_claim_bind_live_owner_sequences_and_quote ... ok
 test tests::registration_requires_operator_signature_and_new_consensus_pop ... ok
+test tests::self_bond_binds_owner_and_registered_operator ... ok
 test tests::validator_mutations_bind_current_operator_sequence_and_new_key_pop ... ok
 test tests::transfer_policy_is_checked_before_crypto ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
      Running unittests src\lib.rs (feasibility\target\debug\deps\bit_types-4eddc4dc6dd47019.exe)
 
 running 20 tests
-test policy::tests::golden_issuance_points ... ok
 test block::tests::artifacts_reject_ambiguous_results_and_event_order ... ok
+test envelope::tests::structural_envelope_matches_cross_language_vector ... ok
+test block::tests::execution_and_compact_artifacts_round_trip ... ok
 test envelope::tests::ed25519_role_messages_bind_domain_and_full_effect_hash ... ok
+test amount::tests::amount_bounds_and_json_are_exact ... ok
+test envelope::tests::envelope_roundtrip_and_tx_id ... ok
+test block::tests::empty_artifacts_match_cross_language_vector ... ok
+test envelope::tests::rejects_proof_role_and_wire_changes ... ok
+test envelope::tests::role_plan_includes_action_authorities ... ok
+test policy::tests::golden_issuance_points ... ok
+test policy::tests::reference_policy_matches_frozen_vector ... ok
 test block::tests::every_system_event_round_trips ... ok
 test supply::tests::supply_audit_round_trips_and_rejects_identity_changes ... ok
-test envelope::tests::structural_envelope_matches_cross_language_vector ... ok
-test block::tests::empty_artifacts_match_cross_language_vector ... ok
-test block::tests::execution_and_compact_artifacts_round_trip ... ok
-test policy::tests::reference_policy_matches_frozen_vector ... ok
-test envelope::tests::role_plan_includes_action_authorities ... ok
-test envelope::tests::envelope_roundtrip_and_tx_id ... ok
-test envelope::tests::rejects_proof_role_and_wire_changes ... ok
-test supply::tests::supply_audit_matches_shared_vector ... ok
 test tx::tests::canonical_body_roundtrip_and_rejects_non_shortest ... ok
-test tx::tests::structure_and_expiry_fail_closed ... ok
+test supply::tests::supply_audit_matches_shared_vector ... ok
 test tx::tests::all_action_shapes_roundtrip ... ok
-test amount::tests::amount_bounds_and_json_are_exact ... ok
-test tx::tests::structural_body_matches_cross_language_vector ... ok
 test tx::tests::identifiers_are_domain_separated ... ok
+test tx::tests::structural_body_matches_cross_language_vector ... ok
+test tx::tests::structure_and_expiry_fail_closed ... ok
 test policy::tests::small_budget_exhaustion ... ok
 
-test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
    Doc-tests bit_app
 

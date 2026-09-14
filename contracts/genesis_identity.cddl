@@ -54,3 +54,38 @@ genesis-signature-package-v1 = [
   genesis-manifest-hash: hash32,
   approvals: [* approval],
 ]
+
+derived-claim = [allocation-id: hash32, claim-id: hash32]
+derived-validator = [
+  allocation-id: hash32,
+  validator-id: hash32,
+  self-bond-position-id: hash32,
+  consensus-address: bytes .size 20,
+  voting-power: uint,
+  consensus-pubkey: hash32,
+]
+
+genesis-derived-v1 = [
+  "BIT-GENESIS-DERIVED",
+  1,
+  identity-manifest-hash: hash32,
+  chain-context: hash32,
+  runtime-inputs-sha256: hash32,
+  derived-claims: [* derived-claim],
+  derived-validators: [* derived-validator],
+  genesis-commitments-hash: hash32,
+  genesis-claims-hash: hash32,
+  shielded-tree-root: hash32,
+  app-hash: hash32,
+  genesis-execution-hash: hash32,
+  genesis-compact-hash: hash32,
+  cometbft-genesis-sha256: hash32,
+]
+
+genesis-derived-signature-package-v1 = [
+  "BIT-GENESIS-DERIVED-SIGNATURES",
+  1,
+  identity-manifest-hash: hash32,
+  derived-manifest-hash: hash32,
+  approvals: [* approval],
+]

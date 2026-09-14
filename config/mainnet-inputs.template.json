@@ -41,11 +41,16 @@
   },
   "genesis_manifest_hash": null,
   "genesis_signature_package_sha256": null,
+  "genesis_derived_manifest_sha256": null,
+  "genesis_derived_signature_package_sha256": null,
   "derived_genesis": {
-    "initial_state_root": null,
+    "derived_manifest_hash": null,
+    "runtime_inputs_sha256": null,
+    "shielded_tree_root": null,
     "app_hash": null,
     "genesis_execution_hash": null,
-    "genesis_compact_hash": null
+    "genesis_compact_hash": null,
+    "cometbft_genesis_sha256": null
   },
   "initial_supply_state": {
     "cumulative_minted_atomic": "0",

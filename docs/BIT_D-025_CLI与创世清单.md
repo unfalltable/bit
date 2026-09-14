@@ -1,6 +1,6 @@
 # BIT D-025 CLI 与创世清单
 
-状态：`IN_PROGRESS`。创世公开领取权的共识身份、状态编码、交易执行和证明查询已经实现；identity manifest v1 的规范编码、多方签名包、离线 CLI 与首版 release preflight 已实现。manifest hash 已绑定高度零状态、chain context 和网关证明；派生结果清单、完整 InitChain 构建和真实外部输入仍待完成。
+状态：`IN_PROGRESS`。创世公开领取权的共识身份、状态编码、交易执行和证明查询已经实现；identity manifest v1、派生结果 manifest v1、两阶段多方签名包、离线 CLI 与 release preflight 已实现。manifest hash 已绑定高度零状态、chain context 和网关证明；完整 InitChain 构建、真实高度零派生产物和外部输入仍待完成。
 
 ## 1. 哈希依赖顺序
 
@@ -18,7 +18,7 @@
 
 `claim_id` 不进入产生 `genesis_manifest_hash` 的身份主体。身份主体只记录领取公钥和金额；节点在得到 `chain_context` 后使用 `SHA256("bit/genesis-claim-id/v1" || chain_context || claim_pubkey || amount_be_16)` 派生领取 ID。最终派生结果可以列出 `claim_id`、状态根和 app hash 供签署者复核，但不能反向改变身份 hash。
 
-当前代码已固定上述 `claim_id` 公式。identity manifest 的机器合同位于 `bit-genesis`；`GenesisConfig` 现在必须携带非零 manifest hash，并要求其派生结果等于 chain context。manifest hash 与 chain context 会写入高度零 JMT，重启时作为不可变配置核对。现阶段仍不能仅凭 identity manifest 生成主网创世，因为完整配置转换、状态结果清单与第二阶段签名尚未闭合。
+当前代码已固定上述 `claim_id` 公式。identity manifest 的机器合同位于 `bit-genesis`；`GenesisConfig` 现在必须携带非零 manifest hash，并要求其派生结果等于 chain context。manifest hash 与 chain context 会写入高度零 JMT，重启时作为不可变配置核对。第二阶段结果清单与签名合同已经闭合，但现阶段仍不能仅凭 identity manifest 生成主网创世，因为验证人元数据、恢复收据、费用/质押参数到完整配置的转换器尚未实现。
 
 ## 2. 创世领取状态
 
@@ -94,7 +94,26 @@ SHA256("BIT-GENESIS-IDENTITY-V1" || cbor_len_be_u64 || canonical_cbor)
 
 公开测试向量位于 `tests/vectors/genesis-identity-vectors.json`，包含完整 CBOR、manifest hash、chain context、签名消息和达到阈值的签名包。测试私钥只存在单元测试夹具中，明确禁止用于主网。
 
-## 6. CLI 与 preflight
+## 6. 派生结果 manifest v1
+
+`BIT-GENESIS-DERIVED` v1 是 identity 签署后的第二阶段结果。它绑定 identity manifest hash、chain context、完整运行时输入文件 SHA-256、派生 claim ID、validator ID、自质押 position ID、CometBFT 共识地址和投票权，以及创世承诺摘要、领取摘要、TCT 根、JMT app hash、创世 execution/compact hash 与最终 CometBFT genesis 文件 SHA-256。
+
+派生 claim 和 validator 数量必须与 identity 精确一致，并按 allocation ID 严格递增。验证器使用 identity 中的公钥和金额重新计算所有 ID、共识地址及领取/承诺摘要；零结果哈希、零投票权、超出 CometBFT 安全总投票权、缺项、增项或篡改均拒绝。派生清单哈希固定为：
+
+```text
+SHA256("BIT-GENESIS-DERIVED-V1" || cbor_len_be_u64 || canonical_cbor)
+```
+
+第二阶段签名消息固定为：
+
+```text
+"BIT-GENESIS-DERIVED-APPROVAL-V1" ||
+identity_manifest_hash || derived_manifest_hash
+```
+
+`BIT-GENESIS-DERIVED-SIGNATURES` v1 继续使用 identity 中冻结的签署者集合和阈值，并独立于第一阶段签名。这样签署者可以先批准不含循环派生值的身份输入，再复核真实构建所得的 app hash 与 CometBFT genesis。相同黄金向量由 Rust 和 Python 标准库独立核对 canonical CBOR 与两个哈希域。
+
+## 7. CLI 与 preflight
 
 当前命令：
 
@@ -105,18 +124,27 @@ bit genesis verify --manifest identity.cbor [--signatures approvals.cbor]
 bit genesis inspect --manifest identity.cbor
 bit genesis sign --manifest identity.cbor --key-file KEY \
   --output approvals.cbor [--append previous.cbor]
+bit genesis build-derived --manifest identity.cbor \
+  --input DERIVED.json --output derived.cbor
+bit genesis verify-derived --manifest identity.cbor \
+  --derived derived.cbor [--signatures derived-approvals.cbor]
+bit genesis inspect-derived --manifest identity.cbor --derived derived.cbor
+bit genesis sign-derived --manifest identity.cbor --derived derived.cbor \
+  --key-file KEY --output derived-approvals.cbor [--append previous.cbor]
 bit release preflight --input mainnet.json \
   --manifest identity.cbor --signatures approvals.cbor \
-  --crypto-manifest crypto/manifest.json --parameters frozen-params.json
+  --crypto-manifest crypto/manifest.json --parameters frozen-params.json \
+  --derived-manifest derived.cbor --derived-signatures derived-approvals.cbor \
+  --runtime-inputs runtime-inputs.json --cometbft-genesis genesis.json
 ```
 
-`inspect` 输出 manifest/policy hash、chain context、四类分配合计，以及派生的 claim、validator 和自质押 position ID。`build` 和 `sign` 默认拒绝覆盖已有文件。
+identity `inspect` 输出 manifest/policy hash、chain context、四类分配合计，以及派生的 claim、validator 和自质押 position ID。derived `inspect` 输出两阶段 manifest hash、运行时输入 hash、状态根、app hash 和 CometBFT genesis hash。所有 `build` 和 `sign` 命令默认拒绝覆盖已有文件。
 
-首版 preflight 从实际证据计算 `mainnet_ready`，不采信输入 JSON 中的同名布尔值。它核对 manifest 与 JSON 身份逐字节一致、多方签名阈值、crypto/参数文件 SHA-256、当前 Git HEAD 与干净工作区、G0 分配闭环、`Mint/Burn/K/e=0`、`Future=M-G0`、发布产物文件哈希，并要求提供派生状态哈希及非空检查点、独立端点、安全审查和平台签名材料。默认模板会明确列出 blockers 并以非零退出码结束。
+preflight 从实际证据计算 `mainnet_ready`，不采信输入 JSON 中的同名布尔值。它核对 identity manifest 与 JSON 身份逐字节一致、第一阶段签名阈值、crypto/参数文件 SHA-256、派生 manifest 文件哈希与全部摘要字段、第二阶段签名阈值、运行时输入和 CometBFT genesis 文件哈希、当前 Git HEAD 与干净工作区、G0 分配闭环、`Mint/Burn/K/e=0`、`Future=M-G0`、发布产物文件哈希，并要求非空检查点、独立端点、安全审查和平台签名材料。默认模板会明确列出 blockers 并以非零退出码结束。
 
-## 7. 尚未完成的 D-025 范围
+## 8. 尚未完成的 D-025 范围
 
-1. 冻结派生结果清单的规范编码和第二阶段复核签名，将 identity 输入实际构造成完整 `GenesisConfig`、CometBFT genesis 与高度零状态根。
+1. 将 identity 与经哈希绑定的运行时输入实际构造成完整 `GenesisConfig`、CometBFT genesis 与高度零状态，自动生成派生 manifest，而不是人工填写结果字段。
 2. manifest hash 与 chain context 已进入不可变状态；继续把 policy hash、crypto hash、资源参数和全部初始容器接入生产 `InitChain`，拒绝节点本地覆盖。
 3. 对初始私密承诺执行完整曲线/资产检查，对验证者自质押执行 staking 参数、投票权和元数据检查；生成可独立重放的完整创世产物。
 4. 将检查点、独立端点、安全审查、平台证书和发布产物升级为有明确字段、签名范围及撤销语义的证据合同。

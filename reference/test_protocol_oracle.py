@@ -36,6 +36,60 @@ class ProtocolOracleTests(unittest.TestCase):
             vector["approval_message_hex"],
         )
 
+    def test_genesis_derived_manifest_hash_domains(self):
+        vector = json.loads((ROOT / "tests/vectors/genesis-identity-vectors.json").read_text(
+            encoding="utf-8"))
+        identity_input = json.loads((ROOT / "tests/fixtures/genesis-identity-input.test.json").read_text(
+            encoding="utf-8"))["identity"]
+        derived = json.loads((ROOT / "tests/fixtures/genesis-derived-input.test.json").read_text(
+            encoding="utf-8"))["derived_genesis"]
+
+        claim_entries = [oracle.cbor_array(
+            oracle.cbor_bytes(bytes.fromhex(entry["allocation_id"])),
+            oracle.cbor_bytes(bytes.fromhex(entry["claim_id"])),
+        ) for entry in derived["claims"]]
+        validator_entries = []
+        validators_by_allocation = {
+            entry["allocation_id"]: entry for entry in identity_input["initial_validators"]
+        }
+        for entry in derived["validators"]:
+            source = validators_by_allocation[entry["allocation_id"]]
+            validator_entries.append(oracle.cbor_array(
+                oracle.cbor_bytes(bytes.fromhex(entry["allocation_id"])),
+                oracle.cbor_bytes(bytes.fromhex(entry["validator_id"])),
+                oracle.cbor_bytes(bytes.fromhex(entry["self_bond_position_id"])),
+                oracle.cbor_bytes(bytes.fromhex(entry["consensus_address"])),
+                oracle.cbor_uint(entry["voting_power"]),
+                oracle.cbor_bytes(bytes.fromhex(source["consensus_pubkey"])),
+            ))
+        encoded = oracle.cbor_array(
+            oracle.cbor_text("BIT-GENESIS-DERIVED"),
+            oracle.cbor_uint(1),
+            oracle.cbor_bytes(bytes.fromhex(derived["identity_manifest_hash"])),
+            oracle.cbor_bytes(bytes.fromhex(derived["chain_context"])),
+            oracle.cbor_bytes(bytes.fromhex(derived["runtime_inputs_sha256"])),
+            oracle.cbor_array(*claim_entries),
+            oracle.cbor_array(*validator_entries),
+            oracle.cbor_bytes(bytes.fromhex(derived["genesis_commitments_hash"])),
+            oracle.cbor_bytes(bytes.fromhex(derived["genesis_claims_hash"])),
+            oracle.cbor_bytes(bytes.fromhex(derived["shielded_tree_root"])),
+            oracle.cbor_bytes(bytes.fromhex(derived["app_hash"])),
+            oracle.cbor_bytes(bytes.fromhex(derived["genesis_execution_hash"])),
+            oracle.cbor_bytes(bytes.fromhex(derived["genesis_compact_hash"])),
+            oracle.cbor_bytes(bytes.fromhex(derived["cometbft_genesis_sha256"])),
+        )
+        self.assertEqual(encoded.hex(), vector["canonical_derived_cbor_hex"])
+        derived_hash = hashlib.sha256(
+            b"BIT-GENESIS-DERIVED-V1" + len(encoded).to_bytes(8, "big") + encoded
+        ).digest()
+        self.assertEqual(derived_hash.hex(), vector["derived_manifest_hash"])
+        self.assertEqual(
+            (b"BIT-GENESIS-DERIVED-APPROVAL-V1"
+             + bytes.fromhex(derived["identity_manifest_hash"])
+             + derived_hash).hex(),
+            vector["derived_approval_message_hex"],
+        )
+
     def test_policy_bytes_and_hash(self):
         vector = json.loads((ROOT / "tests/vectors/emission-vectors.json").read_text(encoding="utf-8"))["reference_policy"]
         encoded = oracle.reference_policy()

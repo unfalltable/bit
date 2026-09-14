@@ -7,6 +7,7 @@
   "required": [
     "network_type", "mainnet_ready", "status", "identity",
     "genesis_manifest_hash", "genesis_signature_package_sha256",
+    "genesis_derived_manifest_sha256", "genesis_derived_signature_package_sha256",
     "derived_genesis", "initial_supply_state", "checkpoint_publishers",
     "independent_endpoints", "external_security_reviews",
     "platform_signing_certificates", "release_artifacts"
@@ -79,14 +80,19 @@
     },
     "genesis_manifest_hash": { "$ref": "#/$defs/nullableHash" },
     "genesis_signature_package_sha256": { "$ref": "#/$defs/nullableHash" },
+    "genesis_derived_manifest_sha256": { "$ref": "#/$defs/nullableHash" },
+    "genesis_derived_signature_package_sha256": { "$ref": "#/$defs/nullableHash" },
     "derived_genesis": {
       "type": "object", "additionalProperties": false,
-      "required": ["initial_state_root", "app_hash", "genesis_execution_hash", "genesis_compact_hash"],
+      "required": ["derived_manifest_hash", "runtime_inputs_sha256", "shielded_tree_root", "app_hash", "genesis_execution_hash", "genesis_compact_hash", "cometbft_genesis_sha256"],
       "properties": {
-        "initial_state_root": { "$ref": "#/$defs/nullableHash" },
+        "derived_manifest_hash": { "$ref": "#/$defs/nullableHash" },
+        "runtime_inputs_sha256": { "$ref": "#/$defs/nullableHash" },
+        "shielded_tree_root": { "$ref": "#/$defs/nullableHash" },
         "app_hash": { "$ref": "#/$defs/nullableHash" },
         "genesis_execution_hash": { "$ref": "#/$defs/nullableHash" },
-        "genesis_compact_hash": { "$ref": "#/$defs/nullableHash" }
+        "genesis_compact_hash": { "$ref": "#/$defs/nullableHash" },
+        "cometbft_genesis_sha256": { "$ref": "#/$defs/nullableHash" }
       }
     },
     "initial_supply_state": {

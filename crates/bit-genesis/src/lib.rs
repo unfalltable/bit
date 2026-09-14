@@ -4,7 +4,10 @@
 //! derived.  Human descriptions and derived identifiers are deliberately not
 //! part of this format.
 
-use bit_types::{chain_context, Amount, MonetaryPolicy, MAX_SUPPLY_ATOMIC};
+use bit_types::{
+    chain_context, genesis_claim_id, position_id, validator_id, Amount, MonetaryPolicy,
+    MAX_SUPPLY_ATOMIC,
+};
 use ed25519_consensus::{
     Signature as Ed25519Signature, SigningKey, VerificationKey as Ed25519VerificationKey,
 };
@@ -21,7 +24,14 @@ pub const IDENTITY_HASH_DOMAIN: &[u8] = b"BIT-GENESIS-IDENTITY-V1";
 pub const APPROVAL_FORMAT: &str = "BIT-GENESIS-SIGNATURES";
 pub const APPROVAL_VERSION: u64 = 1;
 pub const APPROVAL_DOMAIN: &[u8] = b"BIT-GENESIS-APPROVAL-V1";
+pub const DERIVED_FORMAT: &str = "BIT-GENESIS-DERIVED";
+pub const DERIVED_VERSION: u64 = 1;
+pub const DERIVED_HASH_DOMAIN: &[u8] = b"BIT-GENESIS-DERIVED-V1";
+pub const DERIVED_APPROVAL_FORMAT: &str = "BIT-GENESIS-DERIVED-SIGNATURES";
+pub const DERIVED_APPROVAL_VERSION: u64 = 1;
+pub const DERIVED_APPROVAL_DOMAIN: &[u8] = b"BIT-GENESIS-DERIVED-APPROVAL-V1";
 pub const MAX_IDENTITY_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_DERIVED_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_GENESIS_ENTRIES: usize = 100_000;
 pub const MAX_APPROVAL_SIGNERS: usize = 1_024;
 pub const MAX_SIGNATURE_PACKAGE_BYTES: usize = 1024 * 1024;
@@ -34,6 +44,10 @@ pub enum Error {
     InvalidCbor(&'static str),
     #[error("invalid signature package: {0}")]
     InvalidSignaturePackage(&'static str),
+    #[error("invalid derived genesis manifest: {0}")]
+    InvalidDerived(&'static str),
+    #[error("invalid derived signature package: {0}")]
+    InvalidDerivedSignaturePackage(&'static str),
     #[error("invalid hex field {field}: {reason}")]
     InvalidHex {
         field: &'static str,
@@ -609,6 +623,581 @@ pub fn approval_message(manifest_hash: &Hash32) -> Vec<u8> {
     message
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DerivedClaim {
+    pub allocation_id: Hash32,
+    pub claim_id: Hash32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DerivedValidator {
+    pub allocation_id: Hash32,
+    pub validator_id: Hash32,
+    pub self_bond_position_id: Hash32,
+    pub consensus_address: [u8; 20],
+    pub voting_power: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GenesisDerivedManifest {
+    pub identity_manifest_hash: Hash32,
+    pub chain_context: Hash32,
+    pub runtime_inputs_sha256: Hash32,
+    pub claims: Vec<DerivedClaim>,
+    pub validators: Vec<DerivedValidator>,
+    pub genesis_commitments_hash: Hash32,
+    pub genesis_claims_hash: Hash32,
+    pub shielded_tree_root: Hash32,
+    pub app_hash: Hash32,
+    pub genesis_execution_hash: Hash32,
+    pub genesis_compact_hash: Hash32,
+    pub cometbft_genesis_sha256: Hash32,
+}
+
+impl GenesisDerivedManifest {
+    pub fn validate(&self, identity: &GenesisIdentityManifest) -> Result<()> {
+        identity.validate()?;
+        let identity_hash = identity.hash()?;
+        let chain = identity.chain_context()?;
+        if self.identity_manifest_hash != identity_hash || self.chain_context != chain {
+            return Err(Error::InvalidDerived(
+                "identity manifest hash or chain context mismatch",
+            ));
+        }
+        for value in [
+            self.runtime_inputs_sha256,
+            self.genesis_commitments_hash,
+            self.genesis_claims_hash,
+            self.shielded_tree_root,
+            self.app_hash,
+            self.genesis_execution_hash,
+            self.genesis_compact_hash,
+            self.cometbft_genesis_sha256,
+        ] {
+            if value == [0; 32] {
+                return Err(Error::InvalidDerived("derived hash field is zero"));
+            }
+        }
+        if self.claims.len() != identity.claims.len()
+            || self.validators.len() != identity.validators.len()
+        {
+            return Err(Error::InvalidDerived("derived entry count mismatch"));
+        }
+        require_derived_sorted_unique(
+            self.claims.iter().map(|entry| entry.allocation_id),
+            "derived claims must be strictly sorted by allocation_id",
+        )?;
+        require_derived_sorted_unique(
+            self.validators.iter().map(|entry| entry.allocation_id),
+            "derived validators must be strictly sorted by allocation_id",
+        )?;
+
+        let allocations: BTreeMap<_, _> = identity
+            .allocations
+            .iter()
+            .map(|entry| (entry.allocation_id, entry.amount))
+            .collect();
+        let mut claim_ids = BTreeSet::new();
+        for (derived, source) in self.claims.iter().zip(&identity.claims) {
+            let amount = allocations
+                .get(&source.allocation_id)
+                .copied()
+                .ok_or(Error::InvalidDerived("claim allocation is missing"))?;
+            if derived.allocation_id != source.allocation_id
+                || derived.claim_id != genesis_claim_id(&chain, &source.claim_pubkey, amount)
+                || !claim_ids.insert(derived.claim_id)
+            {
+                return Err(Error::InvalidDerived("derived claim identifier mismatch"));
+            }
+        }
+
+        let mut total_power = 0u64;
+        let mut validator_ids = BTreeSet::new();
+        let mut position_ids = BTreeSet::new();
+        let mut consensus_addresses = BTreeSet::new();
+        for (derived, source) in self.validators.iter().zip(&identity.validators) {
+            if derived.allocation_id != source.allocation_id
+                || derived.validator_id != validator_id(&chain, &source.operator_pubkey)
+                || derived.self_bond_position_id != position_id(&chain, &source.owner_pubkey)
+                || derived.consensus_address != consensus_address(&source.consensus_pubkey)
+                || derived.voting_power == 0
+                || !validator_ids.insert(derived.validator_id)
+                || !position_ids.insert(derived.self_bond_position_id)
+                || !consensus_addresses.insert(derived.consensus_address)
+            {
+                return Err(Error::InvalidDerived(
+                    "derived validator identity or power mismatch",
+                ));
+            }
+            total_power = total_power
+                .checked_add(derived.voting_power)
+                .ok_or(Error::InvalidDerived("validator power overflow"))?;
+        }
+        if total_power > (1u64 << 60) - 1 {
+            return Err(Error::InvalidDerived(
+                "validator power exceeds CometBFT safe total",
+            ));
+        }
+        if self.genesis_commitments_hash != genesis_commitments_hash(identity)
+            || self.genesis_claims_hash != genesis_claims_hash(identity, &self.claims)?
+        {
+            return Err(Error::InvalidDerived(
+                "genesis commitment or claim summary mismatch",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn encode_canonical(&self, identity: &GenesisIdentityManifest) -> Result<Vec<u8>> {
+        self.validate(identity)?;
+        let mut writer = Writer::new();
+        writer.array(14);
+        writer.text(DERIVED_FORMAT);
+        writer.uint(DERIVED_VERSION);
+        writer.bytes(&self.identity_manifest_hash);
+        writer.bytes(&self.chain_context);
+        writer.bytes(&self.runtime_inputs_sha256);
+        writer.array(self.claims.len());
+        for entry in &self.claims {
+            writer.array(2);
+            writer.bytes(&entry.allocation_id);
+            writer.bytes(&entry.claim_id);
+        }
+        writer.array(self.validators.len());
+        for entry in &self.validators {
+            writer.array(6);
+            writer.bytes(&entry.allocation_id);
+            writer.bytes(&entry.validator_id);
+            writer.bytes(&entry.self_bond_position_id);
+            writer.bytes(&entry.consensus_address);
+            writer.uint(entry.voting_power);
+            writer.bytes(
+                &identity
+                    .validators
+                    .iter()
+                    .find(|source| source.allocation_id == entry.allocation_id)
+                    .expect("validated derived validator source exists")
+                    .consensus_pubkey,
+            );
+        }
+        writer.bytes(&self.genesis_commitments_hash);
+        writer.bytes(&self.genesis_claims_hash);
+        writer.bytes(&self.shielded_tree_root);
+        writer.bytes(&self.app_hash);
+        writer.bytes(&self.genesis_execution_hash);
+        writer.bytes(&self.genesis_compact_hash);
+        writer.bytes(&self.cometbft_genesis_sha256);
+        let bytes = writer.finish();
+        if bytes.len() > MAX_DERIVED_BYTES {
+            return Err(Error::InvalidDerived(
+                "derived genesis manifest exceeds maximum size",
+            ));
+        }
+        Ok(bytes)
+    }
+
+    pub fn decode_canonical(bytes: &[u8], identity: &GenesisIdentityManifest) -> Result<Self> {
+        if bytes.len() > MAX_DERIVED_BYTES {
+            return Err(Error::InvalidCbor(
+                "derived genesis manifest exceeds maximum size",
+            ));
+        }
+        let mut cursor = Cursor::new(bytes);
+        if cursor.array()? != 14
+            || cursor.text()? != DERIVED_FORMAT
+            || cursor.uint()? != DERIVED_VERSION
+        {
+            return Err(Error::InvalidDerived(
+                "unknown derived genesis format or field count",
+            ));
+        }
+        let identity_manifest_hash = fixed32(cursor.bytes()?, "identity manifest hash length")?;
+        let chain_context = fixed32(cursor.bytes()?, "chain context length")?;
+        let runtime_inputs_sha256 = fixed32(cursor.bytes()?, "runtime inputs hash length")?;
+        let claim_count = bounded_count(
+            cursor.array()?,
+            MAX_GENESIS_ENTRIES,
+            "too many derived claims",
+        )?;
+        let mut claims = Vec::with_capacity(claim_count);
+        for _ in 0..claim_count {
+            if cursor.array()? != 2 {
+                return Err(Error::InvalidCbor("derived claim field count"));
+            }
+            claims.push(DerivedClaim {
+                allocation_id: fixed32(cursor.bytes()?, "derived claim allocation id length")?,
+                claim_id: fixed32(cursor.bytes()?, "derived claim id length")?,
+            });
+        }
+        let validator_count = bounded_count(
+            cursor.array()?,
+            MAX_GENESIS_ENTRIES,
+            "too many derived validators",
+        )?;
+        let mut validators = Vec::with_capacity(validator_count);
+        for _ in 0..validator_count {
+            if cursor.array()? != 6 {
+                return Err(Error::InvalidCbor("derived validator field count"));
+            }
+            let allocation_id = fixed32(cursor.bytes()?, "derived validator allocation id length")?;
+            let validator_id = fixed32(cursor.bytes()?, "derived validator id length")?;
+            let self_bond_position_id =
+                fixed32(cursor.bytes()?, "derived self-bond position id length")?;
+            let consensus_address = fixed20(cursor.bytes()?, "consensus address length")?;
+            let voting_power = cursor.uint()?;
+            let consensus_pubkey = fixed32(cursor.bytes()?, "consensus public key length")?;
+            let source_key = identity
+                .validators
+                .iter()
+                .find(|source| source.allocation_id == allocation_id)
+                .map(|source| source.consensus_pubkey)
+                .ok_or(Error::InvalidDerived("validator allocation is missing"))?;
+            if consensus_pubkey != source_key {
+                return Err(Error::InvalidDerived("consensus public key mismatch"));
+            }
+            validators.push(DerivedValidator {
+                allocation_id,
+                validator_id,
+                self_bond_position_id,
+                consensus_address,
+                voting_power,
+            });
+        }
+        let manifest = Self {
+            identity_manifest_hash,
+            chain_context,
+            runtime_inputs_sha256,
+            claims,
+            validators,
+            genesis_commitments_hash: fixed32(cursor.bytes()?, "genesis commitments hash length")?,
+            genesis_claims_hash: fixed32(cursor.bytes()?, "genesis claims hash length")?,
+            shielded_tree_root: fixed32(cursor.bytes()?, "shielded tree root length")?,
+            app_hash: fixed32(cursor.bytes()?, "app hash length")?,
+            genesis_execution_hash: fixed32(cursor.bytes()?, "genesis execution hash length")?,
+            genesis_compact_hash: fixed32(cursor.bytes()?, "genesis compact hash length")?,
+            cometbft_genesis_sha256: fixed32(cursor.bytes()?, "CometBFT genesis hash length")?,
+        };
+        cursor.finish()?;
+        manifest.validate(identity)?;
+        if manifest.encode_canonical(identity)?.as_slice() != bytes {
+            return Err(Error::InvalidCbor(
+                "derived genesis manifest does not round-trip canonically",
+            ));
+        }
+        Ok(manifest)
+    }
+
+    pub fn hash(&self, identity: &GenesisIdentityManifest) -> Result<Hash32> {
+        let bytes = self.encode_canonical(identity)?;
+        let mut hash = Sha256::new();
+        hash.update(DERIVED_HASH_DOMAIN);
+        hash.update((bytes.len() as u64).to_be_bytes());
+        hash.update(bytes);
+        Ok(hash.finalize().into())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DerivedSignaturePackage {
+    pub identity_manifest_hash: Hash32,
+    pub derived_manifest_hash: Hash32,
+    pub approvals: Vec<Approval>,
+}
+
+impl DerivedSignaturePackage {
+    pub fn encode_canonical(&self) -> Result<Vec<u8>> {
+        if self.approvals.len() > MAX_APPROVAL_SIGNERS {
+            return Err(Error::InvalidDerivedSignaturePackage(
+                "too many derived approvals",
+            ));
+        }
+        require_sorted_unique(
+            self.approvals.iter().map(|approval| approval.signer_pubkey),
+            "derived approvals must be strictly sorted",
+        )
+        .map_err(|_| {
+            Error::InvalidDerivedSignaturePackage("duplicate or unsorted derived approvals")
+        })?;
+        let mut writer = Writer::new();
+        writer.array(5);
+        writer.text(DERIVED_APPROVAL_FORMAT);
+        writer.uint(DERIVED_APPROVAL_VERSION);
+        writer.bytes(&self.identity_manifest_hash);
+        writer.bytes(&self.derived_manifest_hash);
+        writer.array(self.approvals.len());
+        for approval in &self.approvals {
+            writer.array(2);
+            writer.bytes(&approval.signer_pubkey);
+            writer.bytes(&approval.signature);
+        }
+        let bytes = writer.finish();
+        if bytes.len() > MAX_SIGNATURE_PACKAGE_BYTES {
+            return Err(Error::InvalidDerivedSignaturePackage(
+                "derived signature package exceeds maximum size",
+            ));
+        }
+        Ok(bytes)
+    }
+
+    pub fn decode_canonical(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > MAX_SIGNATURE_PACKAGE_BYTES {
+            return Err(Error::InvalidCbor(
+                "derived signature package exceeds maximum size",
+            ));
+        }
+        let mut cursor = Cursor::new(bytes);
+        if cursor.array()? != 5
+            || cursor.text()? != DERIVED_APPROVAL_FORMAT
+            || cursor.uint()? != DERIVED_APPROVAL_VERSION
+        {
+            return Err(Error::InvalidDerivedSignaturePackage(
+                "unknown derived signature package format",
+            ));
+        }
+        let identity_manifest_hash = fixed32(cursor.bytes()?, "identity manifest hash length")?;
+        let derived_manifest_hash = fixed32(cursor.bytes()?, "derived manifest hash length")?;
+        let count = bounded_count(
+            cursor.array()?,
+            MAX_APPROVAL_SIGNERS,
+            "too many derived approvals",
+        )?;
+        let mut approvals = Vec::with_capacity(count);
+        for _ in 0..count {
+            if cursor.array()? != 2 {
+                return Err(Error::InvalidDerivedSignaturePackage(
+                    "derived approval field count",
+                ));
+            }
+            approvals.push(Approval {
+                signer_pubkey: fixed32(cursor.bytes()?, "derived approval public key length")?,
+                signature: fixed64(cursor.bytes()?, "derived approval signature length")?,
+            });
+        }
+        cursor.finish()?;
+        let package = Self {
+            identity_manifest_hash,
+            derived_manifest_hash,
+            approvals,
+        };
+        if package.encode_canonical()?.as_slice() != bytes {
+            return Err(Error::InvalidCbor(
+                "derived signature package does not round-trip canonically",
+            ));
+        }
+        Ok(package)
+    }
+
+    pub fn verify(
+        &self,
+        identity: &GenesisIdentityManifest,
+        derived: &GenesisDerivedManifest,
+    ) -> Result<usize> {
+        let count = self.verify_partial(identity, derived)?;
+        if count < usize::from(identity.approval_policy.threshold) {
+            return Err(Error::InvalidDerivedSignaturePackage(
+                "derived approval threshold is not satisfied",
+            ));
+        }
+        Ok(count)
+    }
+
+    pub fn verify_partial(
+        &self,
+        identity: &GenesisIdentityManifest,
+        derived: &GenesisDerivedManifest,
+    ) -> Result<usize> {
+        derived.validate(identity)?;
+        let identity_hash = identity.hash()?;
+        let derived_hash = derived.hash(identity)?;
+        if self.identity_manifest_hash != identity_hash
+            || self.derived_manifest_hash != derived_hash
+        {
+            return Err(Error::InvalidDerivedSignaturePackage(
+                "derived signature package hash mismatch",
+            ));
+        }
+        require_sorted_unique(
+            self.approvals.iter().map(|approval| approval.signer_pubkey),
+            "derived approvals must be strictly sorted",
+        )
+        .map_err(|_| {
+            Error::InvalidDerivedSignaturePackage("duplicate or unsorted derived approvals")
+        })?;
+        let message = derived_approval_message(&identity_hash, &derived_hash);
+        for approval in &self.approvals {
+            if !identity
+                .approval_policy
+                .signers
+                .contains(&approval.signer_pubkey)
+            {
+                return Err(Error::InvalidDerivedSignaturePackage(
+                    "derived approval signer is not authorized",
+                ));
+            }
+            let key = Ed25519VerificationKey::try_from(approval.signer_pubkey).map_err(|_| {
+                Error::InvalidDerivedSignaturePackage("invalid derived approval public key")
+            })?;
+            let signature =
+                Ed25519Signature::try_from(approval.signature.as_slice()).map_err(|_| {
+                    Error::InvalidDerivedSignaturePackage("invalid derived signature encoding")
+                })?;
+            key.verify(&signature, &message).map_err(|_| {
+                Error::InvalidDerivedSignaturePackage("derived signature verification failed")
+            })?;
+        }
+        Ok(self.approvals.len())
+    }
+
+    pub fn add_signature(
+        &mut self,
+        identity: &GenesisIdentityManifest,
+        derived: &GenesisDerivedManifest,
+        secret_key: [u8; 32],
+    ) -> Result<Hash32> {
+        self.verify_partial(identity, derived)?;
+        let signing_key = SigningKey::from(secret_key);
+        let signer_pubkey = signing_key.verification_key().to_bytes();
+        if !identity.approval_policy.signers.contains(&signer_pubkey) {
+            return Err(Error::InvalidDerivedSignaturePackage(
+                "secret key is not an authorized derived signer",
+            ));
+        }
+        if self
+            .approvals
+            .iter()
+            .any(|approval| approval.signer_pubkey == signer_pubkey)
+        {
+            return Err(Error::InvalidDerivedSignaturePackage(
+                "derived signer already approved",
+            ));
+        }
+        let signature = signing_key
+            .sign(&derived_approval_message(
+                &self.identity_manifest_hash,
+                &self.derived_manifest_hash,
+            ))
+            .to_bytes();
+        self.approvals.push(Approval {
+            signer_pubkey,
+            signature,
+        });
+        self.approvals
+            .sort_by_key(|approval| approval.signer_pubkey);
+        Ok(signer_pubkey)
+    }
+}
+
+pub fn derived_approval_message(
+    identity_manifest_hash: &Hash32,
+    derived_manifest_hash: &Hash32,
+) -> Vec<u8> {
+    let mut message = Vec::with_capacity(DERIVED_APPROVAL_DOMAIN.len() + 64);
+    message.extend_from_slice(DERIVED_APPROVAL_DOMAIN);
+    message.extend_from_slice(identity_manifest_hash);
+    message.extend_from_slice(derived_manifest_hash);
+    message
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DerivedInputDocument {
+    pub identity_manifest_hash: String,
+    pub chain_context: String,
+    pub runtime_inputs_sha256: String,
+    pub claims: Vec<DerivedClaimDocument>,
+    pub validators: Vec<DerivedValidatorDocument>,
+    pub genesis_commitments_hash: String,
+    pub genesis_claims_hash: String,
+    pub shielded_tree_root: String,
+    pub app_hash: String,
+    pub genesis_execution_hash: String,
+    pub genesis_compact_hash: String,
+    pub cometbft_genesis_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DerivedClaimDocument {
+    pub allocation_id: String,
+    pub claim_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DerivedValidatorDocument {
+    pub allocation_id: String,
+    pub validator_id: String,
+    pub self_bond_position_id: String,
+    pub consensus_address: String,
+    pub voting_power: u64,
+}
+
+impl DerivedInputDocument {
+    pub fn into_manifest(
+        self,
+        identity: &GenesisIdentityManifest,
+    ) -> Result<GenesisDerivedManifest> {
+        let manifest = GenesisDerivedManifest {
+            identity_manifest_hash: parse_hash(
+                &self.identity_manifest_hash,
+                "identity_manifest_hash",
+            )?,
+            chain_context: parse_hash(&self.chain_context, "chain_context")?,
+            runtime_inputs_sha256: parse_hash(
+                &self.runtime_inputs_sha256,
+                "runtime_inputs_sha256",
+            )?,
+            claims: self
+                .claims
+                .into_iter()
+                .map(|entry| {
+                    Ok(DerivedClaim {
+                        allocation_id: parse_hash(&entry.allocation_id, "allocation_id")?,
+                        claim_id: parse_hash(&entry.claim_id, "claim_id")?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+            validators: self
+                .validators
+                .into_iter()
+                .map(|entry| {
+                    Ok(DerivedValidator {
+                        allocation_id: parse_hash(&entry.allocation_id, "allocation_id")?,
+                        validator_id: parse_hash(&entry.validator_id, "validator_id")?,
+                        self_bond_position_id: parse_hash(
+                            &entry.self_bond_position_id,
+                            "self_bond_position_id",
+                        )?,
+                        consensus_address: parse_fixed20(
+                            &entry.consensus_address,
+                            "consensus_address",
+                        )?,
+                        voting_power: entry.voting_power,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+            genesis_commitments_hash: parse_hash(
+                &self.genesis_commitments_hash,
+                "genesis_commitments_hash",
+            )?,
+            genesis_claims_hash: parse_hash(&self.genesis_claims_hash, "genesis_claims_hash")?,
+            shielded_tree_root: parse_hash(&self.shielded_tree_root, "shielded_tree_root")?,
+            app_hash: parse_hash(&self.app_hash, "app_hash")?,
+            genesis_execution_hash: parse_hash(
+                &self.genesis_execution_hash,
+                "genesis_execution_hash",
+            )?,
+            genesis_compact_hash: parse_hash(&self.genesis_compact_hash, "genesis_compact_hash")?,
+            cometbft_genesis_sha256: parse_hash(
+                &self.cometbft_genesis_sha256,
+                "cometbft_genesis_sha256",
+            )?,
+        };
+        manifest.validate(identity)?;
+        Ok(manifest)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IdentityInputDocument {
@@ -879,12 +1468,94 @@ pub fn parse_hash(value: &str, field: &'static str) -> Result<Hash32> {
         })
 }
 
+fn parse_fixed20(value: &str, field: &'static str) -> Result<[u8; 20]> {
+    decode_hex(value, field)?
+        .try_into()
+        .map_err(|_| Error::InvalidHex {
+            field,
+            reason: "must contain exactly 20 bytes",
+        })
+}
+
 fn fixed32(value: Vec<u8>, error: &'static str) -> Result<Hash32> {
+    value.try_into().map_err(|_| Error::InvalidCbor(error))
+}
+
+fn fixed20(value: Vec<u8>, error: &'static str) -> Result<[u8; 20]> {
     value.try_into().map_err(|_| Error::InvalidCbor(error))
 }
 
 fn fixed64(value: Vec<u8>, error: &'static str) -> Result<[u8; 64]> {
     value.try_into().map_err(|_| Error::InvalidCbor(error))
+}
+
+fn require_derived_sorted_unique(
+    values: impl IntoIterator<Item = Hash32>,
+    error: &'static str,
+) -> Result<()> {
+    let mut previous = None;
+    for value in values {
+        if previous.is_some_and(|prior| prior >= value) {
+            return Err(Error::InvalidDerived(error));
+        }
+        previous = Some(value);
+    }
+    Ok(())
+}
+
+fn consensus_address(consensus_pubkey: &Hash32) -> [u8; 20] {
+    let digest = Sha256::digest(consensus_pubkey);
+    let mut address = [0u8; 20];
+    address.copy_from_slice(&digest[..20]);
+    address
+}
+
+fn genesis_commitments_hash(identity: &GenesisIdentityManifest) -> Hash32 {
+    let mut hash = Sha256::new();
+    hash.update(b"BIT-GENESIS-COMMITMENTS-V1");
+    hash.update((identity.commitments.len() as u64).to_be_bytes());
+    for commitment in &identity.commitments {
+        hash.update(commitment.commitment);
+    }
+    hash.finalize().into()
+}
+
+fn genesis_claims_hash(
+    identity: &GenesisIdentityManifest,
+    derived_claims: &[DerivedClaim],
+) -> Result<Hash32> {
+    let allocations: BTreeMap<_, _> = identity
+        .allocations
+        .iter()
+        .map(|entry| (entry.allocation_id, entry.amount))
+        .collect();
+    let claim_inputs: BTreeMap<_, _> = identity
+        .claims
+        .iter()
+        .map(|entry| (entry.allocation_id, entry.claim_pubkey))
+        .collect();
+    let mut claims = Vec::with_capacity(derived_claims.len());
+    for entry in derived_claims {
+        let claim_pubkey = claim_inputs
+            .get(&entry.allocation_id)
+            .copied()
+            .ok_or(Error::InvalidDerived("claim allocation is missing"))?;
+        let amount = allocations
+            .get(&entry.allocation_id)
+            .copied()
+            .ok_or(Error::InvalidDerived("claim amount is missing"))?;
+        claims.push((entry.claim_id, claim_pubkey, amount));
+    }
+    claims.sort_by_key(|entry| entry.0);
+    let mut hash = Sha256::new();
+    hash.update(b"BIT-GENESIS-CLAIMS-V1");
+    hash.update((claims.len() as u64).to_be_bytes());
+    for (claim_id, claim_pubkey, amount) in claims {
+        hash.update(claim_id);
+        hash.update(claim_pubkey);
+        hash.update(amount.to_be_bytes());
+    }
+    Ok(hash.finalize().into())
 }
 
 fn encode_resource_limits(writer: &mut Writer, limits: &ResourceLimits) {
@@ -1222,6 +1893,10 @@ mod tests {
         chain_context: String,
         approval_message_hex: String,
         threshold_signature_package_cbor_hex: String,
+        canonical_derived_cbor_hex: String,
+        derived_manifest_hash: String,
+        derived_approval_message_hex: String,
+        threshold_derived_signature_package_cbor_hex: String,
     }
 
     fn vectors() -> GenesisVectors {
@@ -1311,6 +1986,51 @@ mod tests {
         }
     }
 
+    fn derived(identity: &GenesisIdentityManifest) -> GenesisDerivedManifest {
+        let chain = identity.chain_context().unwrap();
+        let claims = identity
+            .claims
+            .iter()
+            .map(|claim| {
+                let amount = identity
+                    .allocations
+                    .iter()
+                    .find(|allocation| allocation.allocation_id == claim.allocation_id)
+                    .unwrap()
+                    .amount;
+                DerivedClaim {
+                    allocation_id: claim.allocation_id,
+                    claim_id: genesis_claim_id(&chain, &claim.claim_pubkey, amount),
+                }
+            })
+            .collect::<Vec<_>>();
+        let validators = identity
+            .validators
+            .iter()
+            .map(|validator| DerivedValidator {
+                allocation_id: validator.allocation_id,
+                validator_id: validator_id(&chain, &validator.operator_pubkey),
+                self_bond_position_id: position_id(&chain, &validator.owner_pubkey),
+                consensus_address: consensus_address(&validator.consensus_pubkey),
+                voting_power: 4,
+            })
+            .collect::<Vec<_>>();
+        GenesisDerivedManifest {
+            identity_manifest_hash: identity.hash().unwrap(),
+            chain_context: chain,
+            runtime_inputs_sha256: [0x66; 32],
+            genesis_commitments_hash: genesis_commitments_hash(identity),
+            genesis_claims_hash: genesis_claims_hash(identity, &claims).unwrap(),
+            claims,
+            validators,
+            shielded_tree_root: [0x77; 32],
+            app_hash: [0x88; 32],
+            genesis_execution_hash: [0x99; 32],
+            genesis_compact_hash: [0xaa; 32],
+            cometbft_genesis_sha256: [0xbb; 32],
+        }
+    }
+
     #[test]
     fn canonical_identity_round_trip_and_hash_are_stable() {
         let manifest = manifest();
@@ -1370,6 +2090,65 @@ mod tests {
     }
 
     #[test]
+    fn derived_manifest_and_second_stage_approvals_are_strict() {
+        let identity = manifest();
+        let derived = derived(&identity);
+        let bytes = derived.encode_canonical(&identity).unwrap();
+        let vectors = vectors();
+        assert_eq!(hex::encode(&bytes), vectors.canonical_derived_cbor_hex);
+        assert_eq!(
+            GenesisDerivedManifest::decode_canonical(&bytes, &identity).unwrap(),
+            derived
+        );
+        assert_eq!(
+            hex::encode(derived.hash(&identity).unwrap()),
+            vectors.derived_manifest_hash
+        );
+        assert_eq!(
+            hex::encode(derived_approval_message(
+                &identity.hash().unwrap(),
+                &derived.hash(&identity).unwrap(),
+            )),
+            vectors.derived_approval_message_hex
+        );
+
+        let mut package = DerivedSignaturePackage {
+            identity_manifest_hash: identity.hash().unwrap(),
+            derived_manifest_hash: derived.hash(&identity).unwrap(),
+            approvals: Vec::new(),
+        };
+        package.add_signature(&identity, &derived, [5; 32]).unwrap();
+        assert!(package.verify(&identity, &derived).is_err());
+        package.add_signature(&identity, &derived, [6; 32]).unwrap();
+        assert_eq!(package.verify(&identity, &derived).unwrap(), 2);
+        let package_bytes = package.encode_canonical().unwrap();
+        assert_eq!(
+            hex::encode(&package_bytes),
+            vectors.threshold_derived_signature_package_cbor_hex
+        );
+        assert_eq!(
+            DerivedSignaturePackage::decode_canonical(&package_bytes).unwrap(),
+            package
+        );
+    }
+
+    #[test]
+    fn derived_manifest_rejects_identity_and_output_tampering() {
+        let identity = manifest();
+        let mut wrong_claim = derived(&identity);
+        wrong_claim.claims[0].claim_id = [0xcc; 32];
+        assert!(wrong_claim.validate(&identity).is_err());
+
+        let mut wrong_address = derived(&identity);
+        wrong_address.validators[0].consensus_address = [0xdd; 20];
+        assert!(wrong_address.validate(&identity).is_err());
+
+        let mut wrong_summary = derived(&identity);
+        wrong_summary.genesis_claims_hash = [0xee; 32];
+        assert!(wrong_summary.validate(&identity).is_err());
+    }
+
+    #[test]
     fn canonical_decoder_rejects_trailing_bytes() {
         let mut bytes = manifest().encode_canonical().unwrap();
         bytes.push(0);
@@ -1384,5 +2163,15 @@ mod tests {
         assert!(
             SignaturePackage::decode_canonical(&vec![0; MAX_SIGNATURE_PACKAGE_BYTES + 1]).is_err()
         );
+        assert!(GenesisDerivedManifest::decode_canonical(
+            &vec![0; MAX_DERIVED_BYTES + 1],
+            &manifest(),
+        )
+        .is_err());
+        assert!(DerivedSignaturePackage::decode_canonical(&vec![
+            0;
+            MAX_SIGNATURE_PACKAGE_BYTES + 1
+        ])
+        .is_err());
     }
 }
