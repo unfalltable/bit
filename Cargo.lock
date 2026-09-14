@@ -518,6 +518,7 @@ dependencies = [
  "bit-types",
  "primitive-types",
  "sha2 0.10.9",
+ "tendermint",
  "thiserror 2.0.20",
 ]
 

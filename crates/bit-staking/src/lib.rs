@@ -70,6 +70,10 @@ pub enum Error {
     InvalidCommitVotingPower,
     #[error("validator epoch score is stale or out of order")]
     InvalidScoreEpoch,
+    #[error("effective validator set contains an invalid or duplicate entry")]
+    InvalidEffectiveValidatorSet,
+    #[error("last commit does not exactly match the persisted effective validator set")]
+    LastCommitSetMismatch,
     #[error("commission claim must be nonzero and no greater than accrued commission")]
     InvalidCommissionClaim,
     #[error("position already exists")]
@@ -351,6 +355,125 @@ pub struct CommitVote {
 pub struct ConsensusPowerUpdate {
     pub consensus_pubkey: PubKey32,
     pub power: u64,
+}
+
+/// Canonical CometBFT validator set, sorted by power descending and address
+/// ascending. The cached hash is the exact CometBFT SimpleValidator Merkle hash.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectiveValidatorSet {
+    validators: Vec<ConsensusPowerUpdate>,
+    comet_hash: Hash32,
+}
+
+impl EffectiveValidatorSet {
+    pub fn new(mut validators: Vec<ConsensusPowerUpdate>) -> Result<Self> {
+        validators.sort_by(|left, right| {
+            right.power.cmp(&left.power).then_with(|| {
+                consensus_address(&left.consensus_pubkey)
+                    .cmp(&consensus_address(&right.consensus_pubkey))
+            })
+        });
+        validate_effective_validators(&validators)?;
+        let comet_hash = comet_validator_set_hash(&validators)?;
+        Ok(Self {
+            validators,
+            comet_hash,
+        })
+    }
+
+    pub fn validators(&self) -> &[ConsensusPowerUpdate] {
+        &self.validators
+    }
+
+    pub fn comet_hash(&self) -> Hash32 {
+        self.comet_hash
+    }
+
+    pub fn validate_last_commit(&self, votes: &[CommitVote]) -> Result<()> {
+        if votes.len() != self.validators.len()
+            || votes.iter().zip(&self.validators).any(|(vote, validator)| {
+                vote.consensus_address != consensus_address(&validator.consensus_pubkey)
+                    || vote.power != validator.power
+            })
+        {
+            return Err(Error::LastCommitSetMismatch);
+        }
+        Ok(())
+    }
+
+    pub fn apply_updates(&self, updates: &[ConsensusPowerUpdate]) -> Result<Self> {
+        let mut validators: BTreeMap<PubKey32, u64> = self
+            .validators
+            .iter()
+            .map(|validator| (validator.consensus_pubkey, validator.power))
+            .collect();
+        let mut seen = BTreeSet::new();
+        for update in updates {
+            if !seen.insert(update.consensus_pubkey) {
+                return Err(Error::InvalidEffectiveValidatorSet);
+            }
+            if update.power == 0 {
+                if validators.remove(&update.consensus_pubkey).is_none() {
+                    return Err(Error::InvalidEffectiveValidatorSet);
+                }
+            } else {
+                validators.insert(update.consensus_pubkey, update.power);
+            }
+        }
+        Self::new(
+            validators
+                .into_iter()
+                .map(|(consensus_pubkey, power)| ConsensusPowerUpdate {
+                    consensus_pubkey,
+                    power,
+                })
+                .collect(),
+        )
+    }
+
+    pub fn encode_persistent(&self) -> Result<Vec<u8>> {
+        let count = u32::try_from(self.validators.len()).map_err(|_| Error::Overflow)?;
+        let mut writer = Writer::new();
+        writer.u8(1);
+        writer.u32(count);
+        for validator in &self.validators {
+            writer.hash32(&validator.consensus_pubkey);
+            writer.u64(validator.power);
+        }
+        writer.hash32(&self.comet_hash);
+        Ok(writer.finish())
+    }
+
+    pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(bytes);
+        reader.version(1)?;
+        let count = usize::try_from(reader.u32()?).map_err(|_| Error::Overflow)?;
+        let required = count
+            .checked_mul(40)
+            .and_then(|size| size.checked_add(32))
+            .ok_or(Error::Overflow)?;
+        if reader.remaining() != required {
+            return Err(Error::InvalidEncoding(
+                "effective validator set length mismatch",
+            ));
+        }
+        let mut validators = Vec::with_capacity(count);
+        for _ in 0..count {
+            validators.push(ConsensusPowerUpdate {
+                consensus_pubkey: reader.hash32()?,
+                power: reader.u64()?,
+            });
+        }
+        let stored_hash = reader.hash32()?;
+        reader.finish()?;
+        let set = Self::new(validators.clone())?;
+        if set.validators != validators || set.comet_hash != stored_hash {
+            return Err(Error::InvalidEncoding(
+                "noncanonical effective validator set",
+            ));
+        }
+        Ok(set)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -901,6 +1024,19 @@ pub struct StakingBook {
 }
 
 impl StakingBook {
+    pub fn effective_validator_set(&self) -> Result<EffectiveValidatorSet> {
+        EffectiveValidatorSet::new(
+            self.validators
+                .values()
+                .filter(|validator| validator.voting_power != 0)
+                .map(|validator| ConsensusPowerUpdate {
+                    consensus_pubkey: validator.consensus_pubkey,
+                    power: validator.voting_power,
+                })
+                .collect(),
+        )
+    }
+
     pub fn new(chain_context: Hash32, parameters: StakingParameters) -> Result<Self> {
         parameters.validate()?;
         Ok(Self {
@@ -2401,6 +2537,47 @@ pub fn consensus_address(consensus_pubkey: &PubKey32) -> ConsensusAddress {
     address
 }
 
+fn validate_effective_validators(validators: &[ConsensusPowerUpdate]) -> Result<()> {
+    let mut keys = BTreeSet::new();
+    let mut addresses = BTreeSet::new();
+    let mut total = 0u64;
+    for validator in validators {
+        if validator.power == 0 || validator.power > COMETBFT_SAFE_TOTAL_POWER {
+            return Err(Error::InvalidEffectiveValidatorSet);
+        }
+        if !keys.insert(validator.consensus_pubkey)
+            || !addresses.insert(consensus_address(&validator.consensus_pubkey))
+        {
+            return Err(Error::InvalidEffectiveValidatorSet);
+        }
+        total = total
+            .checked_add(validator.power)
+            .ok_or(Error::InvalidEffectiveValidatorSet)?;
+        if total > COMETBFT_SAFE_TOTAL_POWER {
+            return Err(Error::InvalidEffectiveValidatorSet);
+        }
+    }
+    Ok(())
+}
+
+fn comet_validator_set_hash(validators: &[ConsensusPowerUpdate]) -> Result<Hash32> {
+    let validators = validators
+        .iter()
+        .map(|validator| {
+            let public_key = tendermint::PublicKey::from_raw_ed25519(&validator.consensus_pubkey)
+                .ok_or(Error::InvalidEffectiveValidatorSet)?;
+            let power = tendermint::vote::Power::try_from(validator.power)
+                .map_err(|_| Error::InvalidEffectiveValidatorSet)?;
+            Ok(tendermint::validator::Info::new(public_key, power))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    tendermint::validator::Set::without_proposer(validators)
+        .hash()
+        .as_bytes()
+        .try_into()
+        .map_err(|_| Error::InvalidEffectiveValidatorSet)
+}
+
 fn amount(value: u128) -> Amount {
     Amount::new(value).expect("testnet staking constants and validated arithmetic fit Amount")
 }
@@ -3476,5 +3653,83 @@ mod tests {
         assert_eq!(scores[&validator_id], u128::from(power) * 3);
         assert_eq!(book.validator(&validator_id).unwrap().score_epoch, 1);
         assert_eq!(book.validator(&validator_id).unwrap().epoch_score, 0);
+    }
+
+    #[test]
+    fn effective_set_is_canonical_hashed_and_applies_exact_updates() {
+        let first = ConsensusPowerUpdate {
+            consensus_pubkey: key(31),
+            power: 11,
+        };
+        let second = ConsensusPowerUpdate {
+            consensus_pubkey: key(32),
+            power: 13,
+        };
+        let set = EffectiveValidatorSet::new(vec![first, second]).unwrap();
+        assert_eq!(set.validators(), &[second, first]);
+        assert_ne!(set.comet_hash(), [0; 32]);
+        set.validate_last_commit(&[
+            CommitVote {
+                consensus_address: consensus_address(&second.consensus_pubkey),
+                power: second.power,
+                signed: false,
+            },
+            CommitVote {
+                consensus_address: consensus_address(&first.consensus_pubkey),
+                power: first.power,
+                signed: true,
+            },
+        ])
+        .unwrap();
+        assert_eq!(
+            set.validate_last_commit(&[
+                CommitVote {
+                    consensus_address: consensus_address(&first.consensus_pubkey),
+                    power: first.power,
+                    signed: true,
+                },
+                CommitVote {
+                    consensus_address: consensus_address(&second.consensus_pubkey),
+                    power: second.power,
+                    signed: false,
+                },
+            ]),
+            Err(Error::LastCommitSetMismatch)
+        );
+
+        let decoded =
+            EffectiveValidatorSet::decode_persistent(&set.encode_persistent().unwrap()).unwrap();
+        assert_eq!(decoded, set);
+        let updated = set
+            .apply_updates(&[
+                ConsensusPowerUpdate {
+                    consensus_pubkey: second.consensus_pubkey,
+                    power: 0,
+                },
+                ConsensusPowerUpdate {
+                    consensus_pubkey: first.consensus_pubkey,
+                    power: 17,
+                },
+            ])
+            .unwrap();
+        assert_eq!(updated.validators().len(), 1);
+        assert_eq!(updated.validators()[0].power, 17);
+        assert_eq!(
+            EffectiveValidatorSet::new(vec![first, first]),
+            Err(Error::InvalidEffectiveValidatorSet)
+        );
+        assert_eq!(
+            set.apply_updates(&[ConsensusPowerUpdate {
+                consensus_pubkey: key(33),
+                power: 0,
+            }]),
+            Err(Error::InvalidEffectiveValidatorSet)
+        );
+        let mut corrupt = set.encode_persistent().unwrap();
+        *corrupt.last_mut().unwrap() ^= 1;
+        assert!(matches!(
+            EffectiveValidatorSet::decode_persistent(&corrupt),
+            Err(Error::InvalidEncoding(_))
+        ));
     }
 }

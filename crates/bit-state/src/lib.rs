@@ -9,9 +9,10 @@ use bit_emission::{
     completed_epochs_after_height, FeeClass, FeePolicy, GenesisAllocation, SupplyAudit, SupplyState,
 };
 use bit_staking::{
-    ActivationCapacityRecord, ActivationOutcome, CommitVote, ConsensusPowerUpdate, PositionStatus,
-    StakePool, StakePosition, StakingBook, StakingParameters, StakingTotals, Validator,
-    ValidatorPower, ValidatorReward, ValidatorSetTransition, ValidatorUpdate,
+    ActivationCapacityRecord, ActivationOutcome, CommitVote, ConsensusPowerUpdate,
+    EffectiveValidatorSet, PositionStatus, StakePool, StakePosition, StakingBook,
+    StakingParameters, StakingTotals, Validator, ValidatorPower, ValidatorReward,
+    ValidatorSetTransition, ValidatorUpdate,
 };
 use bit_transaction::{
     verify_staking_stateless, verify_transfer_stateless, ActionAuthorizationView,
@@ -34,7 +35,7 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 10;
+const STORAGE_SCHEMA_VERSION: u32 = 11;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -75,6 +76,7 @@ const STAKING_VALIDATOR_PREFIX: &str = "staking/validators/";
 const STAKING_POOL_PREFIX: &str = "staking/pools/";
 const STAKING_POSITION_PREFIX: &str = "staking/positions/";
 const STAKING_CAPACITY_PREFIX: &str = "staking/capacity/";
+const STAKING_EFFECTIVE_SCHEDULE: &str = "staking/effective_schedule";
 
 const SUBSTORES: &[&str] = &[
     "shielded",
@@ -210,6 +212,18 @@ pub enum Error {
     CommitmentTreeFull,
     #[error("invalid epoch system phase: {0}")]
     InvalidSystemPhase(&'static str),
+    #[error("next_validators_hash does not match the persisted H+1 validator set")]
+    NextValidatorsHashMismatch,
+    #[error(
+        "HALT_NO_SAFE_VALIDATOR_SET: validator updates would remove the last effective validator"
+    )]
+    NoSafeValidatorSet,
+    #[error("effective validator set height {requested} is outside [{first}, {last}]")]
+    EffectiveValidatorSetUnavailable {
+        requested: u64,
+        first: u64,
+        last: u64,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -241,6 +255,146 @@ pub struct SystemBlockOutcome {
     pub activations: Vec<(Hash32, ActivationOutcome)>,
     pub validator_set: Option<Vec<ValidatorPower>>,
     pub validator_updates: Vec<ConsensusPowerUpdate>,
+}
+
+/// Three-height rolling schedule. At committed height H it stores the exact
+/// CometBFT sets for H, H+1, and H+2. Historical JMT versions retain the same
+/// three-height view without copying a full set into a new key every block.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct EffectiveValidatorSchedule {
+    base_height: u64,
+    sets: [EffectiveValidatorSet; 3],
+}
+
+impl EffectiveValidatorSchedule {
+    fn genesis(set: EffectiveValidatorSet) -> Self {
+        Self {
+            base_height: 0,
+            sets: [set.clone(), set.clone(), set],
+        }
+    }
+
+    fn effective_set_at(&self, height: u64) -> Result<&EffectiveValidatorSet> {
+        let last = self
+            .base_height
+            .checked_add(2)
+            .ok_or_else(|| Error::CorruptState("effective set height overflow".to_owned()))?;
+        let index = height
+            .checked_sub(self.base_height)
+            .and_then(|offset| (offset <= 2).then_some(offset as usize));
+        index
+            .map(|index| &self.sets[index])
+            .ok_or(Error::EffectiveValidatorSetUnavailable {
+                requested: height,
+                first: self.base_height,
+                last,
+            })
+    }
+
+    fn validate_block_context(
+        &self,
+        height: u64,
+        last_commit: Option<&[CommitVote]>,
+        next_validators_hash: Hash32,
+    ) -> Result<()> {
+        let expected_base = height
+            .checked_sub(1)
+            .ok_or(Error::InvalidSystemPhase("block height is zero"))?;
+        if self.base_height != expected_base {
+            return Err(Error::InvalidSystemPhase(
+                "effective validator schedule is not aligned with block height",
+            ));
+        }
+        let next_height = height
+            .checked_add(1)
+            .ok_or(Error::InvalidSystemPhase("next validator height overflow"))?;
+        if self.effective_set_at(next_height)?.comet_hash() != next_validators_hash {
+            return Err(Error::NextValidatorsHashMismatch);
+        }
+        if height == 1 {
+            if last_commit.is_some_and(|votes| !votes.is_empty()) {
+                return Err(Error::InvalidSystemPhase(
+                    "height one cannot contain a previous commit",
+                ));
+            }
+        } else {
+            self.effective_set_at(height - 1)?
+                .validate_last_commit(last_commit.ok_or(Error::InvalidSystemPhase(
+                    "previous commit is required after height one",
+                ))?)?;
+        }
+        Ok(())
+    }
+
+    fn advance(&mut self, committed_height: u64, h_plus_two: EffectiveValidatorSet) -> Result<()> {
+        let expected = self
+            .base_height
+            .checked_add(1)
+            .ok_or_else(|| Error::CorruptState("effective set height overflow".to_owned()))?;
+        if committed_height != expected {
+            return Err(Error::InvalidSystemPhase(
+                "effective validator schedule advance is out of order",
+            ));
+        }
+        self.sets = [self.sets[1].clone(), self.sets[2].clone(), h_plus_two];
+        self.base_height = committed_height;
+        Ok(())
+    }
+
+    fn encode_persistent(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        out.push(1);
+        out.extend_from_slice(&self.base_height.to_be_bytes());
+        for set in &self.sets {
+            let bytes = set.encode_persistent()?;
+            let len = u32::try_from(bytes.len()).map_err(|_| {
+                Error::CorruptState("effective set encoding is too large".to_owned())
+            })?;
+            out.extend_from_slice(&len.to_be_bytes());
+            out.extend_from_slice(&bytes);
+        }
+        Ok(out)
+    }
+
+    fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut offset = 0usize;
+        if take_schedule(bytes, &mut offset, 1)?[0] != 1 {
+            return Err(Error::CorruptState(
+                "unsupported effective validator schedule version".to_owned(),
+            ));
+        }
+        let base_height = u64::from_be_bytes(
+            take_schedule(bytes, &mut offset, 8)?
+                .try_into()
+                .expect("slice length is checked"),
+        );
+        let mut sets = Vec::with_capacity(3);
+        for _ in 0..3 {
+            let len = u32::from_be_bytes(
+                take_schedule(bytes, &mut offset, 4)?
+                    .try_into()
+                    .expect("slice length is checked"),
+            );
+            let len = usize::try_from(len)
+                .map_err(|_| Error::CorruptState("effective set length overflow".to_owned()))?;
+            sets.push(EffectiveValidatorSet::decode_persistent(take_schedule(
+                bytes,
+                &mut offset,
+                len,
+            )?)?);
+        }
+        if offset != bytes.len() {
+            return Err(Error::CorruptState(
+                "trailing effective validator schedule bytes".to_owned(),
+            ));
+        }
+        Ok(Self {
+            base_height,
+            sets: sets
+                .try_into()
+                .expect("exactly three effective sets were decoded"),
+        })
+    }
 }
 
 pub struct QueryProof {
@@ -382,6 +536,22 @@ impl PersistentState {
             .map_err(|_| Error::CorruptState("staking memory lock is poisoned".to_owned()))?
             .clone();
         validate_staking_supply(&staking, &supply)?;
+        let effective_schedule = read_effective_schedule(&snapshot).await?;
+        if effective_schedule.base_height != current_height {
+            return Err(Error::CorruptState(
+                "effective validator schedule height differs from state height".to_owned(),
+            ));
+        }
+        let logical_height = current_height
+            .checked_add(2)
+            .ok_or_else(|| Error::CorruptState("validator set height overflow".to_owned()))?;
+        if effective_schedule.effective_set_at(logical_height)?
+            != &staking.effective_validator_set()?
+        {
+            return Err(Error::CorruptState(
+                "logical staking set differs from the H+2 effective set".to_owned(),
+            ));
+        }
 
         Ok(BlockSession {
             owner: self,
@@ -393,6 +563,7 @@ impl PersistentState {
             compact_hash,
             supply,
             staking,
+            effective_schedule,
             staking_touches: StakingTouches::default(),
             system_phases_staged: false,
             transaction_count: 0,
@@ -421,6 +592,38 @@ impl PersistentState {
         let height = read_u64(&snapshot, META_HEIGHT).await?;
         let supply = read_supply(&snapshot).await?;
         Ok(supply.audit_at_height(&self.config.monetary_policy, height)?)
+    }
+
+    /// Return one of the three consensus sets retained at the latest state
+    /// version. Older committed heights remain recoverable from historical JMT
+    /// versions when the historical query surface is exposed.
+    pub async fn effective_validator_set_at(&self, height: u64) -> Result<EffectiveValidatorSet> {
+        Ok(read_effective_schedule(&self.storage.latest_snapshot())
+            .await?
+            .effective_set_at(height)?
+            .clone())
+    }
+
+    /// Hash CometBFT must place in the height-H request for its H+1 set.
+    pub async fn expected_next_validators_hash(&self, block_height: u64) -> Result<Hash32> {
+        let snapshot = self.storage.latest_snapshot();
+        let current_height = read_u64(&snapshot, META_HEIGHT).await?;
+        let expected = current_height
+            .checked_add(1)
+            .ok_or_else(|| Error::CorruptState("state height overflow".to_owned()))?;
+        if block_height != expected {
+            return Err(Error::HeightMismatch {
+                expected,
+                actual: block_height,
+            });
+        }
+        let set_height = block_height
+            .checked_add(1)
+            .ok_or_else(|| Error::CorruptState("validator set height overflow".to_owned()))?;
+        Ok(read_effective_schedule(&snapshot)
+            .await?
+            .effective_set_at(set_height)?
+            .comet_hash())
     }
 
     pub fn staking_book(&self) -> Result<StakingBook> {
@@ -498,6 +701,7 @@ pub struct BlockSession<'a> {
     compact_hash: Hash32,
     supply: SupplyState,
     staking: StakingBook,
+    effective_schedule: EffectiveValidatorSchedule,
     staking_touches: StakingTouches,
     system_phases_staged: bool,
     transaction_count: usize,
@@ -574,47 +778,63 @@ impl BlockSession<'_> {
     pub fn stage_consensus_system(
         &mut self,
         last_commit: Option<&[CommitVote]>,
+        next_validators_hash: Hash32,
     ) -> Result<SystemBlockOutcome> {
         if self.system_phases_staged {
             return Err(Error::InvalidSystemPhase(
                 "consensus system phases are already staged",
             ));
         }
-        if self.height == 1 {
-            if last_commit.is_some_and(|votes| !votes.is_empty()) {
-                return Err(Error::InvalidSystemPhase(
-                    "height one cannot contain a previous commit",
-                ));
-            }
-            self.system_phases_staged = true;
-            return Ok(SystemBlockOutcome {
-                last_commit_height: None,
-                reward_settlement: None,
-                activations: Vec::new(),
-                validator_set: None,
-                validator_updates: Vec::new(),
-            });
-        }
 
-        let votes = last_commit.ok_or(Error::InvalidSystemPhase(
-            "previous commit is required after height one",
-        ))?;
-        let last_commit_height = self.height - 1;
-        let score_epoch = (last_commit_height - 1) / self.owner.config.monetary_policy.epoch_blocks;
-        let commit_outcome = self.staking.record_last_commit(
-            score_epoch,
+        let checkpoint = (
+            self.supply.clone(),
+            self.staking.clone(),
+            self.effective_schedule.clone(),
+            self.staking_touches.clone(),
+        );
+        let outcome = self.stage_consensus_system_inner(last_commit, next_validators_hash);
+        if outcome.is_err() {
+            self.supply = checkpoint.0;
+            self.staking = checkpoint.1;
+            self.effective_schedule = checkpoint.2;
+            self.staking_touches = checkpoint.3;
+        }
+        outcome
+    }
+
+    fn stage_consensus_system_inner(
+        &mut self,
+        last_commit: Option<&[CommitVote]>,
+        next_validators_hash: Hash32,
+    ) -> Result<SystemBlockOutcome> {
+        self.effective_schedule.validate_block_context(
             self.height,
-            self.block_time_seconds,
-            votes,
+            last_commit,
+            next_validators_hash,
         )?;
-        self.staking_touches
-            .validators
-            .extend(commit_outcome.observed_validators);
-        let mut updates: BTreeMap<[u8; 32], u64> = commit_outcome
-            .validator_updates
-            .into_iter()
-            .map(|update| (update.consensus_pubkey, update.power))
-            .collect();
+
+        let last_commit_height = (self.height > 1).then_some(self.height - 1);
+        let mut updates = BTreeMap::new();
+        if let Some(last_commit_height) = last_commit_height {
+            let votes = last_commit.expect("validated above for height greater than one");
+            let score_epoch =
+                (last_commit_height - 1) / self.owner.config.monetary_policy.epoch_blocks;
+            let commit_outcome = self.staking.record_last_commit(
+                score_epoch,
+                self.height,
+                self.block_time_seconds,
+                votes,
+            )?;
+            self.staking_touches
+                .validators
+                .extend(commit_outcome.observed_validators);
+            updates.extend(
+                commit_outcome
+                    .validator_updates
+                    .into_iter()
+                    .map(|update| (update.consensus_pubkey, update.power)),
+            );
+        }
 
         let mut reward_settlement = None;
         let mut activations = Vec::new();
@@ -638,20 +858,34 @@ impl BlockSession<'_> {
             }
             validator_set = Some(transition.selected);
         }
+        let validator_updates: Vec<_> = updates
+            .into_iter()
+            .map(|(consensus_pubkey, power)| ConsensusPowerUpdate {
+                consensus_pubkey,
+                power,
+            })
+            .collect();
+        let h_plus_one = self
+            .height
+            .checked_add(1)
+            .ok_or(Error::InvalidSystemPhase("validator set height overflow"))?;
+        let base_set = self
+            .effective_schedule
+            .effective_set_at(h_plus_one)?
+            .clone();
+        let h_plus_two = base_set.apply_updates(&validator_updates)?;
+        if !base_set.validators().is_empty() && h_plus_two.validators().is_empty() {
+            return Err(Error::NoSafeValidatorSet);
+        }
+        self.effective_schedule.advance(self.height, h_plus_two)?;
         self.system_phases_staged = true;
 
         Ok(SystemBlockOutcome {
-            last_commit_height: Some(last_commit_height),
+            last_commit_height,
             reward_settlement,
             activations,
             validator_set,
-            validator_updates: updates
-                .into_iter()
-                .map(|(consensus_pubkey, power)| ConsensusPowerUpdate {
-                    consensus_pubkey,
-                    power,
-                })
-                .collect(),
+            validator_updates,
         })
     }
 
@@ -1410,8 +1644,24 @@ impl BlockSession<'_> {
 
     /// Seal the shielded block and compute the next app hash without writing it.
     pub async fn prepare(mut self) -> Result<PreparedBlock> {
+        if !self.system_phases_staged {
+            return Err(Error::InvalidSystemPhase(
+                "consensus system phases were not staged",
+            ));
+        }
         self.staking.validate()?;
         validate_staking_supply(&self.staking, &self.supply)?;
+        let logical_height = self
+            .height
+            .checked_add(2)
+            .ok_or(Error::InvalidSystemPhase("validator set height overflow"))?;
+        if self.effective_schedule.effective_set_at(logical_height)?
+            != &self.staking.effective_validator_set()?
+        {
+            return Err(Error::InvalidSystemPhase(
+                "logical staking set differs from the H+2 effective set",
+            ));
+        }
         let staking_totals = self.staking.totals()?;
         let supply = self
             .supply
@@ -1450,6 +1700,10 @@ impl BlockSession<'_> {
             .put_raw(compact_key(self.height), self.compact_hash.to_vec());
         write_supply(&mut self.delta, &self.supply);
         write_staking_updates(&mut self.delta, &self.staking, &self.staking_touches)?;
+        self.delta.put_raw(
+            STAKING_EFFECTIVE_SCHEDULE.to_owned(),
+            self.effective_schedule.encode_persistent()?,
+        );
 
         if self.height >= self.owner.config.anchor_retention_blocks {
             let prune_height = self.height - self.owner.config.anchor_retention_blocks;
@@ -1576,6 +1830,11 @@ async fn initialize_genesis(storage: &Storage, config: &GenesisConfig) -> Result
     write_fee_policy(&mut delta, config.fee_policy);
     write_supply(&mut delta, &supply);
     write_staking_genesis(&mut delta, &config.genesis_staking)?;
+    delta.put_raw(
+        STAKING_EFFECTIVE_SCHEDULE.to_owned(),
+        EffectiveValidatorSchedule::genesis(config.genesis_staking.effective_validator_set()?)
+            .encode_persistent()?,
+    );
     delta.put_raw(TREE_ROOT.to_owned(), tree_root.to_vec());
     delta.put_raw(TREE_FRONTIER.to_owned(), frontier);
     delta.put_raw(anchor_height_key(0), tree_root.to_vec());
@@ -1665,6 +1924,20 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
         ));
     }
     validate_staking_supply(&staking, &supply)?;
+    let effective_schedule = read_effective_schedule(&snapshot).await?;
+    if effective_schedule.base_height != height {
+        return Err(Error::CorruptState(
+            "effective validator schedule height differs from state height".to_owned(),
+        ));
+    }
+    let logical_height = height
+        .checked_add(2)
+        .ok_or_else(|| Error::CorruptState("validator set height overflow".to_owned()))?;
+    if effective_schedule.effective_set_at(logical_height)? != &staking.effective_validator_set()? {
+        return Err(Error::CorruptState(
+            "logical staking set differs from the H+2 effective set".to_owned(),
+        ));
+    }
 
     let tree = read_tree(&snapshot).await?;
     let tree_root = tree_root_bytes(&tree);
@@ -1808,6 +2081,23 @@ fn write_staking_updates(
         delta.put_raw(staking_capacity_key(*epoch), capacity.encode_persistent());
     }
     Ok(())
+}
+
+async fn read_effective_schedule(snapshot: &Snapshot) -> Result<EffectiveValidatorSchedule> {
+    EffectiveValidatorSchedule::decode_persistent(
+        &required(snapshot, STAKING_EFFECTIVE_SCHEDULE).await?,
+    )
+}
+
+fn take_schedule<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<&'a [u8]> {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| Error::CorruptState("effective schedule length overflow".to_owned()))?;
+    let value = bytes
+        .get(*offset..end)
+        .ok_or_else(|| Error::CorruptState("truncated effective validator schedule".to_owned()))?;
+    *offset = end;
+    Ok(value)
 }
 
 async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result<StakingBook> {
@@ -2838,6 +3128,65 @@ mod tests {
         }
     }
 
+    async fn stage_empty_consensus(
+        state: &PersistentState,
+        block: &mut BlockSession<'_>,
+        height: u64,
+    ) {
+        let next_hash = state.expected_next_validators_hash(height).await.unwrap();
+        let empty = [];
+        block
+            .stage_consensus_system((height > 1).then_some(empty.as_slice()), next_hash)
+            .unwrap();
+    }
+
+    fn active_validator_config(
+        retention: u64,
+        parameters: StakingParameters,
+    ) -> (GenesisConfig, Hash32, Hash32, u64) {
+        let mut genesis = config(retention);
+        let chain = genesis.chain_context;
+        let operator = [0x91; 32];
+        let validator = validator_id(&chain, &operator);
+        let consensus_pubkey = [0x92; 32];
+        let owner = [0x93; 32];
+        let position = position_id(&chain, &owner);
+        let principal = Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
+        let mut staking = StakingBook::new(chain, parameters).unwrap();
+        staking
+            .register_validator(validator, operator, consensus_pubkey, 500)
+            .unwrap();
+        staking
+            .open_pending_delegation(
+                0,
+                0,
+                position,
+                owner,
+                validator,
+                principal,
+                Amount::ZERO,
+                true,
+                vec![0x94; bit_staking::RECOVERY_RECEIPT_BYTES],
+            )
+            .unwrap();
+        staking.activate_pending(&position, 1).unwrap();
+        let power = staking.apply_validator_set().unwrap()[0].power;
+        genesis.genesis_staking = staking;
+        genesis.genesis_allocation = GenesisAllocation {
+            shielded: Amount::ZERO,
+            stake: principal,
+            pending_delegation: Amount::ZERO,
+            exits: Amount::ZERO,
+            commission: Amount::ZERO,
+            fee_reserve: Amount::ZERO,
+            unclaimed_genesis: Amount::new(
+                genesis.monetary_policy.genesis_supply.value() - principal.value(),
+            )
+            .unwrap(),
+        };
+        (genesis, validator, consensus_pubkey, power)
+    }
+
     fn verified(tx: u8, anchor: Hash32, nullifier: u8, commitment: u64) -> VerifiedTransfer {
         VerifiedTransfer {
             tx_id: [tx; 32],
@@ -2886,6 +3235,7 @@ mod tests {
 
         let transfer = verified(4, genesis.shielded_tree_root, 5, 6);
         let mut block = state.begin_block(1, [7; 32], [8; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut block, 1).await;
         block.stage_verified(&transfer).await.unwrap();
         let first_prepared = block.prepare().await.unwrap();
         let expected_root = first_prepared.app_hash;
@@ -2898,6 +3248,7 @@ mod tests {
             .unwrap();
         assert_eq!(state.summary().await.unwrap(), genesis);
         let mut replay = state.begin_block(1, [7; 32], [8; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut replay, 1).await;
         replay.stage_verified(&transfer).await.unwrap();
         let replay = replay.prepare().await.unwrap();
         assert_eq!(replay.app_hash, expected_root);
@@ -2950,10 +3301,11 @@ mod tests {
             .unwrap();
 
         for height in 1..=2 {
-            let block = state
+            let mut block = state
                 .begin_block(height, [height as u8; 32], [height as u8 + 10; 32])
                 .await
                 .unwrap();
+            stage_empty_consensus(&state, &mut block, height).await;
             state.commit(block.prepare().await.unwrap()).unwrap();
         }
         let before_boundary = state.summary().await.unwrap();
@@ -2963,9 +3315,9 @@ mod tests {
         let boundary = state.begin_block(3, [3; 32], [13; 32]).await.unwrap();
         assert!(matches!(
             boundary.prepare().await,
-            Err(Error::Accounting(bit_emission::Error::Invariant(
-                "completed epochs differ from committed height"
-            )))
+            Err(Error::InvalidSystemPhase(
+                "consensus system phases were not staged"
+            ))
         ));
         assert_eq!(state.summary().await.unwrap(), before_boundary);
         state.close().await;
@@ -2975,6 +3327,59 @@ mod tests {
             .unwrap();
         assert_eq!(reopened.summary().await.unwrap(), before_boundary);
         reopened.close().await;
+    }
+
+    #[tokio::test]
+    async fn removing_the_last_effective_validator_halts_atomically() {
+        let dir = TempDir::new().unwrap();
+        let mut parameters = StakingParameters::reference_testnet();
+        parameters.downtime_window = 1;
+        parameters.min_signed_bps = 10_000;
+        let (genesis, validator, consensus_pubkey, power) = active_validator_config(8, parameters);
+        let state = PersistentState::open(dir.path().to_path_buf(), genesis)
+            .await
+            .unwrap();
+
+        let first_hash = state.expected_next_validators_hash(1).await.unwrap();
+        let mut first = state.begin_block(1, [0xa1; 32], [0xa2; 32]).await.unwrap();
+        first.stage_consensus_system(None, first_hash).unwrap();
+        state.commit(first.prepare().await.unwrap()).unwrap();
+
+        let second_hash = state.expected_next_validators_hash(2).await.unwrap();
+        let mut second = state.begin_block(2, [0xa3; 32], [0xa4; 32]).await.unwrap();
+        let missed = CommitVote {
+            consensus_address: bit_staking::consensus_address(&consensus_pubkey),
+            power,
+            signed: false,
+        };
+        assert!(matches!(
+            second.stage_consensus_system(Some(&[missed]), second_hash),
+            Err(Error::NoSafeValidatorSet)
+        ));
+        assert_eq!(
+            second.staking.validator(&validator).unwrap().status,
+            bit_staking::ValidatorStatus::Active
+        );
+
+        let signed = CommitVote {
+            signed: true,
+            ..missed
+        };
+        let outcome = second
+            .stage_consensus_system(Some(&[signed]), second_hash)
+            .unwrap();
+        assert!(outcome.validator_updates.is_empty());
+        state.commit(second.prepare().await.unwrap()).unwrap();
+        assert_eq!(state.summary().await.unwrap().state_height, 2);
+        assert_eq!(
+            state
+                .staking_book()
+                .unwrap()
+                .validator(&validator)
+                .unwrap()
+                .status,
+            bit_staking::ValidatorStatus::Active
+        );
     }
 
     #[tokio::test]
@@ -2995,6 +3400,7 @@ mod tests {
             .await
             .unwrap();
         let mut first = state.begin_block(1, [51; 32], [52; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut first, 1).await;
         first
             .stage_authorized_validator_registration(
                 validator,
@@ -3031,17 +3437,20 @@ mod tests {
             proof.verify().unwrap();
         }
 
-        let second = state.begin_block(2, [53; 32], [54; 32]).await.unwrap();
+        let mut second = state.begin_block(2, [53; 32], [54; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut second, 2).await;
         state.commit(second.prepare().await.unwrap()).unwrap();
         let mut boundary = state.begin_block(3, [55; 32], [56; 32]).await.unwrap();
-        let settlement = boundary
-            .stage_epoch_reward_settlement(&BTreeMap::new())
+        let boundary_hash = state.expected_next_validators_hash(3).await.unwrap();
+        let system = boundary
+            .stage_consensus_system(Some(&[]), boundary_hash)
             .unwrap();
+        let settlement = system.reward_settlement.unwrap();
         assert_eq!(settlement.distributed, Amount::ZERO);
-        let outcomes = boundary.stage_epoch_staking_activation().unwrap();
+        let outcomes = system.activations;
         assert_eq!(outcomes.len(), 1);
         assert!(matches!(outcomes[0].1, ActivationOutcome::Activated { .. }));
-        let selected = boundary.stage_validator_set_selection().unwrap();
+        let selected = system.validator_set.unwrap();
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].validator_id, validator);
         let receipt = state.commit(boundary.prepare().await.unwrap()).unwrap();
@@ -3158,20 +3567,25 @@ mod tests {
         let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
             .await
             .unwrap();
+        let first_next_hash = state.expected_next_validators_hash(1).await.unwrap();
         let mut first = state.begin_block(1, [1; 32], [3; 32]).await.unwrap();
-        first.stage_consensus_system(None).unwrap();
+        first.stage_consensus_system(None, first_next_hash).unwrap();
         state.commit(first.prepare().await.unwrap()).unwrap();
         let commit_vote = CommitVote {
             consensus_address: bit_staking::consensus_address(&consensus_pubkey),
             power,
             signed: true,
         };
+        let second_next_hash = state.expected_next_validators_hash(2).await.unwrap();
         let mut second = state.begin_block(2, [2; 32], [4; 32]).await.unwrap();
-        second.stage_consensus_system(Some(&[commit_vote])).unwrap();
+        second
+            .stage_consensus_system(Some(&[commit_vote]), second_next_hash)
+            .unwrap();
         state.commit(second.prepare().await.unwrap()).unwrap();
+        let boundary_next_hash = state.expected_next_validators_hash(3).await.unwrap();
         let mut boundary = state.begin_block(3, [3; 32], [5; 32]).await.unwrap();
         let system = boundary
-            .stage_consensus_system(Some(&[commit_vote]))
+            .stage_consensus_system(Some(&[commit_vote]), boundary_next_hash)
             .unwrap();
         let settlement = system.reward_settlement.unwrap();
         let available = initial_fees.value() + settlement.issuance_quota.value();
@@ -3204,9 +3618,10 @@ mod tests {
             expected_commission
         );
         let h3 = state.summary().await.unwrap();
+        let claim_next_hash = state.expected_next_validators_hash(4).await.unwrap();
         let mut claim_block = state.begin_block(4, [4; 32], [6; 32]).await.unwrap();
         claim_block
-            .stage_consensus_system(Some(&[commit_vote]))
+            .stage_consensus_system(Some(&[commit_vote]), claim_next_hash)
             .unwrap();
         claim_block
             .stage_verified_staking(&empty_verified_staking(
@@ -3268,6 +3683,7 @@ mod tests {
         let mut malformed_commitment = verified(26, genesis.shielded_tree_root, 27, 28);
         malformed_commitment.output_commitments[0] = [0xff; 32];
         let mut block = state.begin_block(1, [18; 32], [19; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut block, 1).await;
         block.stage_verified(&first).await.unwrap();
         assert!(matches!(
             block.stage_verified(&first).await,
@@ -3319,9 +3735,11 @@ mod tests {
             .unwrap();
         let anchor0 = state.summary().await.unwrap().shielded_tree_root;
 
-        let block1 = state.begin_block(1, [1; 32], [1; 32]).await.unwrap();
+        let mut block1 = state.begin_block(1, [1; 32], [1; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut block1, 1).await;
         let receipt1 = state.commit(block1.prepare().await.unwrap()).unwrap();
-        let block2 = state.begin_block(2, [2; 32], [2; 32]).await.unwrap();
+        let mut block2 = state.begin_block(2, [2; 32], [2; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut block2, 2).await;
         let receipt2 = state.commit(block2.prepare().await.unwrap()).unwrap();
         assert!(!state.anchor_is_retained(&anchor0).await.unwrap());
         assert!(state
@@ -3333,7 +3751,8 @@ mod tests {
             .await
             .unwrap());
 
-        let block3 = state.begin_block(3, [3; 32], [3; 32]).await.unwrap();
+        let mut block3 = state.begin_block(3, [3; 32], [3; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut block3, 3).await;
         let receipt3 = state.commit(block3.prepare().await.unwrap()).unwrap();
         assert!(!state
             .anchor_is_retained(&receipt1.shielded_tree_root)
@@ -3462,8 +3881,16 @@ mod tests {
         let storage = Storage::load(frontier_dir.path().to_path_buf(), prefixes)
             .await
             .unwrap();
-        let mut delta = StateDelta::new(storage.latest_snapshot());
+        let snapshot = storage.latest_snapshot();
+        let mut schedule = read_effective_schedule(&snapshot).await.unwrap();
+        let unchanged = schedule.effective_set_at(2).unwrap().clone();
+        schedule.advance(1, unchanged).unwrap();
+        let mut delta = StateDelta::new(snapshot);
         delta.put_raw(META_HEIGHT.to_owned(), u64_bytes(1));
+        delta.put_raw(
+            STAKING_EFFECTIVE_SCHEDULE.to_owned(),
+            schedule.encode_persistent().unwrap(),
+        );
         delta.put_raw(TREE_FRONTIER.to_owned(), vec![0xff]);
         storage.commit(delta).await.unwrap();
         storage.release().await;
@@ -3503,6 +3930,7 @@ mod tests {
                 .unwrap();
             let genesis = state.summary().await.unwrap();
             let mut block = state.begin_block(1, [0x81; 32], [0x82; 32]).await.unwrap();
+            stage_empty_consensus(&state, &mut block, 1).await;
             let tx_id = block
                 .verify_and_stage_transaction(&envelope_bytes)
                 .await
@@ -3737,6 +4165,7 @@ mod tests {
         assert_eq!(genesis.supply.pending_delegation_total, release);
 
         let mut block = state.begin_block(1, [0xb1; 32], [0xb2; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut block, 1).await;
         let mut wrong_source_body = body.clone();
         if let Action::CancelPending { fee_source, .. } = &mut wrong_source_body.action {
             *fee_source = bit_types::FeeSource::Shielded;
@@ -3808,6 +4237,7 @@ mod tests {
         assert_eq!(genesis.supply.fee_reserve, Amount::ZERO);
 
         let mut block = state.begin_block(1, [0x21; 32], [0x22; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut block, 1).await;
         let mut underpriced_body = body.clone();
         underpriced_body.fee = Amount::ZERO;
         let mut underpriced_envelope = decoded.clone();
@@ -3921,6 +4351,7 @@ mod tests {
         let mut transfer = verified(41, genesis.shielded_tree_root, 42, 43);
         transfer.fee = Amount::new(1).unwrap();
         let mut block = state.begin_block(1, [44; 32], [45; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut block, 1).await;
         assert!(matches!(
             block.stage_verified(&transfer).await,
             Err(Error::Accounting(bit_emission::Error::Insufficient(
@@ -4023,6 +4454,7 @@ mod tests {
             .begin_block_at(1, 1, [0xc1; 32], [0xc2; 32])
             .await
             .unwrap();
+        stage_empty_consensus(&state, &mut block, 1).await;
         block
             .stage_verified_staking(&empty_verified_staking(
                 0xd1,

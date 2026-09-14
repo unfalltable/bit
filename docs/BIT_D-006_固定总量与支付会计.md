@@ -1,6 +1,6 @@
 # BIT D-006 固定总量与支付会计
 
-状态：`IN_PROGRESS`。固定总量、供应恒等式、创世分配、最低手续费、Transfer 费用入池、逐 epoch 发行算法、高度/结算计数、由 last commit 驱动的池奖励/佣金分配和佣金领取已经实现并持久化；H+2 实际集合核验、钱包收发闭环和审计快照规范编码仍待完成。
+状态：`IN_PROGRESS`。固定总量、供应恒等式、创世分配、最低手续费、Transfer 费用入池、逐 epoch 发行算法、高度/结算计数、由 last commit 驱动的池奖励/佣金分配和佣金领取已经实现并持久化；H+2 实际集合已核验，钱包收发闭环和审计快照规范编码仍待完成。
 
 ## 1. 会计边界
 
@@ -53,7 +53,7 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 ## 4. 持久化与证明
 
-货币政策、政策哈希、六项费率、供应累计量、七类资产容器、完成 epoch 数和已放弃额度都纳入当前 schema v10 的 JMT（这些字段最初在 v5 引入）。它们与高度、TCT、交易索引、execution 摘要、compact 摘要及质押记录在同一个 RocksDB WriteBatch 中提交。每个 validator v5 记录其 `commission_accrued`、签名窗口和 epoch score，重启时要求佣金总和精确等于供应容器 `ΣC`。
+货币政策、政策哈希、六项费率、供应累计量、七类资产容器、完成 epoch 数和已放弃额度都纳入当前 schema v11 的 JMT（这些字段最初在 v5 引入）。它们与高度、TCT、交易索引、execution 摘要、compact 摘要、质押记录及三高度实际验证者集合在同一个 RocksDB WriteBatch 中提交。每个 validator v5 记录其 `commission_accrued`、签名窗口和 epoch score，重启时要求佣金总和精确等于供应容器 `ΣC`。
 
 最新高度可对单项供应键生成并本地验证 ICS23 证明。当前提供强类型 `SupplyAudit` 作为进程内审计视图；SPEC-04 尚未冻结 `supply/audit_snapshot` 的规范字节格式，因此本阶段没有自行定义该网络接口，避免形成第二套共识编码。
 
@@ -76,7 +76,7 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 ## 6. 完成 D-006 还需要
 
-1. 持久化 `validator_set_at_height`，核对 H/H+1/H+2 实际集合与 last commit power，完成固定 CometBFT 进程向量。
+1. 将已持久化的 H/H+1/H+2 实际集合、last commit power 和请求哈希接入固定 CometBFT 四节点进程向量。
 2. 为钱包和网关提供带证明的费率、在线率、奖励和佣金报价接口。
 3. 接入 GenesisClaim、Unbond、ClaimExit 和 Slash 等剩余容器转换；Delegate 和 ClaimCommission 已接入。
 4. 冻结 SPEC-04 后实现 `supply/audit_snapshot` 的规范编码、查询路由、共享测试向量和跨语言读取器。

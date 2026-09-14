@@ -1,6 +1,6 @@
 # BIT D-007 原生质押设计
 
-状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；实际签名 score、在线率窗口、自动奖励和 CometBFT ValidatorUpdates 已实现。H+2 实际集合核验仍在开发，不包含 D-008 的退出与处罚实现。
+状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；实际签名 score、在线率窗口、自动奖励、CometBFT ValidatorUpdates、H/H+1/H+2 实际集合核验和最后有效验证者保护已实现。不包含 D-008 的退出与处罚实现。
 
 ## 1. 唯一身份与对象
 
@@ -31,6 +31,10 @@ S' = S + minted
 
 候选资格要求状态为 Candidate 或 Active、接受委托且活动 self-bond 的当前池价值达到最低值。候选按池资产降序、validator_id 字节升序排列，截取参考上限 64。投票权为 `floor(P/power_unit_atomic)`，默认单位 1 BIT；单项及选中总和均检查不超过 `2^60-1`，不使用浮点或临时缩放。
 
+质押逻辑集合转换为 CometBFT 实际集合后，按 power 降序、20 字节共识地址升序形成唯一规范顺序，并使用固定 Tendermint 0.40.4 实现计算集合哈希。已提交高度 H 的 schema v11 状态保存 H/H+1/H+2 三个集合；H 请求必须携带 H+1 哈希，H 返回的更新只应用到 H+2。H>1 的 last commit 必须与 H-1 集合逐项匹配地址、power 和顺序，不能用当前候选集合替代历史实际集合。
+
+如果 downtime jail 或边界选择将一个非空实际集合变为空，系统阶段返回 `HALT_NO_SAFE_VALIDATOR_SET`，不提交该高度。系统阶段对供应、质押、触及索引和集合日程执行整体回滚，Prepare 再次交叉核对质押逻辑集合与 H+2 集合，防止错误路径留下半完成状态。
+
 ## 4. 供应会计接口
 
 `bit-emission` 已增加三项原子转换，为后续非 Transfer 执行器提供唯一会计入口：
@@ -43,7 +47,7 @@ S' = S + minted
 
 ## 5. 本阶段验证
 
-schema v10 为 parameters、validator、pool、position 和 capacity 分别定义版本化、定长整数、大端序的持久化编码；parameters v3 固定在线率、jail、佣金通知和证据窗口参数，validator v5 记录完整公开元数据、sequence、累计佣金、压缩签名窗口、当前 epoch score、待生效变更、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、非零 bit padding、签名计数不符、尾随字节、非法 Amount、非法 UTF-8 和不符合定长规则的收据。
+schema v11 为 parameters、validator、pool、position、capacity 和三高度实际集合日程分别定义版本化、定长整数、大端序的持久化编码；parameters v3 固定在线率、jail、佣金通知和证据窗口参数，validator v5 记录完整公开元数据、sequence、累计佣金、压缩签名窗口、当前 epoch score、待生效变更、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、非零 bit padding、签名计数不符、尾随字节、非法 Amount、非法 UTF-8、不符合定长规则的收据、非规范集合顺序和缓存哈希不匹配。
 
 交易层现已对 RegisterValidator、Delegate、CancelPending、UpdateValidator、UnjailValidator、RotateConsensusKey 和 ClaimCommission 验证独立角色域的 Ed25519 签名。注册与轮换的 consensus-pop 域和 operator 域分离，所有既有验证人动作都从当前状态解析 operator 与精确 sequence。七类动作与 Spend/Output 证明、Spend 授权、最低费和公开 lock/release 一起进入同一个 binding equation。应用核心的 CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都通过统一动作调度进入该执行器。
 
@@ -57,11 +61,10 @@ ABCI PrepareProposal、ProcessProposal 和 FinalizeBlock 使用请求中的规�
 
 状态层在同一候选副本中验证 commitment tree、nullifier/tx_id、供应容器和质押账本，任一检查失败都不修改区块 overlay。Prepare 同时验证 `sum(pool.P)=供应容器 P` 与全部 pending/refundable 本金之和等于供应容器 D。持久内存镜像仅在 RocksDB batch 成功提交后替换，重启从逐项记录重建并重跑全部不变量。
 
-测试覆盖 ID、委托/自质押、延后激活、奖励份额、U256 大数、滑点、资不抵债池、容量、候选排序、投票权上限、签名窗口边界、downtime jail、epoch score 消费、严格编码、账本篡改与失败原子性。缩短 epoch 的状态和应用集成测试以连续真实 commit power 自动完成发行/奖励/集合选择，验证 ValidatorUpdates、Commit 和重启恢复；ABCI 测试拒绝缺失 commit、错误地址、非正 power 和未知 flag。
+测试覆盖 ID、委托/自质押、延后激活、奖励份额、U256 大数、滑点、资不抵债池、容量、候选排序、投票权上限、签名窗口边界、downtime jail、epoch score 消费、严格编码、账本篡改与失败原子性。缩短 epoch 的状态和应用集成测试以连续真实 commit power 自动完成发行/奖励/集合选择，验证 ValidatorUpdates 只在 H+2 生效、集合在 Commit 和重启后保持一致，并拒绝错误请求哈希和 power；单验证者测试确认集合变空时明确停机且系统阶段原子回滚。ABCI 测试拒绝缺失 commit、错误地址、非正 power、错误长度的哈希和未知 flag。
 
 ## 6. 完成 D-007 还需要
 
-1. 持久化唯一 `effective_set_at(height)`，对 H/H+1/H+2 的 last commit、`next_validators_hash` 和返回更新做真实进程核验。
+1. 把唯一 `effective_set_at(height)`、last commit、`next_validators_hash` 和返回更新接入真实 CometBFT 四节点进程核验。
 2. 实现增量候选索引，避免边界扫描全部历史验证人。
-3. 落实最后合格验证者保护和 `HALT_NO_SAFE_VALIDATOR_SET`。
-4. 进入 D-008 退出 cohort、ticket、证据去重与 SlashJob。
+3. 进入 D-008 退出 cohort、ticket、证据去重与 SlashJob。

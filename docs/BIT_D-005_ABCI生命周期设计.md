@@ -1,6 +1,6 @@
 # BIT D-005 ABCI 生命周期设计
 
-状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates。可用快照、生产摘要编码器、H+2 集合核验和真实多节点接线仍未完成。
+状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。可用快照、生产摘要编码器和真实多节点接线仍未完成。
 
 ## 1. 单一执行入口
 
@@ -14,13 +14,13 @@
 |---|---|
 | `info` | 返回持久化高度、app hash 和创世锁定的协议版本 |
 | `check_tx` | 针对最新已提交状态的下一高度验证一笔交易，丢弃临时状态 |
-| `prepare_proposal` | 先从 local last commit 执行系统阶段，再保持候选输入顺序筛选可执行交易；同块冲突会被过滤 |
-| `process_proposal` | 从 proposed last commit 重放同一系统阶段和交易；超字节预算或任何无效输入都拒绝提案 |
-| `finalize_block` | 从 decided last commit 执行签名计分和边界结算，再按顺序执行交易；只产生待提交批次和 ValidatorUpdates |
+| `prepare_proposal` | 先核对 H+1 的 `next_validators_hash`，再从 local last commit 执行系统阶段并保持候选输入顺序筛选可执行交易；同块冲突会被过滤 |
+| `process_proposal` | 核对请求哈希，从 proposed last commit 重放同一系统阶段和交易；超字节预算或任何无效输入都拒绝提案 |
+| `finalize_block` | 核对请求哈希，从 decided last commit 执行签名计分和边界结算，再按顺序执行交易；只产生待提交批次和 H+2 ValidatorUpdates |
 | `commit` | 每次只消费一个待提交批次；无 Finalize 或重复 Commit 均返回错误 |
 | `query_latest_with_proof` | 复用 `bit-state` 最新高度 ICS23 查询 |
 
-PrepareProposal、ProcessProposal 和 FinalizeBlock 都要求合法的 ABCI Timestamp，并把 Unix 秒传给同一块执行器。高度 1 不接受历史投票；之后每块必须提供 last commit。地址严格为 CometBFT Ed25519 地址的 20 字节，power 必须为正，未知 flag、未知共识地址、重复地址和总 power 越界均拒绝。只有 `BLOCK_ID_FLAG_COMMIT` 增加 score，Nil/Absent 只记录未签机会。Finalize 与高度、摘要、供应、在线窗口和质押变更一起持久化；时间倒退时停止执行。
+PrepareProposal、ProcessProposal 和 FinalizeBlock 都要求合法的 ABCI Timestamp 和恰好 32 字节的 `next_validators_hash`，并把 Unix 秒传给同一块执行器。请求哈希必须等于持久化 H+1 集合的 CometBFT 原生哈希。高度 1 不接受历史投票；之后每块必须提供 last commit，并逐项匹配 H-1 实际集合的规范顺序、地址和 power。地址严格为 CometBFT Ed25519 地址的 20 字节，power 必须为正，未知 flag、未知共识地址、重复地址和总 power 越界均拒绝。只有 `BLOCK_ID_FLAG_COMMIT` 增加 score，Nil/Absent 只记录未签机会。Finalize 与高度、摘要、供应、在线窗口、质押变更和三高度集合日程一起持久化；时间倒退或集合不一致时停止执行。
 
 FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`。如果底层存储或已提交状态损坏，错误不会伪装成普通交易拒绝；网络适配必须让节点停止参与，而不能返回伪造的成功 app hash。
 
@@ -48,6 +48,6 @@ ABCI 适配通过 `FinalizeDigestProvider` 强制注入两个摘要来源；没�
 
 ## 6. 当前验证与下一切片
 
-当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励并检查返回的 Ed25519 key/power 更新，严格解码测试覆盖缺失 commit、错误地址、非正 power 和未知 block-id flag。
+当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励，检查返回的 Ed25519 key/power 更新只在 H+2 集合生效且重启后保持一致；错误请求哈希、commit power、缺失 commit、错误地址、非正 power 和未知 block-id flag 均被拒绝。
 
-下一步实现版本化 execution/compact 编码器及创世语义校验，然后把真实 Transfer 放进 CometBFT 四节点重放与崩溃恢复实验。D-004 同步补快照导入导出和历史高度证明；D-007 接入唯一的验证者集合生效函数与 H+2 测试。
+下一步实现版本化 execution/compact 编码器及创世语义校验，然后把生产 `bit-app`、真实 Transfer 和集合更新放进 CometBFT 四节点重放与崩溃恢复实验。D-004 同步补快照导入导出和历史高度证明。

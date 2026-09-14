@@ -608,6 +608,9 @@ impl Application for AbciApplication {
         else {
             return ResponsePrepareProposal { txs: Vec::new() };
         };
+        let Ok(next_validators_hash) = next_validators_hash(&request.next_validators_hash) else {
+            return ResponsePrepareProposal { txs: Vec::new() };
+        };
         let transactions = request.txs.into_iter().map(Vec::from).collect();
         let _guard = self.execution_guard();
         match self
@@ -619,6 +622,7 @@ impl Application for AbciApplication {
                 transactions,
                 max_tx_bytes,
                 last_commit.as_ref(),
+                next_validators_hash,
             )) {
             Ok(proposal) => ResponsePrepareProposal {
                 txs: proposal.transactions.into_iter().map(Into::into).collect(),
@@ -645,6 +649,9 @@ impl Application for AbciApplication {
         else {
             return reject();
         };
+        let Ok(next_validators_hash) = next_validators_hash(&request.next_validators_hash) else {
+            return reject();
+        };
         let transactions: Vec<Vec<u8>> = request.txs.into_iter().map(Vec::from).collect();
         let _guard = self.execution_guard();
         match self
@@ -655,6 +662,7 @@ impl Application for AbciApplication {
                 block_time_seconds,
                 &transactions,
                 last_commit.as_ref(),
+                next_validators_hash,
             )) {
             Ok(true) => ResponseProcessProposal {
                 status: response_process_proposal::ProposalStatus::Accept as i32,
@@ -697,6 +705,8 @@ impl Application for AbciApplication {
             block_time_seconds(request.time.as_ref()).unwrap_or_else(|error| self.halt(error));
         let last_commit = decided_last_commit(height, request.decided_last_commit.as_ref())
             .unwrap_or_else(|error| self.halt(error));
+        let next_validators_hash = next_validators_hash(&request.next_validators_hash)
+            .unwrap_or_else(|error| self.halt(error));
         let _guard = self.execution_guard();
         let digests = self
             .inner
@@ -710,6 +720,7 @@ impl Application for AbciApplication {
             execution_hash: digests.execution_hash,
             compact_hash: digests.compact_hash,
             last_commit,
+            next_validators_hash,
         };
         match self
             .inner
@@ -774,6 +785,12 @@ fn block_time_seconds(
         return Err("block time is invalid".to_owned());
     }
     u64::try_from(timestamp.seconds).map_err(|_| "block time does not fit u64".to_owned())
+}
+
+fn next_validators_hash(bytes: &[u8]) -> std::result::Result<Hash32, String> {
+    bytes
+        .try_into()
+        .map_err(|_| "next_validators_hash must contain exactly 32 bytes".to_owned())
 }
 
 fn decided_last_commit(
@@ -1026,6 +1043,15 @@ mod tests {
         .unwrap()
     }
 
+    fn genesis_next_validators_hash() -> Vec<u8> {
+        genesis(1_000_000)
+            .genesis_staking
+            .effective_validator_set()
+            .unwrap()
+            .comet_hash()
+            .to_vec()
+    }
+
     #[test]
     fn config_and_init_chain_are_strict() {
         let dir = TempDir::new().unwrap();
@@ -1131,6 +1157,7 @@ mod tests {
                     seconds: 1_800_000_001,
                     nanos: 0,
                 }),
+                next_validators_hash: genesis_next_validators_hash().into(),
                 ..Default::default()
             },
         );
@@ -1144,6 +1171,7 @@ mod tests {
                     seconds: 1_800_000_001,
                     nanos: 0,
                 }),
+                next_validators_hash: genesis_next_validators_hash().into(),
                 ..Default::default()
             },
         );
@@ -1161,6 +1189,7 @@ mod tests {
                     seconds: 1_800_000_001,
                     nanos: 0,
                 }),
+                next_validators_hash: genesis_next_validators_hash().into(),
                 ..Default::default()
             },
         );
@@ -1256,6 +1285,8 @@ mod tests {
 
     #[test]
     fn decided_commit_decoding_is_strict_and_preserves_commit_flags() {
+        assert_eq!(next_validators_hash(&[9; 32]), Ok([9; 32]));
+        assert!(next_validators_hash(&[9; 31]).is_err());
         assert!(decided_last_commit(1, None).unwrap().is_none());
         assert!(decided_last_commit(2, None).is_err());
 
@@ -1360,6 +1391,7 @@ mod tests {
                         seconds: 1_800_000_001,
                         nanos: 0,
                     }),
+                    next_validators_hash: genesis_next_validators_hash().into(),
                     ..Default::default()
                 })
                 .unwrap()

@@ -14,7 +14,7 @@
 
 | 键 | 值 | 约束 |
 |---|---|---|
-| `meta/version` | 4 字节大端 schema 版本 | 当前为 10，未知版本拒绝启动 |
+| `meta/version` | 4 字节大端 schema 版本 | 当前为 11，未知版本拒绝启动 |
 | `meta/height` | 8 字节大端状态高度 | 必须等于 Cnidarium 最新版本 |
 | `meta/block_time_seconds` | 8 字节大端 Unix 秒 | ABCI 区块时间，不允许相对 durable 状态倒退 |
 | `meta/chain_context` | 32 字节 | 创世后不可变 |
@@ -51,6 +51,7 @@
 | `staking/pools/<validator_id>` | v1 StakePool 记录 | pool 资产和 pending 分别交叉核对 P、D |
 | `staking/positions/<position_id>` | v1 StakePosition 记录 | owner 不可修改，恢复收据严格为 512 字节 |
 | `staking/capacity/<epoch_hex>` | v1 ActivationCapacity 记录 | 接受数减取消数不得下溢 |
+| `staking/effective_schedule` | v1 三高度实际集合记录 | 在已提交高度 H 保存 H/H+1/H+2 的规范顺序、power 和 CometBFT 集合哈希 |
 | `shielded/tree_root` | 32 字节 TCT 根 | 必须与 frontier 重算结果一致 |
 | `shielded/tree_frontier` | 固定依赖版本的 bincode TCT | 纳入 JMT；解码前限制为 64 MiB |
 | `shielded/anchor/<height>` | 32 字节 TCT 根 | 只保留配置窗口 |
@@ -62,15 +63,15 @@
 
 初始化时按签名创世清单的顺序校验并插入隐私承诺，然后关闭高度零 TCT block；非法字段元素或重复承诺会在写盘前拒绝。清单摘要使用 `BIT-GENESIS-COMMITMENTS-V1 || count_be_u64 || commitments` 的 SHA-256，重启配置必须给出同一有序清单。主网清单仍属于未批准外部输入。
 
-TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
+TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
 
 ## 3. 块生命周期
 
-1. `begin_block_at(h,time)` 从最新不可变快照读取高度、链时间和 TCT，要求 `h = durable_height + 1`、`time >= durable_time`，并核对 frontier 与树根。
+1. `begin_block_at(h,time)` 从最新不可变快照读取高度、链时间、TCT 和实际验证者集合日程，要求 `h = durable_height + 1`、`time >= durable_time`，并核对 frontier、树根、日程高度和质押逻辑集合。
 2. 每笔 Transfer 先检查 chain context、动作类型、anchor 和 tx_id，再执行证明与签名校验；得到 nullifier 后，在当前 `StateDelta` 中检查同块及历史冲突。
 3. 所有 nullifier、output commitment 和费用会计都通过后才写入 delta。TCT 与供应状态均在副本上完成变更，任何失败都不会留下部分更新。
-4. epoch 首块系统阶段必须先结算发行，再按确定性顺序激活 pending，最后选择验证集合；调用顺序或高度不符时拒绝。
-5. `prepare()` 重新验证供应和质押恒等式，关闭当前 TCT block，把新根、frontier、anchor、供应字段、触及的质押记录、执行摘要、compact 摘要和高度写入同一个 delta，并调用 Cnidarium `prepare_commit` 计算下一 JMT 根。
+4. 每块系统阶段先要求请求中的 `next_validators_hash` 等于持久化 H+1 集合哈希；H>1 时 last commit 必须逐项匹配 H-1 集合的规范顺序、地址和 power。epoch 首块再结算发行、按确定性顺序激活 pending、选择验证集合，并把返回更新应用为 H+2 集合。
+5. `prepare()` 重新验证供应、质押恒等式及质押逻辑集合与 H+2 实际集合一致，关闭当前 TCT block，把新根、frontier、anchor、供应字段、触及的质押记录、三高度集合日程、执行摘要、compact 摘要和高度写入同一个 delta，并调用 Cnidarium `prepare_commit` 计算下一 JMT 根。
 6. `commit()` 调用 `commit_batch`，用单个 RocksDB WriteBatch 落盘全部 JMT、索引和值。返回的 app hash 必须等于 prepare 阶段的根；成功后才替换进程内质押镜像。
 
 Prepare 结果被丢弃时，数据库版本不变。重启后从最后 durable 高度重新执行相同输入，必须产生同一个 app hash。测试已覆盖这条边界。
@@ -96,6 +97,8 @@ Prepare 结果被丢弃时，数据库版本不变。重启后从最后 durable 
 - 最低费使用完整规范 envelope 字节数向上取整到 KiB，并叠加 Spend/Output proof 数量和动作附加费；低费交易在 Groth16 前拒绝，费率配置变化时旧数据库拒绝打开。
 - `completed_epochs` 必须等于提交高度推导出的 `max(0,(h-1)/epoch_blocks)`；缺少边界系统结算时 Prepare 失败且 durable 高度不推进。
 - validator、pool、position 和 activation-capacity 使用独立 JMT 键；重启逐项解码并重建账本，拒绝键/ID 不符、非法编码、质押参数变化、份额索引不一致及 `sum(P)`/`sum(D)`/`sum(C)` 与供应容器不一致。
+- 实际验证者按 CometBFT 的 power 降序、地址升序形成唯一集合并计算原生集合哈希；错误的 `next_validators_hash`、last commit 成员、顺序或 power 在修改系统状态前拒绝。
+- H 返回的 ValidatorUpdates 只改变 H+2 集合；三高度滚动日程与质押逻辑集合在 Prepare 和重启时交叉核对。任何错误会回滚系统阶段的内存变更，移除最后一个有效验证者返回 `HALT_NO_SAFE_VALIDATOR_SET`。
 
 ## 6. 后续工作
 

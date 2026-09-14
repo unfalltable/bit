@@ -106,6 +106,8 @@ pub struct BlockRequest {
     pub compact_hash: Hash32,
     /// Actual votes for height `height - 1`; absent only at height one.
     pub last_commit: Option<LastCommit>,
+    /// CometBFT header hash of the validator set effective at `height + 1`.
+    pub next_validators_hash: Hash32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -156,6 +158,13 @@ impl ApplicationCore {
         Ok(self.state.summary().await?)
     }
 
+    pub async fn expected_next_validators_hash(&self, block_height: u64) -> Result<Hash32> {
+        Ok(self
+            .state
+            .expected_next_validators_hash(block_height)
+            .await?)
+    }
+
     /// Check a transaction against the latest committed state without writes.
     pub async fn check_tx(&self, transaction: &[u8]) -> Result<TxResult> {
         let height = next_height(self.state.summary().await?.state_height)?;
@@ -197,12 +206,14 @@ impl ApplicationCore {
         candidates: Vec<Vec<u8>>,
         requested_max_tx_bytes: u64,
     ) -> Result<PreparedProposal> {
+        let next_validators_hash = self.expected_next_validators_hash(height).await?;
         self.prepare_proposal_at_with_commit(
             height,
             block_time_seconds,
             candidates,
             requested_max_tx_bytes,
             None,
+            next_validators_hash,
         )
         .await
     }
@@ -214,13 +225,17 @@ impl ApplicationCore {
         candidates: Vec<Vec<u8>>,
         requested_max_tx_bytes: u64,
         last_commit: Option<&LastCommit>,
+        next_validators_hash: Hash32,
     ) -> Result<PreparedProposal> {
         let limit = requested_max_tx_bytes.min(self.max_block_bytes);
         let mut block = self
             .state
             .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
             .await?;
-        block.stage_consensus_system(last_commit.map(|commit| commit.votes.as_slice()))?;
+        block.stage_consensus_system(
+            last_commit.map(|commit| commit.votes.as_slice()),
+            next_validators_hash,
+        )?;
         let mut transactions = Vec::new();
         let mut rejected = Vec::new();
         let mut total_transaction_bytes = 0u64;
@@ -269,8 +284,15 @@ impl ApplicationCore {
         block_time_seconds: u64,
         transactions: &[Vec<u8>],
     ) -> Result<bool> {
-        self.process_proposal_at_with_commit(height, block_time_seconds, transactions, None)
-            .await
+        let next_validators_hash = self.expected_next_validators_hash(height).await?;
+        self.process_proposal_at_with_commit(
+            height,
+            block_time_seconds,
+            transactions,
+            None,
+            next_validators_hash,
+        )
+        .await
     }
 
     pub async fn process_proposal_at_with_commit(
@@ -279,6 +301,7 @@ impl ApplicationCore {
         block_time_seconds: u64,
         transactions: &[Vec<u8>],
         last_commit: Option<&LastCommit>,
+        next_validators_hash: Hash32,
     ) -> Result<bool> {
         if total_bytes(transactions)? > self.max_block_bytes {
             return Ok(false);
@@ -287,7 +310,10 @@ impl ApplicationCore {
             .state
             .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
             .await?;
-        block.stage_consensus_system(last_commit.map(|commit| commit.votes.as_slice()))?;
+        block.stage_consensus_system(
+            last_commit.map(|commit| commit.votes.as_slice()),
+            next_validators_hash,
+        )?;
         for transaction in transactions {
             if let Err(error) = block.verify_and_stage_transaction(transaction).await {
                 rejection_or_state_error(error)?;
@@ -328,6 +354,7 @@ impl ApplicationCore {
                 .last_commit
                 .as_ref()
                 .map(|commit| commit.votes.as_slice()),
+            request.next_validators_hash,
         )?;
         let mut transaction_results = Vec::with_capacity(request.transactions.len());
         for transaction in &request.transactions {
@@ -543,6 +570,7 @@ mod tests {
                 execution_hash: [4; 32],
                 compact_hash: [5; 32],
                 last_commit: None,
+                next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await
             .unwrap();
@@ -555,6 +583,7 @@ mod tests {
                 execution_hash: [4; 32],
                 compact_hash: [5; 32],
                 last_commit: None,
+                next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await,
             Err(Error::PendingBlockExists)
@@ -594,6 +623,7 @@ mod tests {
                 execution_hash: [8; 32],
                 compact_hash: [9; 32],
                 last_commit: None,
+                next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await,
             Err(Error::FinalizedBlockTooLarge {
@@ -619,6 +649,7 @@ mod tests {
                 execution_hash: [6; 32],
                 compact_hash: [7; 32],
                 last_commit: None,
+                next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await
             .unwrap();
@@ -655,6 +686,7 @@ mod tests {
                     execution_hash: [height as u8; 32],
                     compact_hash: [height as u8 + 10; 32],
                     last_commit: (height > 1).then(|| LastCommit { votes: vec![vote] }),
+                    next_validators_hash: app.expected_next_validators_hash(height).await.unwrap(),
                 })
                 .await
                 .unwrap();
@@ -670,6 +702,7 @@ mod tests {
                 execution_hash: [3; 32],
                 compact_hash: [13; 32],
                 last_commit: Some(LastCommit { votes: vec![vote] }),
+                next_validators_hash: app.expected_next_validators_hash(3).await.unwrap(),
             })
             .await
             .unwrap();
@@ -679,6 +712,7 @@ mod tests {
             consensus_pubkey
         );
         assert!(boundary.validator_updates[0].power > power);
+        let updated_power = boundary.validator_updates[0].power;
         app.commit().await.unwrap();
         assert_eq!(
             app.state_summary().await.unwrap().supply.completed_epochs,
@@ -694,6 +728,12 @@ mod tests {
         assert_eq!(validator.signing_window.len(), 2);
         assert_eq!(validator.signed_window_count, 2);
         assert_eq!(validator.epoch_score, 0);
+        for height in [3, 4] {
+            let set = app.state.effective_validator_set_at(height).await.unwrap();
+            assert_eq!(set.validators()[0].power, power);
+        }
+        let h_plus_two = app.state.effective_validator_set_at(5).await.unwrap();
+        assert_eq!(h_plus_two.validators()[0].power, updated_power);
         app.close().await;
 
         let reopened = ApplicationCore::open(dir.path().to_path_buf(), genesis)
@@ -709,5 +749,71 @@ mod tests {
             &validator
         );
         reopened.close().await;
+    }
+
+    #[tokio::test]
+    async fn consensus_context_mismatch_is_rejected_without_staging_state() {
+        let dir = TempDir::new().unwrap();
+        let (genesis, _, consensus_pubkey, power) = genesis_with_active_validator();
+        let app = ApplicationCore::open(dir.path().to_path_buf(), genesis)
+            .await
+            .unwrap();
+        let initial = app.state_summary().await.unwrap();
+        let expected_h1 = app.expected_next_validators_hash(1).await.unwrap();
+        let mut wrong_hash = expected_h1;
+        wrong_hash[0] ^= 1;
+        assert!(matches!(
+            app.finalize_block(BlockRequest {
+                height: 1,
+                block_time_seconds: 1,
+                transactions: Vec::new(),
+                execution_hash: [31; 32],
+                compact_hash: [32; 32],
+                last_commit: None,
+                next_validators_hash: wrong_hash,
+            })
+            .await,
+            Err(Error::State(bit_state::Error::NextValidatorsHashMismatch))
+        ));
+        assert_eq!(app.state_summary().await.unwrap(), initial);
+
+        app.finalize_block(BlockRequest {
+            height: 1,
+            block_time_seconds: 1,
+            transactions: Vec::new(),
+            execution_hash: [31; 32],
+            compact_hash: [32; 32],
+            last_commit: None,
+            next_validators_hash: expected_h1,
+        })
+        .await
+        .unwrap();
+        app.commit().await.unwrap();
+
+        let expected_h2 = app.expected_next_validators_hash(2).await.unwrap();
+        let wrong_vote = CommitVote {
+            consensus_address: consensus_address(&consensus_pubkey),
+            power: power + 1,
+            signed: true,
+        };
+        assert!(matches!(
+            app.finalize_block(BlockRequest {
+                height: 2,
+                block_time_seconds: 2,
+                transactions: Vec::new(),
+                execution_hash: [33; 32],
+                compact_hash: [34; 32],
+                last_commit: Some(LastCommit {
+                    votes: vec![wrong_vote],
+                }),
+                next_validators_hash: expected_h2,
+            })
+            .await,
+            Err(Error::State(bit_state::Error::Staking(
+                bit_staking::Error::LastCommitSetMismatch
+            )))
+        ));
+        assert_eq!(app.info().await.unwrap().last_block_height, 1);
+        app.close().await;
     }
 }
