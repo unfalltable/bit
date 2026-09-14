@@ -1,40 +1,6 @@
-    Checking serde v1.0.217
-    Checking bytes v1.9.0
-    Checking prost v0.13.4
-    Checking serde_bytes v0.11.15
-    Checking tendermint-proto v0.40.1
-    Checking futures-executor v0.3.31
-    Checking serde_json v1.0.137
-    Checking informalsystems-pbjson v0.7.0
-    Checking futures v0.3.31
-    Checking tendermint v0.40.1
-    Checking ics23 v0.12.0
-    Checking cosmos-sdk-proto v0.26.1
-    Checking fixed-hash v0.8.0
-    Checking ibc-proto v0.51.1
-    Checking ibc-types-timestamp v0.15.0
-    Checking ibc-types-identifier v0.15.0
-    Checking ibc-types-domain-type v0.15.0
-    Checking impl-serde v0.4.0
-    Checking primitive-types v0.12.2
-    Checking tendermint-light-client-verifier v0.40.1
-    Checking erased-serde v0.3.31
-    Checking ibc-types-core-commitment v0.15.0
-    Checking ibc-types-core-client v0.15.0
-    Checking ibc-types-core-connection v0.15.0
-   Compiling librocksdb-sys v0.11.0+8.1.1
-    Checking ibc-types-core-channel v0.15.0
-    Checking zstd-sys v2.0.13+zstd.1.5.6
-    Checking tokio v1.43.0
-    Checking borsh v1.5.5
-    Checking ibc-types-path v0.15.0
-    Checking ibc-types-lightclients-tendermint v0.15.0
-    Checking ibc-types-transfer v0.15.0
-    Checking jmt v0.11.0
-    Checking pin-project v1.1.8
-    Checking ibc-types v0.15.0
-    Checking rocksdb v0.21.0
-    Checking tokio-stream v0.1.17
-    Checking regex v1.11.1
-    Checking cnidarium v0.83.0 (D:\others\BIT\third_party\cnidarium)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9m 00s
+cargo.exe :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
++     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `d...get(s) in 0.23s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError

@@ -130,6 +130,43 @@ def wait_height(target, indices=range(4), seconds=90):
     raise TimeoutError(f"height {target} not reached: {heights}")
 
 
+def wait_quorum_halt(indices=(0, 1, 3), settle_seconds=3, observe_seconds=3, seconds=30):
+    """Wait for live nodes to converge, then prove their height stays fixed."""
+    deadline = time.monotonic() + seconds
+    stable_height = None
+    stable_since = None
+    while time.monotonic() < deadline:
+        heights = [height(index) for index in indices]
+        failed = [
+            name for name, process in PROCESSES.items() if process.poll() is not None
+        ]
+        if failed:
+            raise RuntimeError(f"processes exited while waiting for quorum halt: {failed}")
+        now = time.monotonic()
+        if heights[0] > 0 and len(set(heights)) == 1:
+            if heights[0] != stable_height:
+                stable_height = heights[0]
+                stable_since = now
+            elif stable_since is not None and now - stable_since >= settle_seconds:
+                break
+        else:
+            stable_height = None
+            stable_since = None
+        time.sleep(0.2)
+    else:
+        raise AssertionError(f"chain did not halt without quorum: {heights}")
+
+    observation_deadline = time.monotonic() + observe_seconds
+    while time.monotonic() < observation_deadline:
+        heights = [height(index) for index in indices]
+        if any(value != stable_height for value in heights):
+            raise AssertionError(
+                f"chain advanced without more than two-thirds voting power: {heights}"
+            )
+        time.sleep(0.2)
+    return stable_height
+
+
 def validator_powers(height_value):
     validators = rpc(0, f"validators?height={height_value}&per_page=100")["validators"]
     return {
@@ -394,11 +431,7 @@ def main():
         raise AssertionError("application hash diverged after evidence execution")
 
     stop("node2")
-    time.sleep(2)
-    halted_height = height(0)
-    time.sleep(3)
-    if height(0) != halted_height:
-        raise AssertionError("chain advanced without more than two-thirds voting power")
+    halted_height = wait_quorum_halt()
     spawn("node2", [COMET, "start", "--home", RUN / "nodes/node2"])
     recovered = wait_height(halted_height + 4)
 

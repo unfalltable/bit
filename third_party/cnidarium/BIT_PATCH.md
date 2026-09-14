@@ -16,6 +16,8 @@ a state transition after the complete RocksDB WriteBatch is durable:
 - validate the complete Cnidarium WriteBatch encoding before it enters the WAL,
   because RocksDB can persist a truncated batch and report corruption only on
   the next database open;
+- expose RocksDB's consistent physical checkpoint operation through the
+  asynchronous storage API so BIT can validate and package state snapshots;
 - expose one-shot pre-write, corrupted-batch, and post-write/cache-publication
   fault points behind the disabled-by-default `bit-fault-injection` feature
   for deterministic crash-boundary tests.

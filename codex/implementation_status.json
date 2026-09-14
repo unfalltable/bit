@@ -4,7 +4,7 @@
   "overall": "IN_PROGRESS",
   "completion_estimate": {
     "full_launch_percent_range": [19, 23],
-    "chain_core_percent": 63,
+    "chain_core_percent": 64,
     "basis": "implemented and tested code versus D-001 through D-030, including product, operations, independent review, release evidence, and mainnet external inputs",
     "confidence": "MEDIUM_FOR_CURRENT_CHAIN_SLICES_LOW_FOR_FULL_LAUNCH"
   },
@@ -51,9 +51,9 @@
       "id": "D-004",
       "name": "状态存储",
       "status": "IN_PROGRESS",
-      "implemented": ["schema v16 Cnidarium/JMT/RocksDB state", "Penumbra TCT frontier", "atomic prepare/commit", "synchronous WAL commit with propagated storage errors", "pre-WAL WriteBatch validation", "deterministic pre-write and post-write/cache-publication fault boundaries", "supply and staking cross-checks", "exit queues", "H/H+1/H+2 schedules", "per-height validator history", "evidence and SlashJob persistence", "latest-state ICS23 membership and non-membership proofs", "restart validation and tamper rejection"],
+      "implemented": ["schema v16 Cnidarium/JMT/RocksDB state", "Penumbra TCT frontier", "atomic prepare/commit", "synchronous WAL commit with propagated storage errors", "pre-WAL WriteBatch validation", "deterministic pre-write and post-write/cache-publication fault boundaries", "supply and staking cross-checks", "exit queues", "H/H+1/H+2 schedules", "per-height validator history", "evidence and SlashJob persistence", "latest-state ICS23 membership and non-membership proofs", "canonical chunk-hashed RocksDB checkpoint export and isolated validated restore", "restart validation and tamper rejection"],
       "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["real disk-quota and operating-system fsync failure injection", "database-file corruption and version-rollback process tests", "snapshot export/import", "historical proofs after restart", "pruning and growth benchmarks", "schema migration tooling"]
+      "remaining": ["real disk-quota and operating-system fsync failure injection", "database-file corruption and version-rollback process tests", "ABCI state-sync transport and light-client trusted roots", "cross-platform snapshot restore", "historical proofs after restart", "pruning and growth benchmarks", "schema migration tooling"]
     },
     {
       "id": "D-005",

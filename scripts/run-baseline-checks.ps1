@@ -30,7 +30,8 @@ function Invoke-BitCheck {
     New-Item -ItemType File -Force -Path $bitLog | Out-Null
     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
     $bitCode = $LASTEXITCODE
-    $bitLogText = [IO.File]::ReadAllText($bitLog).TrimEnd("`r", "`n")
+    $bitLogText = [IO.File]::ReadAllText($bitLog) -replace '(?m)[\t ]+(?=\r?$)', ''
+    $bitLogText = $bitLogText.TrimEnd("`r", "`n")
     if ($bitLogText.Length -gt 0) { $bitLogText += "`r`n" }
     [IO.File]::WriteAllText($bitLog, $bitLogText, [Text.UTF8Encoding]::new($false))
     $script:bitChecks += [ordered]@{
@@ -114,6 +115,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'crates/bit-staking/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-staking\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-state/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-state\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-state/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-state\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'crates/bit-state/src/state_snapshot.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-state\src\state_snapshot.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/abci.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\abci.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
@@ -131,8 +133,13 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'third_party/cnidarium/src/storage.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\src\storage.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/run_bit_app_network.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\run_bit_app_network.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/rust_env.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\rust_env.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() },
-        [ordered]@{ path = 'feasibility/scripts/bootstrap_tools.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\bootstrap_tools.py') -Algorithm SHA256).Hash.ToLowerInvariant() }
+        [ordered]@{ path = 'feasibility/scripts/bootstrap_tools.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\bootstrap_tools.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'scripts/run-baseline-checks.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'scripts\run-baseline-checks.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() }
     )
 }
-$bitReport | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $bitReports 'development-baseline.json') -Encoding utf8
+$bitReportPath = Join-Path $bitReports 'development-baseline.json'
+$bitReportJson = $bitReport | ConvertTo-Json -Depth 8 -Compress
+[IO.File]::WriteAllText($bitReportPath, $bitReportJson, [Text.UTF8Encoding]::new($false))
+& py -B -c "import json,pathlib,sys; p=pathlib.Path(sys.argv[1]); data=json.loads(p.read_text(encoding='utf-8')); p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')" $bitReportPath
+if ($LASTEXITCODE -ne 0) { throw "could not format development baseline report" }
 Write-Host "BIT baseline checks passed: $bitRustPassed BIT Rust tests, $bitCnidariumPassed Cnidarium tests, $bitPythonPassed Python oracle tests"

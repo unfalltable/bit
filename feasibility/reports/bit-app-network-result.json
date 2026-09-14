@@ -1,68 +1,68 @@
 {
   "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T134514695427",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T143823139148",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "application_sha256": "5eabbdaae1b4cf010f287d9ec7f746bfb3f000aee7ab13680f843c3f4128dba9",
-    "evidence_injector_sha256": "697f3ddaad1698fca8ce438a5bc48021a9554fbec54f89897d67f08b97382c77"
+    "application_sha256": "226b69f3104c6aff1a5c8efc9f4d30a2d26926e5ce0d837833b8c2547345fb1f",
+    "evidence_injector_sha256": "fa8b7125eabd47c330ce7f32d6c951bef524daac42158b77edc8a1ca8bd991a6"
   },
   "checks": {
     "validator_powers_h6_h7_h8": {
       "6": {
-        "6cff8539db9b8d956681bb46cf807fd4d251db04d5f908154184b299d6367ee9": 10,
-        "ff13d24b4bd78056c57bb4a892a74fe4a5f3da39cc780908207c447f889648d6": 10,
-        "bf74afacb1ff25282a0270fe53d97d89a3e90ef72d735d1d3957b33455355451": 10,
-        "c9cc18f95af12b43997fecc90d428e2d751a93a09a7699bce9212bdd70e2dd29": 10
+        "d83c58f6a84f52ef325345db367429a15166817b19dc310fde6dfd8b43f9bdf7": 10,
+        "42a30b545270a552010c2186cbc0d348a0b2dfc9a8e22b87ff4dc1110f1781b7": 10,
+        "a076dc4f4eb89ad16a06568743715d3a1547798244da3fe3d790b6e6aef292e6": 10,
+        "8318260a9238c5b937b8e84df57580d11c70d38c643b3f823b916ee829544e06": 10
       },
       "7": {
-        "6cff8539db9b8d956681bb46cf807fd4d251db04d5f908154184b299d6367ee9": 10,
-        "ff13d24b4bd78056c57bb4a892a74fe4a5f3da39cc780908207c447f889648d6": 10,
-        "bf74afacb1ff25282a0270fe53d97d89a3e90ef72d735d1d3957b33455355451": 10,
-        "c9cc18f95af12b43997fecc90d428e2d751a93a09a7699bce9212bdd70e2dd29": 10
+        "d83c58f6a84f52ef325345db367429a15166817b19dc310fde6dfd8b43f9bdf7": 10,
+        "42a30b545270a552010c2186cbc0d348a0b2dfc9a8e22b87ff4dc1110f1781b7": 10,
+        "a076dc4f4eb89ad16a06568743715d3a1547798244da3fe3d790b6e6aef292e6": 10,
+        "8318260a9238c5b937b8e84df57580d11c70d38c643b3f823b916ee829544e06": 10
       },
       "8": {
-        "6cff8539db9b8d956681bb46cf807fd4d251db04d5f908154184b299d6367ee9": 3659,
-        "ff13d24b4bd78056c57bb4a892a74fe4a5f3da39cc780908207c447f889648d6": 3659,
-        "c9cc18f95af12b43997fecc90d428e2d751a93a09a7699bce9212bdd70e2dd29": 3659,
-        "bf74afacb1ff25282a0270fe53d97d89a3e90ef72d735d1d3957b33455355451": 2929
+        "d83c58f6a84f52ef325345db367429a15166817b19dc310fde6dfd8b43f9bdf7": 3476,
+        "42a30b545270a552010c2186cbc0d348a0b2dfc9a8e22b87ff4dc1110f1781b7": 3476,
+        "a076dc4f4eb89ad16a06568743715d3a1547798244da3fe3d790b6e6aef292e6": 3476,
+        "8318260a9238c5b937b8e84df57580d11c70d38c643b3f823b916ee829544e06": 3476
       }
     },
     "h_plus_two_update": true,
     "process_restart_from_durable_jmt_height": 10,
     "resumed_heights": [
-      15,
-      15,
-      15,
-      15
+      16,
+      16,
+      16,
+      16
     ],
-    "same_app_hash_height": 14,
-    "same_app_hash": "b2281953f2e88860de5b46a7bd01e73f8417939218125ac28526c6a63c209c99",
+    "same_app_hash_height": 15,
+    "same_app_hash": "17be7e111a7732475f2dc687f3f34ae7b12e6747638500b3a862146e06b7752d",
     "latest_ics23_proof": true,
     "real_duplicate_vote_evidence": {
-      "comet_evidence_hash": "ba3d500f868d90350ca63a227bafb464962d190b5b63266b81400ec72b63a60d",
-      "validator_address": "31630bb94c181ab85f2f20f29d55e974379568fb",
-      "validator_power": 7307,
-      "infraction_height": 13,
-      "infraction_time_seconds": 1789393537,
-      "infraction_time_nanos": 288340100,
+      "comet_evidence_hash": "65a4edf88fea6494b6d9760daab315a27d96d56d7d2264ef2f5793d5cb94b1be",
+      "validator_address": "a85c31b0498174c3a66671a59279d809b64f16b4",
+      "validator_power": 6943,
+      "infraction_height": 14,
+      "infraction_time_seconds": 1789396727,
+      "infraction_time_nanos": 659514200,
       "total_voting_power": 27772,
-      "inclusion_height": 16,
-      "bit_evidence_hash": "221d2d197f6814593e5a1f9c84cc15a704cf2ffd70510eff100294d778e5825f",
+      "inclusion_height": 18,
+      "bit_evidence_hash": "52d6952699e27b8f906039868a374485d1ca72e68130c4b329205a832f9a9c5c",
       "validator_present_at_h_plus_one": true,
       "validator_removed_at_h_plus_two": true,
       "post_evidence_validator_count": 3,
-      "burned_atomic": "3653990325985",
-      "same_app_hash": "e1c3a91e76ddaab7708639225f7dd955bbeb8a7661d67801e207245289c386c0",
+      "burned_atomic": "3471930650685",
+      "same_app_hash": "40d5c84ecedd60d49aa709577fb7482f53021f618be25bbeac271713f5a578b9",
       "ics23_evidence_membership": true
     },
-    "quorum_halt_height": 19,
+    "quorum_halt_height": 21,
     "quorum_recovery_heights": [
-      23,
-      23,
-      23,
-      23
+      25,
+      25,
+      25,
+      25
     ]
   },
   "limitations": [
@@ -73,6 +73,6 @@
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T13:45:14.695531+00:00",
-  "finished_at": "2026-09-14T13:45:54.932949+00:00"
+  "started_at": "2026-09-14T14:38:23.139248+00:00",
+  "finished_at": "2026-09-14T14:39:08.648480+00:00"
 }

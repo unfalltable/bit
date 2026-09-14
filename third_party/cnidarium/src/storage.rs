@@ -367,6 +367,19 @@ impl Storage {
         self.0.snapshots.read().latest()
     }
 
+    /// Create a consistent physical RocksDB checkpoint at `path`.
+    ///
+    /// The target directory must not already exist. The checkpoint includes
+    /// every column family and can be opened independently from this storage.
+    pub async fn create_checkpoint(&self, path: PathBuf) -> Result<()> {
+        let db = self.0.db.clone();
+        tokio::task::spawn_blocking(move || {
+            rocksdb::checkpoint::Checkpoint::new(db.as_ref())?.create_checkpoint(path)
+        })
+        .await??;
+        Ok(())
+    }
+
     /// Fetches the [`Snapshot`] corresponding to the supplied `jmt::Version` from
     /// the [`SnapshotCache`]. Returns `None` if no match was found.
     pub fn snapshot(&self, version: jmt::Version) -> Option<Snapshot> {

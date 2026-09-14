@@ -1,6 +1,6 @@
 # BIT D-005 ABCI 生命周期设计
 
-状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心并通过空块、重启和投票权实验；可用快照、生产摘要编码器、正式节点命令和多节点真实 Transfer 仍未完成。
+状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心并通过空块、重启和投票权实验；状态层已有本地可验证快照，ABCI State Sync、生产摘要编码器、正式节点命令和多节点真实 Transfer 仍未完成。
 
 ## 1. 单一执行入口
 
@@ -34,7 +34,7 @@ FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`�
 
 查询路径固定为 `/bit/state/key`。当前只服务最新已提交高度；`height=0` 表示最新高度。`prove=true` 时，应用先在本地验证 Cnidarium 生成的 ICS23 证明，再把每层 commitment proof 编码为 `jmt:v` ProofOp。历史高度查询随 D-004 历史快照实现补入。
 
-本链的 vote extension 默认关闭：`ExtendVote` 始终返回空字节，`VerifyVoteExtension` 只接受空扩展。快照方法目前显式报告无可用快照并拒绝导入，避免依赖库默认响应被误解为已支持 State Sync。
+本链的 vote extension 默认关闭：`ExtendVote` 始终返回空字节，`VerifyVoteExtension` 只接受空扩展。`bit-state` 已有本地 checkpoint 快照导出和隔离恢复 API；ABCI 快照方法仍显式报告无可用快照并拒绝导入，避免本地恢复能力被误解为已经完成 State Sync 的发现、传输、可信根校验和会话管理。
 
 ## 4. 稳定交易结果代码
 
@@ -54,4 +54,4 @@ ABCI 适配通过 `FinalizeDigestProvider` 强制注入两个摘要来源；没�
 
 `comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。测试确认奖励更新在 H+2 生效；一个应用从 durable JMT 状态重启并追块，四节点在同一固定高度的 app hash 相同，最新状态返回 ICS23 proof。集成注入器使用隔离网络的临时验证人密钥构造 CometBFT 可验证的冲突 prevote，通过标准 RPC 广播后，四个应用一致执行证据持久化、Burn 和 H+2 验证人移除。处罚后停止一个仍有投票权的验证者，剩余 power 恰为三分之二时链停止，恢复该验证者后继续出块。每次运行的精确高度和证据哈希写入 `feasibility/reports/bit-app-network-result.json`。
 
-下一步实现版本化 execution/compact 编码器及创世语义校验，形成正式节点命令，再把真实 Transfer 和退出放进四节点重放与崩溃恢复实验。D-004 同步补快照导入导出和历史高度证明。
+下一步实现版本化 execution/compact 编码器及创世语义校验，形成正式节点命令，再把真实 Transfer 和退出放进四节点重放与崩溃恢复实验。D-004/D-010 同步把现有本地快照导出恢复接入轻客户端可信根和 ABCI State Sync，并补历史高度证明。

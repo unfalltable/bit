@@ -37,6 +37,10 @@ use std::{
 };
 use thiserror::Error;
 
+mod state_snapshot;
+
+pub use state_snapshot::{StateSnapshotManifest, STATE_SNAPSHOT_CHUNK_BYTES};
+
 pub type Hash32 = [u8; 32];
 
 const STORAGE_SCHEMA_VERSION: u32 = 16;
@@ -209,6 +213,8 @@ pub enum Error {
     InvalidConfig(&'static str),
     #[error("stored state is corrupt or incompatible: {0}")]
     CorruptState(String),
+    #[error("state snapshot failed: {0}")]
+    Snapshot(String),
     #[error("expected next state height {expected}, got {actual}")]
     HeightMismatch { expected: u64, actual: u64 },
     #[error("block time regressed from {previous} to {actual}")]
@@ -627,6 +633,7 @@ impl QueryProof {
 
 pub struct PersistentState {
     storage: Storage,
+    database_path: PathBuf,
     config: GenesisConfig,
     staking: RwLock<StakingBook>,
 }
@@ -636,6 +643,7 @@ impl PersistentState {
     /// Existing state is validated against every immutable configuration field.
     pub async fn open(path: PathBuf, config: GenesisConfig) -> Result<Self> {
         config.validate()?;
+        let database_path = path.clone();
         let prefixes = SUBSTORES
             .iter()
             .map(|prefix| (*prefix).to_owned())
@@ -665,6 +673,7 @@ impl PersistentState {
 
         Ok(Self {
             storage,
+            database_path,
             config,
             staking: RwLock::new(staking),
         })
@@ -4214,6 +4223,22 @@ mod tests {
             .unwrap();
     }
 
+    fn first_non_empty_file(directory: &Path) -> PathBuf {
+        let mut pending = vec![directory.to_path_buf()];
+        while let Some(directory) = pending.pop() {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let entry = entry.unwrap();
+                let file_type = entry.file_type().unwrap();
+                if file_type.is_dir() {
+                    pending.push(entry.path());
+                } else if file_type.is_file() && entry.metadata().unwrap().len() > 0 {
+                    return entry.path();
+                }
+            }
+        }
+        panic!("snapshot database contains no non-empty file")
+    }
+
     fn active_validator_config(
         retention: u64,
         parameters: StakingParameters,
@@ -4426,6 +4451,176 @@ mod tests {
             .nullifier_is_spent(&transfer.nullifiers[0])
             .await
             .unwrap());
+        state.close().await;
+    }
+
+    #[tokio::test]
+    async fn snapshot_export_import_is_chunk_verified_isolated_and_restart_safe() {
+        let root = TempDir::new().unwrap();
+        let source_path = root.path().join("source");
+        let snapshot_path = root.path().join("snapshot");
+        let restored_path = root.path().join("restored");
+        let genesis_config = config(8);
+        let state = PersistentState::open(source_path.clone(), genesis_config.clone())
+            .await
+            .unwrap();
+
+        let mut first = state.begin_block(1, [0x31; 32], [0x32; 32]).await.unwrap();
+        stage_empty_consensus(&state, &mut first, 1).await;
+        let first_receipt = state.commit(first.prepare().await.unwrap()).unwrap();
+        let expected = state.summary().await.unwrap();
+        assert_eq!(expected.state_height, 1);
+
+        let nested_export = source_path.join("nested-snapshot");
+        let error = state
+            .export_snapshot(nested_export.clone())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Snapshot(_)));
+        assert!(!nested_export.exists());
+
+        let manifest = state.export_snapshot(snapshot_path.clone()).await.unwrap();
+        assert_eq!(manifest.format_version, 1);
+        assert_eq!(manifest.storage_schema_version, STORAGE_SCHEMA_VERSION);
+        assert_eq!(manifest.state_height, expected.state_height);
+        assert_eq!(manifest.storage_version, expected.storage_version);
+        assert_eq!(manifest.app_hash, first_receipt.app_hash);
+        assert_eq!(manifest.shielded_tree_root, expected.shielded_tree_root);
+        assert_eq!(manifest.chain_context, genesis_config.chain_context);
+        assert_eq!(
+            manifest.monetary_policy_hash,
+            expected.supply.monetary_policy_hash
+        );
+        assert!(manifest.file_count > 0);
+        assert!(manifest.total_bytes > 0);
+        assert!(manifest.total_chunks > 0);
+        assert_eq!(
+            StateSnapshotManifest::read_from(&snapshot_path).unwrap(),
+            manifest
+        );
+
+        let nested_import = snapshot_path.join("nested-database");
+        let error = match PersistentState::import_snapshot(
+            snapshot_path.clone(),
+            nested_import.clone(),
+            genesis_config.clone(),
+        )
+        .await
+        {
+            Ok(_) => panic!("snapshot imported inside its source directory"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, Error::Snapshot(_)));
+        assert!(!nested_import.exists());
+
+        let unexpected = snapshot_path.join("db/UNLISTED");
+        std::fs::write(&unexpected, b"not in manifest").unwrap();
+        let rejected_extra = root.path().join("rejected-extra");
+        let error = match PersistentState::import_snapshot(
+            snapshot_path.clone(),
+            rejected_extra.clone(),
+            genesis_config.clone(),
+        )
+        .await
+        {
+            Ok(_) => panic!("snapshot with an extra file was accepted"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, Error::Snapshot(_)));
+        assert!(!rejected_extra.exists());
+        std::fs::remove_file(unexpected).unwrap();
+
+        let manifest_path = snapshot_path.join("manifest.bit");
+        let manifest_bytes = std::fs::read(&manifest_path).unwrap();
+        let mut trailing = manifest_bytes.clone();
+        trailing.push(0);
+        std::fs::write(&manifest_path, trailing).unwrap();
+        let rejected_manifest = root.path().join("rejected-manifest");
+        let error = match PersistentState::import_snapshot(
+            snapshot_path.clone(),
+            rejected_manifest.clone(),
+            genesis_config.clone(),
+        )
+        .await
+        {
+            Ok(_) => panic!("snapshot with a noncanonical manifest was accepted"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, Error::Snapshot(_)));
+        assert!(!rejected_manifest.exists());
+        std::fs::write(&manifest_path, manifest_bytes).unwrap();
+
+        let existing_destination = root.path().join("existing-destination");
+        std::fs::create_dir(&existing_destination).unwrap();
+        let marker = existing_destination.join("marker");
+        std::fs::write(&marker, b"preserve").unwrap();
+        let error = match PersistentState::import_snapshot(
+            snapshot_path.clone(),
+            existing_destination,
+            genesis_config.clone(),
+        )
+        .await
+        {
+            Ok(_) => panic!("snapshot overwrote an existing destination"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, Error::Snapshot(_)));
+        assert_eq!(std::fs::read(marker).unwrap(), b"preserve");
+
+        let mut wrong_config = genesis_config.clone();
+        wrong_config.native_asset_id[0] ^= 1;
+        let rejected_config = root.path().join("rejected-config");
+        let error = match PersistentState::import_snapshot(
+            snapshot_path.clone(),
+            rejected_config.clone(),
+            wrong_config,
+        )
+        .await
+        {
+            Ok(_) => panic!("snapshot accepted a different immutable configuration"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, Error::CorruptState(_)));
+        assert!(!rejected_config.exists());
+
+        let restored = PersistentState::import_snapshot(
+            snapshot_path.clone(),
+            restored_path,
+            genesis_config.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.summary().await.unwrap(), expected);
+        let height_proof = restored.query_latest_with_proof(META_HEIGHT).await.unwrap();
+        assert_eq!(height_proof.value, Some(1u64.to_be_bytes().to_vec()));
+        height_proof.verify().unwrap();
+
+        let mut second = restored
+            .begin_block(2, [0x33; 32], [0x34; 32])
+            .await
+            .unwrap();
+        stage_empty_consensus(&restored, &mut second, 2).await;
+        let second_receipt = restored.commit(second.prepare().await.unwrap()).unwrap();
+        assert_eq!(second_receipt.state_height, 2);
+        restored.close().await;
+
+        let database_file = first_non_empty_file(&snapshot_path.join("db"));
+        let mut bytes = std::fs::read(&database_file).unwrap();
+        bytes[0] ^= 1;
+        std::fs::write(&database_file, bytes).unwrap();
+        let rejected_chunk = root.path().join("rejected-chunk");
+        let error = match PersistentState::import_snapshot(
+            snapshot_path,
+            rejected_chunk.clone(),
+            genesis_config,
+        )
+        .await
+        {
+            Ok(_) => panic!("snapshot with a corrupt chunk was accepted"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, Error::Snapshot(_)));
+        assert!(!rejected_chunk.exists());
         state.close().await;
     }
 

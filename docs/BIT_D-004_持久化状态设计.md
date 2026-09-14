@@ -1,6 +1,6 @@
 # BIT D-004 持久化状态设计
 
-状态：`IN_PROGRESS`。可运行状态层已接入 ABCI 和供应会计，并在 Windows 桌面工具链通过测试；快照、历史证明和完整故障注入仍待后续实现。
+状态：`IN_PROGRESS`。可运行状态层已接入 ABCI 和供应会计，并在 Windows 桌面工具链通过测试；本地分块校验快照导出与隔离恢复已实现，ABCI State Sync、历史证明和完整故障注入仍待后续实现。
 
 ## 1. 边界与依赖
 
@@ -89,9 +89,17 @@ Prepare 结果被丢弃或批次在写前失败时，数据库版本不变。重
 
 `query_latest_with_proof` 返回原始值、状态版本、app hash 和 Cnidarium 生成的 ICS23 proof。主 JMT 键使用一层证明；九个子存储区使用“子树值到子树根、子树根到全局根”的两层证明。`QueryProof::verify` 同时处理存在和不存在证明。
 
-当前接口只保证最新快照。Cnidarium 进程内缓存可保留少量旧快照，但重启后的任意历史高度证明、快照导入导出和可信状态同步将在 D-004 后续切片实现。
+当前查询接口只保证最新状态。Cnidarium 进程内缓存可保留少量旧状态，但重启后的任意历史高度证明仍将在 D-004 后续切片实现。
 
-## 5. 已验证不变量
+## 5. 状态快照
+
+`export_snapshot` 从最新 durable 状态创建 RocksDB 物理 checkpoint。导出前、独立打开 checkpoint 后和导出完成时分别读取完整 `StateSummary`，三者必须一致；独立打开同时执行当前 schema 的全部 TCT、供应、质押、队列、集合、证据和索引不变量检查。导出目录只在所有检查成功后从同父目录临时路径原子改名发布，不能位于正在运行的数据库目录内，也不会覆盖已有路径。
+
+每个快照根目录只允许 `manifest.bit`、`manifest.sha256` 和 `db/`。`manifest.bit` 是严格规范二进制，绑定格式版本、4 MiB chunk 大小、存储 schema、状态高度、链时间、存储版本、app hash、TCT 根、chain context、货币政策 hash、总字节数，以及排序后的安全相对文件名、文件长度和各 chunk SHA-256；域分离后的清单 hash 同时写入固定 65 字节的 `manifest.sha256`。实现限制清单为 64 MiB、文件数为 100000、目录项为 200000、目录深度为 16、总数据为 16 TiB，并拒绝链接、设备、非规范路径、额外文件和非规范清单。
+
+`import_snapshot` 要求目标不存在且位于快照目录外。它先校验清单与 chain context，再逐文件、逐 chunk 复制到同父目录的隔离临时数据库并同步文件；随后用完整 `GenesisConfig` 独立打开恢复状态，核对 manifest 中的 schema、高度、链时间、版本、app hash、TCT 根和货币政策 hash。全部通过后才原子发布目标数据库并重新打开。当前格式是固定依赖版本的本地节点恢复格式，不包含共识/资金私钥，也没有把未经轻客户端确认的 manifest 根提升为可信根；快照发现、下载、断点传输及 ABCI OfferSnapshot/LoadSnapshotChunk/ApplySnapshotChunk 仍属于 D-005/D-010。
+
+## 6. 已验证不变量
 
 - 空目录只初始化一次高度零状态；相同配置可重启，chain context 等不可变配置变化时拒绝打开。
 - 状态高度与 Cnidarium 版本严格相等，倒退或缺键时停止打开，不自动清库。
@@ -102,6 +110,7 @@ Prepare 结果被丢弃或批次在写前失败时，数据库版本不变。重
 - 同交易、同块和跨块 nullifier 冲突均被拒绝，失败交易不写 tx_id、不写 nullifier、不推进 TCT。
 - anchor 只在配置窗口内有效；裁剪 anchor 不裁剪 nullifier 或当前状态。
 - 主存储、子存储的 ICS23 成员和非成员证明都能针对返回的 app hash 验证。
+- 快照导出绑定完整状态摘要和逐 chunk hash；额外文件、非规范清单、错误不可变配置、篡改数据、已有目标或源目录内目标都会在发布前拒绝，合法恢复保持同一 app hash/TCT 根并可继续提交新区块。
 - 真实 2 Spend/2 Output Transfer 使用四份 Groth16 证明、两份 Spend 授权和 binding 签名完成验证、Prepare、RocksDB Commit、重启恢复及重启后的 ICS23 查询；同一 envelope 在下一高度被 tx_id 重放检查拒绝。
 - 创世资产容器必须精确合计为创世供应量；Transfer fee 原子执行 `Q -= fee; F += fee`，总供应量不变，余额不足时交易和供应状态均不变。
 - `T = Q + ΣP + D + ΣX + ΣC + F + G = G0 + Mint - Burn`，且 `Mint + K` 必须等于按 epoch 已调度额度；任一持久化字段被独立篡改时节点拒绝打开。
@@ -113,6 +122,6 @@ Prepare 结果被丢弃或批次在写前失败时，数据库版本不变。重
 - Byzantine evidence 的类型、时间、年龄、责任集合、单个及总 power 都从历史状态复核；相同 hash 不重复处罚。活动池和未成熟责任 cohort 的扣减分别与 P、X 及累计 Burn 同批守恒。
 - SlashJob 使用确定性冻结边界和持久游标，全体任务每块合计不超过配置上限；逐块重启测试确认游标、处理数和累计罚没不倒退、不重复。
 
-## 6. 后续工作
+## 7. 后续工作
 
-D-004 仍需完成真实磁盘配额耗尽、操作系统 fsync 失败、数据库文件损坏和版本回退的进程级故障注入；快照分块导出/隔离导入；重启后的历史证明服务；长期 nullifier、frontier 与 JMT 增长测试。D-005 已把同一执行器接到 CheckTx、ProcessProposal、FinalizeBlock、Commit 和 Query，并完成真实四节点/JMT 重启及重复投票处罚实验；后续还需生产摘要、正式节点命令和多节点真实 Transfer。
+D-004 仍需完成真实磁盘配额耗尽、操作系统 fsync 失败、数据库文件损坏和版本回退的进程级故障注入；重启后的历史证明服务；快照跨平台恢复与长期 nullifier、frontier、JMT 增长测试。D-005 已把同一执行器接到 CheckTx、ProcessProposal、FinalizeBlock、Commit 和 Query，并完成真实四节点/JMT 重启及重复投票处罚实验；后续还需把本地快照能力接入可信 State Sync、实现生产摘要和正式节点命令，并覆盖多节点真实 Transfer。
