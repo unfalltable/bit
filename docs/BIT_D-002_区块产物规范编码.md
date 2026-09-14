@@ -81,4 +81,4 @@ ABCI 返回一个 `bit.block.v1` 事件，包含 height、execution_hash、compa
 
 若进程在 JMT 已提交、归档目录尚未发布的窗口崩溃，重启会验证暂存字节、两种域分离哈希、共同块字段、公共事件和成功交易集合，再以最新 JMT 中的 `execution/block/<height>` 与 `compact/hash/<height>` ICS23 证明核对后发布。高于 durable 状态的暂存目录视为未提交 Finalize 并清理；高于状态的已发布目录、冲突字节、非规范路径、符号链接、超限或损坏文件都会拒绝打开或读取。
 
-`ApplicationCore::block_artifacts(height)` 只返回已经发布且重新验证过的完整产物。四节点探针逐节点读取真实 Transfer 高度的两个归档文件，要求字节、链上摘要和 ABCI 事件一致，并在应用重启后再次读取。归档不进入 JMT app hash，也不随当前 State Sync 快照自动补齐历史；远端归档复制、保留下限、删档治理和下载服务仍需单独实现。
+`ApplicationCore::block_artifacts(height)` 只返回已经发布且重新验证过的完整产物；`block_artifacts_with_proofs(height)` 进一步读取该精确历史高度的 execution/compact ICS23 证明，自验后要求证明值分别等于两份归档的域分离哈希，作为下载服务的唯一读取边界。四节点探针逐节点读取真实 Transfer 高度的两个归档文件，要求字节、链上摘要和 ABCI 事件一致，并在应用重启后再次读取。归档不进入 JMT app hash，也不随当前 State Sync 快照自动补齐历史；远端归档复制、保留下限、删档治理和 HTTP 下载服务仍需单独实现。

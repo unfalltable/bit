@@ -32,6 +32,12 @@ use artifact_archive::{ArtifactArchive, StagedArtifacts};
 
 pub type Hash32 = [u8; 32];
 
+pub struct ProvenBlockArtifacts {
+    pub artifacts: BlockArtifacts,
+    pub execution_proof: QueryProof,
+    pub compact_proof: QueryProof,
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("invalid application configuration: {0}")]
@@ -508,6 +514,56 @@ impl ApplicationCore {
         self.artifact_archive.load(height)
     }
 
+    /// Load a published artifact pair and bind both files to the application
+    /// hash committed at their exact block height.
+    pub async fn block_artifacts_with_proofs(
+        &self,
+        height: u64,
+    ) -> Result<Option<ProvenBlockArtifacts>> {
+        let Some(artifacts) = self.block_artifacts(height)? else {
+            return Ok(None);
+        };
+        let execution_proof = self
+            .artifact_hash_proof(
+                &format!("execution/block/{height:020}"),
+                height,
+                &artifacts.execution_hash,
+            )
+            .await?;
+        let compact_proof = self
+            .artifact_hash_proof(
+                &format!("compact/hash/{height:020}"),
+                height,
+                &artifacts.compact_hash,
+            )
+            .await?;
+        Ok(Some(ProvenBlockArtifacts {
+            artifacts,
+            execution_proof,
+            compact_proof,
+        }))
+    }
+
+    async fn artifact_hash_proof(
+        &self,
+        key: &str,
+        height: u64,
+        expected: &Hash32,
+    ) -> Result<QueryProof> {
+        let proof = self.query_at_height_with_proof(key, height).await?;
+        proof.verify().map_err(|error| {
+            Error::ArtifactArchive(format!(
+                "historical state proof for artifact block {height} failed: {error}"
+            ))
+        })?;
+        if proof.value.as_deref() != Some(expected.as_slice()) {
+            return Err(Error::ArtifactArchive(format!(
+                "artifact block {height} differs from its historical state proof"
+            )));
+        }
+        Ok(proof)
+    }
+
     pub(crate) async fn export_state_snapshot(
         &self,
         destination: PathBuf,
@@ -761,6 +817,12 @@ mod tests {
             app.block_artifacts(1).unwrap(),
             Some(finalized.artifacts.clone())
         );
+        let proven = app.block_artifacts_with_proofs(1).await.unwrap().unwrap();
+        assert_eq!(proven.artifacts, finalized.artifacts);
+        assert_eq!(proven.execution_proof.storage_version, 1);
+        assert_eq!(proven.compact_proof.storage_version, 1);
+        proven.execution_proof.verify().unwrap();
+        proven.compact_proof.verify().unwrap();
         assert!(matches!(app.commit().await, Err(Error::NoPendingBlock)));
         app.close().await;
 
