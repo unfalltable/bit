@@ -59,7 +59,7 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 `supply/audit_snapshot` 已冻结版本 1 规范值。它是 19 项 CBOR 数组：版本号、按本节恒定顺序排列的 16 个 Amount、`completed_epochs` 和 `monetary_policy_hash`。每个 Amount 必须编码为精确 16 字节大端 byte string，政策哈希必须为 32 字节，整数必须使用最短 CBOR 表示。顺序依次为 `M, G0, Mint, Burn, I, T, U(e), K, Future(e), Q, ΣP, D, ΣX, ΣC, F, G`。解码器要求无尾随字节、重新编码逐字节相等，并重新验证全部供应恒等式。
 
-创世和每个区块提交都会从同一候选 `SupplyAudit` 生成快照，与组成字段原子写入 JMT。节点打开数据库时解码快照，并要求它和逐键重算结果完全相等；因此缺失、非规范编码或单字段篡改都会拒绝启动。通用 ABCI Query 可返回该键在最新或指定已提交高度 app hash 下的 ICS23 成员证明，重启后仍可重建旧高度。Rust 与独立 Python oracle 共用 `tests/vectors/supply-audit-vectors.json`，四节点探针按真实 Transfer 高度核对四份带证明规范值完全一致。REST DTO 与 SDK 映射仍由 D-022 补齐。
+创世和每个区块提交都会从同一候选 `SupplyAudit` 生成快照，与组成字段原子写入 JMT。节点打开数据库时解码快照，并要求它和逐键重算结果完全相等；因此缺失、非规范编码或单字段篡改都会拒绝启动。通用 ABCI Query 可返回该键在最新或指定已提交高度 app hash 下的 ICS23 成员证明，重启后仍可重建旧高度。Rust 与独立 Python oracle 共用 `tests/vectors/supply-audit-vectors.json`，四节点探针按真实 Transfer 高度核对四份带证明规范值完全一致。`GET /v1/supply` 已把完整快照映射为十进制字符串 DTO 并附同高证明，SDK 验证映射仍由 D-022 后续切片补齐。
 
 提交高度 `h` 对应的已结算 epoch 数固定为 `max(0, (h-1)/epoch_blocks)`。高度 1 和每个 epoch 的末块不会提前结算，下一 epoch 首块才要求计数增加。应用先读取 `h-1` 的 last commit 并累加真实签名 power；边界块在一个候选副本中消费上一 epoch score，决定发行或放弃，把当时全部 F 按 score 分 gross，再按 validator commission 拆到 P/C。PrepareProposal、ProcessProposal 和 FinalizeBlock 都执行同一顺序，任何失败保持 durable 状态不变。
 
@@ -84,5 +84,5 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 1. 四节点实验已验证 H/H+1/H+2 实际集合、last commit power、请求哈希、奖励后投票权，以及真实 Transfer 的费用、交易/nullifier 证明、TCT 根和 execution/compact 摘要一致；下一步补区块产物分发及多节点真实退出。
 2. 为钱包和网关提供带证明的费率、在线率、奖励和佣金报价接口。
 3. 接入 GenesisClaim 和 Slash 等剩余容器转换；Delegate、Unbond、ClaimExit 和 ClaimCommission 已接入。
-4. 为已冻结的 `supply/audit_snapshot` 增加 REST DTO 和面向 SDK 的跨语言解码器；共识值、最新/历史高度查询、共享测试向量和严格 Rust 解码器已经完成。
+4. 为已冻结的 `supply/audit_snapshot` 增加面向 SDK 的跨语言验证映射；共识值、REST DTO、最新/历史高度查询、共享测试向量和严格 Rust 解码器已经完成。
 5. 完成真实钱包 A 到 B 的构造、扫描、余额变化和重启恢复闭环，并在多节点 CometBFT 环境验证供应状态一致。

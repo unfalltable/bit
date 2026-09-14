@@ -1,0 +1,299 @@
+openapi: 3.1.0
+info:
+  title: BIT Public Read API
+  version: 0.1.0
+  description: >-
+    Implemented read-only gateway subset. Plain HTTP is restricted to loopback;
+    public deployment requires a separately configured TLS ingress.
+servers:
+  - url: http://127.0.0.1:8443
+paths:
+  /health/live:
+    get:
+      operationId: healthLive
+      responses:
+        "200":
+          description: Gateway process is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /health/ready:
+    get:
+      operationId: healthReady
+      responses:
+        "200":
+          description: Application state is covered by the declared verified header height.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/state/proof:
+    get:
+      operationId: stateProof
+      parameters:
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - $ref: "#/components/parameters/Height"
+      responses:
+        "200":
+          description: A membership or non-membership proof at the requested state height.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateProofResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/supply:
+    get:
+      operationId: networkSupply
+      parameters:
+        - $ref: "#/components/parameters/Height"
+      responses:
+        "200":
+          description: Canonical supply audit fields and the proof covering the full snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/compact-blocks:
+    get:
+      operationId: compactBlocks
+      parameters:
+        - name: from_height
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: uint64
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+        - name: max_bytes
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 16777216
+            default: 4194304
+      responses:
+        "200":
+          description: Consecutive canonical compact blocks with exact-height hash proofs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompactBlocksResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+components:
+  parameters:
+    Height:
+      name: height
+      in: query
+      description: Zero or omission selects the latest committed height.
+      schema:
+        type: integer
+        format: uint64
+        minimum: 0
+        default: 0
+  responses:
+    Error:
+      description: Stable gateway error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [live, ready]
+    Meta:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, state_height, verified_header_height]
+      properties:
+        protocol_version:
+          type: integer
+          format: uint64
+        state_height:
+          $ref: "#/components/schemas/HeightString"
+        verified_header_height:
+          $ref: "#/components/schemas/HeightString"
+    HeightString:
+      type: string
+      pattern: "^(0|[1-9][0-9]*)$"
+    AmountString:
+      type: string
+      pattern: "^(0|[1-9][0-9]*)$"
+    Hex32:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+    Proof:
+      type: object
+      additionalProperties: false
+      required:
+        [state_height, key, exists, value_base64, proof_format, proof_ops_base64, app_hash]
+      properties:
+        state_height:
+          $ref: "#/components/schemas/HeightString"
+        key:
+          type: string
+          minLength: 1
+          maxLength: 256
+        exists:
+          type: boolean
+        value_base64:
+          oneOf:
+            - type: string
+              contentEncoding: base64
+            - type: "null"
+        proof_format:
+          const: "ics23:jmt:v1"
+        proof_ops_base64:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            type: string
+            contentEncoding: base64
+        app_hash:
+          $ref: "#/components/schemas/Hex32"
+    StateProofResponse:
+      type: object
+      additionalProperties: false
+      required: [meta, result]
+      properties:
+        meta:
+          $ref: "#/components/schemas/Meta"
+        result:
+          $ref: "#/components/schemas/Proof"
+    Supply:
+      type: object
+      additionalProperties: false
+      required:
+        - max_supply
+        - genesis_supply
+        - cumulative_minted
+        - burned
+        - issued_total
+        - total
+        - scheduled_to_date
+        - forfeited_unissued
+        - future_issuance_budget
+        - shielded_total
+        - stake_total
+        - pending_delegation_total
+        - exit_total
+        - commission_total
+        - fee_reserve
+        - unclaimed_genesis_total
+        - completed_epochs
+        - monetary_policy_hash
+      properties:
+        max_supply: { $ref: "#/components/schemas/AmountString" }
+        genesis_supply: { $ref: "#/components/schemas/AmountString" }
+        cumulative_minted: { $ref: "#/components/schemas/AmountString" }
+        burned: { $ref: "#/components/schemas/AmountString" }
+        issued_total: { $ref: "#/components/schemas/AmountString" }
+        total: { $ref: "#/components/schemas/AmountString" }
+        scheduled_to_date: { $ref: "#/components/schemas/AmountString" }
+        forfeited_unissued: { $ref: "#/components/schemas/AmountString" }
+        future_issuance_budget: { $ref: "#/components/schemas/AmountString" }
+        shielded_total: { $ref: "#/components/schemas/AmountString" }
+        stake_total: { $ref: "#/components/schemas/AmountString" }
+        pending_delegation_total: { $ref: "#/components/schemas/AmountString" }
+        exit_total: { $ref: "#/components/schemas/AmountString" }
+        commission_total: { $ref: "#/components/schemas/AmountString" }
+        fee_reserve: { $ref: "#/components/schemas/AmountString" }
+        unclaimed_genesis_total: { $ref: "#/components/schemas/AmountString" }
+        completed_epochs: { $ref: "#/components/schemas/HeightString" }
+        monetary_policy_hash: { $ref: "#/components/schemas/Hex32" }
+    SupplyResponse:
+      type: object
+      additionalProperties: false
+      required: [meta, supply, proof]
+      properties:
+        meta:
+          $ref: "#/components/schemas/Meta"
+        supply:
+          $ref: "#/components/schemas/Supply"
+        proof:
+          $ref: "#/components/schemas/Proof"
+    CompactBlock:
+      type: object
+      additionalProperties: false
+      required: [height, canonical_block_base64, compact_hash, proof]
+      properties:
+        height:
+          $ref: "#/components/schemas/HeightString"
+        canonical_block_base64:
+          type: string
+          contentEncoding: base64
+        compact_hash:
+          $ref: "#/components/schemas/Hex32"
+        proof:
+          $ref: "#/components/schemas/Proof"
+    CompactBlocksResponse:
+      type: object
+      additionalProperties: false
+      required: [meta, items, next_height, complete_to_tip, canonical_bytes]
+      properties:
+        meta:
+          $ref: "#/components/schemas/Meta"
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/CompactBlock"
+        next_height:
+          oneOf:
+            - $ref: "#/components/schemas/HeightString"
+            - type: "null"
+        complete_to_tip:
+          type: boolean
+        canonical_bytes:
+          $ref: "#/components/schemas/HeightString"
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string

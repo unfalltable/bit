@@ -1,12 +1,12 @@
 {
   "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, canonical block artifacts, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T180832185507",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T183254882565",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "application_sha256": "0fcdadc075568fdb83b7b70cdd8e43e67f5a78bb75f5c8e4c9cf0a6ee93e8dc1",
-    "evidence_injector_sha256": "74a05fe86117b8d28bb86b60043015647212450cc3da8f808534ca5f2c72321a"
+    "application_sha256": "9a6f2d92e6967ac95661c3ccc6ee9a8d4b99ab55bebcc04a06fe84c09a069b93",
+    "evidence_injector_sha256": "f098095a5563f0a29344e602c98731bfa9412e867f9e1a9eec683111ee881b00"
   },
   "checks": {
     "real_transfer": {
@@ -26,12 +26,12 @@
       "transaction_record_proved_on_nodes": 4,
       "nullifier_records_proved_on_nodes": 4,
       "post_transfer_tree_root": "c7c2a01a326fa450ea94e065adff45fa0d4d6c28c8280eab147dc0db288a0001",
-      "post_transfer_app_hash": "e9b1481f92264cd94fa35a0c1563fdc2cba1e1fdcead78325d39893881e8a125"
+      "post_transfer_app_hash": "05961293e52d20c3a843ccf507699dff8a9d295c3eb7fd4df06c286fd8935275"
     },
     "canonical_block_artifacts": {
       "height": 12,
-      "execution_hash": "811d5ceb297e8e6c60dbd9f7e60f4dbd0e7945a6449d6e751e7763249262ff37",
-      "compact_hash": "961d694c47d94cfeb4f180075d3ae64d3997cb5eb4ed22a6987df3bcf4e76537",
+      "execution_hash": "346738ed04a730c33a37e671b61f330211f9f03704a1eadbb578186fc469a9d4",
+      "compact_hash": "d20dcb70afd3f86c92504895368e7532a45244f53354ec771c57e8712f4d951a",
       "execution_bytes": 237,
       "compact_bytes": 1577,
       "state_proofs_and_abci_event_match_on_nodes": 4,
@@ -42,27 +42,27 @@
     },
     "canonical_supply_audit": {
       "canonical_bytes": 309,
-      "sha256": "66f9a6b6d12b9503011a93dcbf5965c97f3a38e3e71502f76426e511048075ee",
+      "sha256": "1ba362517ae30213f0a5048e88b2839c5f2f2193a054414d33d0d0ed80792102",
       "state_proved_on_nodes": 4
     },
     "validator_powers_h6_h7_h8": {
       "6": {
-        "4f7441b76d779319c78143e6d92db6e12d5556adcd277d29a900965842aa4c7d": 10,
-        "fc3fbc8b2b6bb0b99f6c54516259a353b33f5c15ed67f3bb1dc7336015ad6294": 10,
-        "ee3cba893893ea977285a100d5efe40ed926b7a0a73650386d876489bfbf0210": 10,
-        "e825eac05128d45972b3bfa7b3060d465644cb4f1f9325b98ee2c59e113e108e": 10
+        "3e6c8da1506c04e2c62fd1de05754d83842947a0797146dac0f8a764f1f86df8": 10,
+        "20f9d43a67747d89a892ea73211c344baf8dc09757a0a16d78475d96fe586760": 10,
+        "88202b6a72bb43dcf05f7a63406f676340cebe09fedd1e27d89bdf5b173df81f": 10,
+        "a3528b0eb8f8408da1e95c81a4c69a67ea3a5bba54af42ccf9ed39bcabb5a861": 10
       },
       "7": {
-        "4f7441b76d779319c78143e6d92db6e12d5556adcd277d29a900965842aa4c7d": 10,
-        "fc3fbc8b2b6bb0b99f6c54516259a353b33f5c15ed67f3bb1dc7336015ad6294": 10,
-        "ee3cba893893ea977285a100d5efe40ed926b7a0a73650386d876489bfbf0210": 10,
-        "e825eac05128d45972b3bfa7b3060d465644cb4f1f9325b98ee2c59e113e108e": 10
+        "3e6c8da1506c04e2c62fd1de05754d83842947a0797146dac0f8a764f1f86df8": 10,
+        "20f9d43a67747d89a892ea73211c344baf8dc09757a0a16d78475d96fe586760": 10,
+        "88202b6a72bb43dcf05f7a63406f676340cebe09fedd1e27d89bdf5b173df81f": 10,
+        "a3528b0eb8f8408da1e95c81a4c69a67ea3a5bba54af42ccf9ed39bcabb5a861": 10
       },
       "8": {
-        "4f7441b76d779319c78143e6d92db6e12d5556adcd277d29a900965842aa4c7d": 3476,
-        "fc3fbc8b2b6bb0b99f6c54516259a353b33f5c15ed67f3bb1dc7336015ad6294": 3476,
-        "ee3cba893893ea977285a100d5efe40ed926b7a0a73650386d876489bfbf0210": 3476,
-        "e825eac05128d45972b3bfa7b3060d465644cb4f1f9325b98ee2c59e113e108e": 3476
+        "3e6c8da1506c04e2c62fd1de05754d83842947a0797146dac0f8a764f1f86df8": 3659,
+        "88202b6a72bb43dcf05f7a63406f676340cebe09fedd1e27d89bdf5b173df81f": 3659,
+        "a3528b0eb8f8408da1e95c81a4c69a67ea3a5bba54af42ccf9ed39bcabb5a861": 3659,
+        "20f9d43a67747d89a892ea73211c344baf8dc09757a0a16d78475d96fe586760": 2929
       }
     },
     "h_plus_two_update": true,
@@ -74,23 +74,23 @@
       19
     ],
     "same_app_hash_height": 18,
-    "same_app_hash": "70455927a72ceb9650cfe2e2fac04816267a423e2ab1a6067b28252685536ced",
+    "same_app_hash": "30e04e531f74da6cdee5c965a4cf863f43aa15f4fd4f8bba9c06b58c6696baa0",
     "latest_and_historical_ics23_proofs": true,
     "real_duplicate_vote_evidence": {
-      "comet_evidence_hash": "a545dc6ad89a00ce106f52e72e9132e660d32e611b52e296103f928fa5749660",
-      "validator_address": "3d11c362e3975e5d8c084184130c852213dc005d",
-      "validator_power": 6943,
+      "comet_evidence_hash": "0a867a0b8f7e9d141d236150dec3ca2e7b49abf7c95378b858f85f7fbe913210",
+      "validator_address": "67799bfac1bebb867cd2e3cfc060bff945544767",
+      "validator_power": 7307,
       "infraction_height": 17,
-      "infraction_time_seconds": 1789409338,
-      "infraction_time_nanos": 578122800,
+      "infraction_time_seconds": 1789410802,
+      "infraction_time_nanos": 155179200,
       "total_voting_power": 27772,
       "inclusion_height": 20,
-      "bit_evidence_hash": "79bf2c3452d00055751c661e78fbe9947e4dc53504844a4a0587f123d1967551",
+      "bit_evidence_hash": "2c7aeb2175253ecfc80990d82d2368eed8d9c444c191a19df2eae98eee58a5b7",
       "validator_present_at_h_plus_one": true,
       "validator_removed_at_h_plus_two": true,
       "post_evidence_validator_count": 3,
-      "burned_atomic": "4858822721098",
-      "same_app_hash": "4e62e37c476bb7068adcfea17fa83f7a2f33cb173d1209e78e59d5a07a233208",
+      "burned_atomic": "5161279775133",
+      "same_app_hash": "dba1885110ed7cf74a042c8924974ccf79581180c13922a52707172df6262a11",
       "ics23_evidence_membership": true
     },
     "quorum_halt_height": 23,
@@ -107,6 +107,6 @@
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T18:08:32.185614+00:00",
-  "finished_at": "2026-09-14T18:09:16.704898+00:00"
+  "started_at": "2026-09-14T18:32:54.882677+00:00",
+  "finished_at": "2026-09-14T18:33:41.500218+00:00"
 }

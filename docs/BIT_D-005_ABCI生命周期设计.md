@@ -46,7 +46,7 @@ FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`�
 
 `BlockRequest` 不再接受外部提供的 `execution_hash` 或 `compact_hash`。FinalizeBlock 执行全部系统事件和交易后预览最终 TCT 根，由唯一编码器构造版本化 execution summary 与 compact block，再把两个域分离哈希写入同一候选状态。树根、产物和提交批次会在 Commit 前交叉核对；编码失败属于共识关键错误。
 
-ABCI `bit.block.v1` 事件公开高度、两个摘要和 compact 字节数，状态键 `execution/block/<height>` 与 `compact/hash/<height>` 可用该高度的 ICS23 proof 核对。精确字节合同、排序、限制和哈希公式见 [D-002 区块产物规范编码](D:/others/BIT/docs/BIT_D-002_区块产物规范编码.md)。本地不可变归档已实现，下载服务仍待实现。
+ABCI `bit.block.v1` 事件公开高度、两个摘要和 compact 字节数，状态键 `execution/block/<height>` 与 `compact/hash/<height>` 可用该高度的 ICS23 proof 核对。精确字节合同、排序、限制和哈希公式见 [D-002 区块产物规范编码](D:/others/BIT/docs/BIT_D-002_区块产物规范编码.md)。本地不可变归档和本机有界下载接口已实现，公网 TLS/Tor 服务仍待实现。
 
 ## 6. 当前验证与下一切片
 
@@ -54,4 +54,4 @@ ABCI `bit.block.v1` 事件公开高度、两个摘要和 compact 字节数，状
 
 `comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。测试从两个创世承诺广播一笔冻结的 2 Spend/2 Output Groth16 Transfer，在链继续推进后按 Transfer 的精确高度核对交易/nullifier、TCT 根、供应审计和 execution/compact 状态证明、ABCI 事件及四节点 app hash；应用重启后再次查询同一旧高度证明。测试还确认奖励更新在 H+2 生效、应用从 durable JMT 状态重启并追块。集成注入器使用隔离网络的临时验证人密钥构造 CometBFT 可验证的冲突 prevote，通过标准 RPC 广播后，四个应用一致执行证据持久化、Burn 和 H+2 验证人移除。处罚后停止一个仍有投票权的验证者，剩余 power 恰为三分之二时链停止，恢复该验证者后继续出块。每次运行的精确高度和哈希写入 `feasibility/reports/bit-app-network-result.json`。
 
-下一步实现区块产物下载和创世语义校验，形成正式节点命令，再把真实退出放进四节点重放与崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人。
+下一步实现创世语义校验和正式节点命令，再把真实退出放进四节点重放与崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人；D-022 继续完成头同步、广播与公网入口。

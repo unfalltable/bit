@@ -289,7 +289,7 @@ impl AbciConfig {
 }
 
 struct Inner {
-    core: ApplicationCore,
+    core: Arc<ApplicationCore>,
     runtime: tokio::runtime::Runtime,
     execution: Mutex<()>,
     config: AbciConfig,
@@ -347,11 +347,13 @@ impl AbciApplication {
             .enable_all()
             .build()
             .map_err(|_| CoreError::InvalidConfig("failed to create ABCI runtime"))?;
-        let core = runtime.block_on(ApplicationCore::open_with_artifact_archive(
-            active_path.clone(),
-            artifact_archive_path(&state_path),
-            genesis.clone(),
-        ))?;
+        let core = Arc::new(
+            runtime.block_on(ApplicationCore::open_with_artifact_archive(
+                active_path.clone(),
+                artifact_archive_path(&state_path),
+                genesis.clone(),
+            ))?,
+        );
         if let Some(marker) = marker.as_ref() {
             let summary = runtime.block_on(core.state_summary())?;
             validate_active_summary(marker, &summary, &genesis)?;
@@ -377,6 +379,14 @@ impl AbciApplication {
                 halted: AtomicBool::new(false),
             }),
         })
+    }
+
+    /// Share the application core with a colocated read-only gateway.
+    ///
+    /// The ABCI application must remain alive because its runtime owns the
+    /// storage background tasks used by the core.
+    pub fn core_handle(&self) -> Arc<ApplicationCore> {
+        self.inner.core.clone()
     }
 
     pub fn bind<A: ToSocketAddrs>(

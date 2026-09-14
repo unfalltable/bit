@@ -1,6 +1,6 @@
 # BIT D-002 区块产物规范编码
 
-状态：`IN_PROGRESS`。版本 1 的执行摘要与紧凑区块字节合同、严格解码器、域分离哈希、共享黄金向量、ABCI/状态接线及本地不可变归档已经实现。按高度下载接口、跨节点保留策略和轻客户端消费仍待 D-010/D-022 完成。
+状态：`IN_PROGRESS`。版本 1 的执行摘要与紧凑区块字节合同、严格解码器、域分离哈希、共享黄金向量、ABCI/状态接线、本地不可变归档及有界按高度下载接口已经实现。跨节点保留策略、TLS/Tor 入口和轻客户端消费仍待 D-010/D-022 完成。
 
 ## 1. 共同外层
 
@@ -73,7 +73,7 @@ SHA256("bit/compact-block/v1" || len_u64_be(cbor) || cbor)
 
 ABCI 返回一个 `bit.block.v1` 事件，包含 height、execution_hash、compact_hash 和 compact_bytes；哈希可通过产物对应高度的 ICS23 查询证明核对。共享空块向量由 Rust 与独立 Python oracle 交叉验证。四节点 CometBFT 探针还执行一笔真实 2 Spend/2 Output Groth16 Transfer，在链继续推进后按 Transfer 的精确高度核对交易、nullifier、TCT 根、两个产物哈希、供应审计、ABCI 事件及四份 JMT app hash 一致。
 
-当前 ABCI 事件只公开摘要与紧凑区块长度。完整产物已经进入本地不可变归档，摘要支持重启后的精确历史高度证明；下载服务接口、保留策略与客户端扫描属于下一阶段，不能仅凭本实现宣称恢复服务已经完成。
+当前 ABCI 事件只公开摘要与紧凑区块长度。完整产物已经进入本地不可变归档，摘要支持重启后的精确历史高度证明；`GET /v1/compact-blocks` 提供有界的本机下载接口。跨节点保留策略、TLS/Tor 入口与客户端扫描属于下一阶段，不能仅凭本实现宣称恢复服务已经完成。
 
 ## 6. 本地不可变归档
 
@@ -81,4 +81,4 @@ ABCI 返回一个 `bit.block.v1` 事件，包含 height、execution_hash、compa
 
 若进程在 JMT 已提交、归档目录尚未发布的窗口崩溃，重启会验证暂存字节、两种域分离哈希、共同块字段、公共事件和成功交易集合，再以最新 JMT 中的 `execution/block/<height>` 与 `compact/hash/<height>` ICS23 证明核对后发布。高于 durable 状态的暂存目录视为未提交 Finalize 并清理；高于状态的已发布目录、冲突字节、非规范路径、符号链接、超限或损坏文件都会拒绝打开或读取。
 
-`ApplicationCore::block_artifacts(height)` 只返回已经发布且重新验证过的完整产物；`block_artifacts_with_proofs(height)` 进一步读取该精确历史高度的 execution/compact ICS23 证明，自验后要求证明值分别等于两份归档的域分离哈希，作为下载服务的唯一读取边界。四节点探针逐节点读取真实 Transfer 高度的两个归档文件，要求字节、链上摘要和 ABCI 事件一致，并在应用重启后再次读取。归档不进入 JMT app hash，也不随当前 State Sync 快照自动补齐历史；远端归档复制、保留下限、删档治理和 HTTP 下载服务仍需单独实现。
+`ApplicationCore::block_artifacts(height)` 只返回已经发布且重新验证过的完整产物；`block_artifacts_with_proofs(height)` 进一步读取该精确历史高度的 execution/compact ICS23 证明，自验后要求证明值分别等于两份归档的域分离哈希，作为下载服务的唯一读取边界。四节点探针逐节点读取真实 Transfer 高度的两个归档文件，要求字节、链上摘要和 ABCI 事件一致，并在应用重启后再次读取。归档不进入 JMT app hash，也不随当前 State Sync 快照自动补齐历史；远端归档复制、保留下限、删档治理和公网 TLS 服务仍需单独实现。

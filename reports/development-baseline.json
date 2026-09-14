@@ -1,13 +1,13 @@
 {
   "status": "PASS",
   "scope": "BIT active baseline only; not a complete chain or product acceptance",
-  "completed_at": "2026-09-14T18:09:16.8749513+00:00",
+  "completed_at": "2026-09-14T18:33:41.7570742+00:00",
   "toolchain": "rustc 1.98.1 (48a229cea 2026-09-01)",
   "checks": [
     {
       "name": "fmt-check",
       "command": "cargo fmt --all -- --check",
-      "started_at": "2026-09-14T18:02:10.9888915+00:00",
+      "started_at": "2026-09-14T18:22:45.7037809+00:00",
       "exit_code": 0,
       "log": "reports/fmt-check.log",
       "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -15,7 +15,7 @@
     {
       "name": "cnidarium-fmt",
       "command": "rustfmt --edition 2021 --check third_party/cnidarium/src/lib.rs third_party/cnidarium/src/storage.rs third_party/cnidarium/src/tests.rs",
-      "started_at": "2026-09-14T18:02:13.8058551+00:00",
+      "started_at": "2026-09-14T18:22:48.5546477+00:00",
       "exit_code": 0,
       "log": "reports/cnidarium-fmt.log",
       "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -23,47 +23,47 @@
     {
       "name": "cnidarium-clippy",
       "command": "cargo clippy --manifest-path third_party/cnidarium/Cargo.toml --lib --no-default-features --features bit-fault-injection --locked -- -D warnings -A clippy::doc_lazy_continuation -A clippy::needless_lifetimes -A clippy::map_clone -A clippy::unnecessary_get_then_check -A clippy::question_mark",
-      "started_at": "2026-09-14T18:02:13.9185728+00:00",
+      "started_at": "2026-09-14T18:22:48.6573896+00:00",
       "exit_code": 0,
       "log": "reports/cnidarium-clippy.log",
-      "log_sha256": "c007d0fff81a08ebf4d4d5311732aa26a7be806815adda844d2cbd7948e7700a"
+      "log_sha256": "651e9269e895bfc88cfc35216135c6922e96b4484daae9e962139dd76319c228"
     },
     {
       "name": "cnidarium-unit",
       "command": "cargo test --manifest-path third_party/cnidarium/Cargo.toml --no-default-features --features bit-fault-injection --locked",
-      "started_at": "2026-09-14T18:02:14.2928798+00:00",
+      "started_at": "2026-09-14T18:22:49.0984610+00:00",
       "exit_code": 0,
       "log": "reports/cnidarium-unit.log",
-      "log_sha256": "ec24ef405ead6f2020b2b5dafde9b6b6321f4e3b2dce0b5215499e75f70a585b"
+      "log_sha256": "ba32b5c3a45f78b59a977fa05df3ed31132668fc480b60c407281c5dbd11412d"
     },
     {
       "name": "clippy",
       "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
-      "started_at": "2026-09-14T18:02:30.9573980+00:00",
+      "started_at": "2026-09-14T18:23:05.2260597+00:00",
       "exit_code": 0,
       "log": "reports/clippy.log",
-      "log_sha256": "07b169a2a1324dff3ce1c1905b06ba0dfe6d86ee1d251d174d40525b9372fd33"
+      "log_sha256": "901f9feecc33ae792049a96786d983105e4a43529cd31a4e9a3efa09edcc8c39"
     },
     {
       "name": "rust-unit",
       "command": "cargo test --workspace --locked",
-      "started_at": "2026-09-14T18:02:33.6499472+00:00",
+      "started_at": "2026-09-14T18:23:50.2755940+00:00",
       "exit_code": 0,
       "log": "reports/rust-unit.log",
-      "log_sha256": "73366e37a9d55320fda643bd8c453ca8cd726a2c032e0a811ac287a5e7d24351"
+      "log_sha256": "831ae77c7a0dd77f10d0ab9976cc830c2d38f92d52152455e182469720aec0e9"
     },
     {
       "name": "python-oracle",
       "command": "py -B -m unittest discover -s reference -p test_*.py -v",
-      "started_at": "2026-09-14T18:08:20.9634268+00:00",
+      "started_at": "2026-09-14T18:32:34.3509541+00:00",
       "exit_code": 0,
       "log": "reports/python-oracle.log",
-      "log_sha256": "f71f41cbef0c70d9d8da980fab53465a3a83406e2258fd64e5b2417c5ad315a6"
+      "log_sha256": "9fcb85391674da4790e0a968c1787c20088db197ff16efeb05d4dc23ad0dd028"
     },
     {
       "name": "comet-evidence-build",
       "command": "D:\\others\\BIT\\feasibility\\.tools\\go\\bin\\go.exe -C D:\\others\\BIT\\feasibility\\evidence-injector build -trimpath -o D:\\others\\BIT\\feasibility\\.tools\\bin\\bit-evidence-injector.exe .",
-      "started_at": "2026-09-14T18:08:21.1407717+00:00",
+      "started_at": "2026-09-14T18:32:34.5972589+00:00",
       "exit_code": 0,
       "log": "reports/comet-evidence-build.log",
       "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -71,22 +71,22 @@
     {
       "name": "comet-app-build",
       "command": "cargo build -p bit-app --example comet_network_probe --locked",
-      "started_at": "2026-09-14T18:08:22.8870860+00:00",
+      "started_at": "2026-09-14T18:32:36.4060907+00:00",
       "exit_code": 0,
       "log": "reports/comet-app-build.log",
-      "log_sha256": "ce6d14ffb51c4f1569ff3a101b877664506249e6b257d00c8f66a308010b6113"
+      "log_sha256": "e792b99cf0246da6405914b099c8cde4b6d3020af50cb027f3f792b3d0203366"
     },
     {
       "name": "comet-app-network",
       "command": "py -B feasibility/scripts/run_bit_app_network.py",
-      "started_at": "2026-09-14T18:08:32.0480870+00:00",
+      "started_at": "2026-09-14T18:32:54.7423784+00:00",
       "exit_code": 0,
       "log": "reports/comet-app-network.log",
       "log_sha256": "496235fbb71c7347267bb94b048226e1a7fafa6b8e7da87deb974e9872145cc6"
     }
   ],
   "counts": {
-    "rust_tests": 104,
+    "rust_tests": 105,
     "cnidarium_tests": 27,
     "python_oracle_tests": 6
   },
@@ -97,17 +97,17 @@
   "artifacts": [
     {
       "path": "feasibility/reports/bit-app-network-result.json",
-      "sha256": "cb855593c2b5cf8ec88e8f350c969ed00fe3ee048163c5a8245949cbab416352"
+      "sha256": "e84c046446dbcbed19dc5975ab77cd39b042f78c8cd6263eed3647fde1d90f9e"
     }
   ],
   "inputs": [
     {
       "path": "Cargo.toml",
-      "sha256": "d35db46e971d1c5062653142aea8e7aa153f2e5165f8f93238dff02fa8d56353"
+      "sha256": "66a07c47e875066321f333ff22a7000080b52e04795fa53a2b4b2865e2f25aff"
     },
     {
       "path": "Cargo.lock",
-      "sha256": "3cd62fcbf001493d155d8b825c07e150cb174a1703d2c5eb5c850dd862deb640"
+      "sha256": "ff4ffa8894c5388e2aad006435711a9577d4b0714e31e1fc19c762eb36f1e9fc"
     },
     {
       "path": "tests/vectors/emission-vectors.json",
@@ -203,7 +203,7 @@
     },
     {
       "path": "crates/bit-app/src/abci.rs",
-      "sha256": "382bf91d193a96a6b651d01e998df69c2fb7195d4c2f613cb53d11e4ac721bc2"
+      "sha256": "22d623e633877427ae15a42bca2d24dd8a33913f8daff5475a534046dc9c37e8"
     },
     {
       "path": "crates/bit-app/src/artifact_archive.rs",
@@ -220,6 +220,18 @@
     {
       "path": "crates/bit-app/src/state_sync.rs",
       "sha256": "69cd52368d78c7f99a745fdc87ac3d3269f19c96b9d3ac4c1377d5841262f999"
+    },
+    {
+      "path": "crates/bit-gateway/Cargo.toml",
+      "sha256": "c4c4ca8353398110a2b33f89d0d6414109d4fb64cbc7b3eb990198b6a1335872"
+    },
+    {
+      "path": "crates/bit-gateway/src/lib.rs",
+      "sha256": "7f1fb6237cad90b60860b251ba30364bb45a10829f060f674af7d5dc002ac1c9"
+    },
+    {
+      "path": "contracts/openapi.yaml",
+      "sha256": "9b77430355b538ab2744664a49eaf5d710238d576dd0311d532a1e21cb505e99"
     },
     {
       "path": "crates/bit-app/examples/comet_network_probe.rs",
@@ -307,7 +319,7 @@
     },
     {
       "path": "scripts/run-baseline-checks.ps1",
-      "sha256": "176d48908a9af90e6f96089e820014ae76c93ac0da9aacb3d1e023d5422a2dd8"
+      "sha256": "7f3d6a2d22ef0d897a77da179647ccd9d7f75ea5ede1f90d4bc2202a0bd1ccab"
     }
   ]
 }

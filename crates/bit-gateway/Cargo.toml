@@ -1,0 +1,27 @@
+[package]
+name = "bit-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+axum = "0.7.9"
+base64 = "0.22.1"
+bit-app = { path = "../bit-app" }
+bit-state = { path = "../bit-state" }
+bit-types = { path = "../bit-types" }
+hex = "0.4.3"
+prost = "0.13.5"
+serde = { version = "1.0.203", features = ["derive"] }
+thiserror = "1.0.63"
+tokio = { version = "1.38.0", features = ["net", "rt-multi-thread"] }
+
+[dev-dependencies]
+bit-emission = { path = "../bit-emission" }
+bit-staking = { path = "../bit-staking" }
+serde_json = "1.0.117"
+tempfile = "3.10.1"
+tower = { version = "0.5.3", features = ["util"] }
+tokio = { version = "1.38.0", features = ["macros", "net", "rt-multi-thread"] }

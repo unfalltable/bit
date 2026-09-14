@@ -1,10 +1,22 @@
-cargo.exe : warning: hiding a lifetime that's elided elsewhere is confusing
+cargo.exe :     Checking tendermint v0.40.4
 At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
 +     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
 +     ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (warning: hiding...re is confusing:String) [], RemoteException
+    + CategoryInfo          : NotSpecified: (    Checking tendermint v0.40.4:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
 
+    Checking ibc-types-timestamp v0.15.1
+    Checking tendermint-light-client-verifier v0.40.4
+    Checking ibc-types-core-commitment v0.15.1
+    Checking ibc-types-core-client v0.15.1
+    Checking ibc-types-core-connection v0.15.1
+    Checking ibc-types-core-channel v0.15.1
+    Checking ibc-types-path v0.15.1
+    Checking ibc-types-lightclients-tendermint v0.15.1
+    Checking ibc-types v0.15.1
+    Checking penumbra-sdk-proto v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\proto)
+    Checking penumbra-sdk-tct v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\crypto\tct)
+warning: hiding a lifetime that's elided elsewhere is confusing
    --> feasibility\upstream\penumbra\crates\crypto\tct\src\tree.rs:753:22
     |
 753 |     pub fn structure(&self) -> structure::Node {
@@ -49,6 +61,14 @@ help: use `'_` for type paths
 
 warning: `penumbra-sdk-tct` (lib) generated 3 warnings (run `cargo clippy --fix --lib -p penumbra-sdk-tct -- -D warning
 s` to apply 3 suggestions)
+    Checking penumbra-sdk-num v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\core\num)
+    Checking penumbra-sdk-asset v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\core\asset)
+    Checking axum-core v0.4.5
+    Checking penumbra-sdk-keys v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\core\keys)
+    Checking tower v0.5.3
+    Checking penumbra-sdk-txhash v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\core\txhash)
+    Checking axum v0.7.9
+    Checking penumbra-sdk-sct v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\sct)
 warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/output_pk.bin enable 'download-provi
 ng-keys' feature to obtain key files
 warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/spend_pk.bin enable 'download-provin
@@ -63,6 +83,9 @@ warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/g
 ad-proving-keys' feature to obtain key files
 warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/nullifier_derivation_pk.bin enable '
 download-proving-keys' feature to obtain key files
+    Checking bit-types v0.1.0 (D:\others\BIT\crates\bit-types)
+    Checking tonic v0.12.3
+    Checking penumbra-sdk-ibc v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\ibc)
 warning: function `pick_connection_version` is never used
  --> feasibility\upstream\penumbra\crates\core\component\ibc\src\version.rs:4:8
   |
@@ -72,6 +95,8 @@ warning: function `pick_connection_version` is never used
   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: `penumbra-sdk-ibc` (lib) generated 1 warning
+    Checking penumbra-sdk-shielded-pool v2.1.1 (D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\shiel
+ded-pool)
 warning: unused import: `channel::PortId`
  --> feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\ics20_withdrawal.rs:1:43
   |
@@ -102,5 +127,12 @@ warning: function `previous` is never used
 
 warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo clippy --fix --lib -p penumbra-sdk-shielde
 d-pool -- -D warnings` to apply 1 suggestion)
+    Checking bit-shielded v0.1.0 (D:\others\BIT\crates\bit-shielded)
+    Checking bit-emission v0.1.0 (D:\others\BIT\crates\bit-emission)
+    Checking cnidarium v0.83.0 (D:\others\BIT\third_party\cnidarium)
+    Checking bit-transaction v0.1.0 (D:\others\BIT\crates\bit-transaction)
+    Checking bit-staking v0.1.0 (D:\others\BIT\crates\bit-staking)
+    Checking bit-state v0.1.0 (D:\others\BIT\crates\bit-state)
     Checking bit-app v0.1.0 (D:\others\BIT\crates\bit-app)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.59s
+    Checking bit-gateway v0.1.0 (D:\others\BIT\crates\bit-gateway)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 44.94s
