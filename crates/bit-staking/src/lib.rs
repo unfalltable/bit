@@ -1267,6 +1267,33 @@ impl ExitTicket {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ExitQueueEntry {
+    pub deadline: u64,
+    pub cohort_id: Hash32,
+}
+
+impl ExitQueueEntry {
+    pub fn encode_persistent(&self) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.u8(1);
+        writer.u64(self.deadline);
+        writer.hash32(&self.cohort_id);
+        writer.finish()
+    }
+
+    pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(bytes);
+        reader.version(1)?;
+        let entry = Self {
+            deadline: reader.u64()?,
+            cohort_id: reader.hash32()?,
+        };
+        reader.finish()?;
+        Ok(entry)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UnbondOutcome {
     pub ticket_id: Hash32,
@@ -1303,6 +1330,9 @@ pub struct StakingBook {
     candidate_lookup: BTreeMap<Hash32, CandidateIndexEntry>,
     exit_cohorts: BTreeMap<Hash32, ExitCohort>,
     exit_tickets: BTreeMap<Hash32, ExitTicket>,
+    exit_exposure_queue: BTreeSet<ExitQueueEntry>,
+    exit_maturity_height_queue: BTreeSet<ExitQueueEntry>,
+    exit_maturity_time_queue: BTreeSet<ExitQueueEntry>,
 }
 
 impl StakingBook {
@@ -1332,6 +1362,9 @@ impl StakingBook {
             candidate_lookup: BTreeMap::new(),
             exit_cohorts: BTreeMap::new(),
             exit_tickets: BTreeMap::new(),
+            exit_exposure_queue: BTreeSet::new(),
+            exit_maturity_height_queue: BTreeSet::new(),
+            exit_maturity_time_queue: BTreeSet::new(),
         })
     }
 
@@ -1354,6 +1387,9 @@ impl StakingBook {
         candidate_index: impl IntoIterator<Item = CandidateIndexEntry>,
         exit_cohorts: impl IntoIterator<Item = ExitCohort>,
         exit_tickets: impl IntoIterator<Item = ExitTicket>,
+        exit_exposure_queue: impl IntoIterator<Item = ExitQueueEntry>,
+        exit_maturity_height_queue: impl IntoIterator<Item = ExitQueueEntry>,
+        exit_maturity_time_queue: impl IntoIterator<Item = ExitQueueEntry>,
     ) -> Result<Self> {
         parameters.validate()?;
         let mut book = Self {
@@ -1367,6 +1403,9 @@ impl StakingBook {
             candidate_lookup: BTreeMap::new(),
             exit_cohorts: BTreeMap::new(),
             exit_tickets: BTreeMap::new(),
+            exit_exposure_queue: BTreeSet::new(),
+            exit_maturity_height_queue: BTreeSet::new(),
+            exit_maturity_time_queue: BTreeSet::new(),
         };
         for validator in validators {
             let id = validator.validator_id;
@@ -1425,6 +1464,27 @@ impl StakingBook {
                 return Err(Error::InvalidEncoding("duplicate exit ticket record"));
             }
         }
+        for entry in exit_exposure_queue {
+            if !book.exit_exposure_queue.insert(entry) {
+                return Err(Error::InvalidEncoding(
+                    "duplicate exit exposure queue record",
+                ));
+            }
+        }
+        for entry in exit_maturity_height_queue {
+            if !book.exit_maturity_height_queue.insert(entry) {
+                return Err(Error::InvalidEncoding(
+                    "duplicate exit maturity-height queue record",
+                ));
+            }
+        }
+        for entry in exit_maturity_time_queue {
+            if !book.exit_maturity_time_queue.insert(entry) {
+                return Err(Error::InvalidEncoding(
+                    "duplicate exit maturity-time queue record",
+                ));
+            }
+        }
         book.validate()?;
         Ok(book)
     }
@@ -1473,6 +1533,30 @@ impl StakingBook {
 
     pub fn exit_ticket(&self, id: &Hash32) -> Option<&ExitTicket> {
         self.exit_tickets.get(id)
+    }
+
+    pub fn exit_exposure_queue(&self) -> impl Iterator<Item = ExitQueueEntry> + '_ {
+        self.exit_exposure_queue.iter().copied()
+    }
+
+    pub fn exit_maturity_height_queue(&self) -> impl Iterator<Item = ExitQueueEntry> + '_ {
+        self.exit_maturity_height_queue.iter().copied()
+    }
+
+    pub fn exit_maturity_time_queue(&self) -> impl Iterator<Item = ExitQueueEntry> + '_ {
+        self.exit_maturity_time_queue.iter().copied()
+    }
+
+    pub fn exit_exposure_queue_contains(&self, entry: &ExitQueueEntry) -> bool {
+        self.exit_exposure_queue.contains(entry)
+    }
+
+    pub fn exit_maturity_height_queue_contains(&self, entry: &ExitQueueEntry) -> bool {
+        self.exit_maturity_height_queue.contains(entry)
+    }
+
+    pub fn exit_maturity_time_queue_contains(&self, entry: &ExitQueueEntry) -> bool {
+        self.exit_maturity_time_queue.contains(entry)
     }
 
     pub fn validator(&self, id: &Hash32) -> Option<&Validator> {
@@ -2543,6 +2627,10 @@ impl StakingBook {
                 });
             cohort.assets = checked_add(cohort.assets, exit_assets)?;
             cohort.total_units = checked_add(cohort.total_units, units)?;
+            next.exit_exposure_queue.insert(ExitQueueEntry {
+                deadline: exposure_end_height,
+                cohort_id: derived_cohort_id,
+            });
             next.exit_tickets.insert(
                 derived_ticket_id,
                 ExitTicket {
@@ -2573,25 +2661,112 @@ impl StakingBook {
     ) -> Result<ExitAdvanceOutcome> {
         self.transact(|next| {
             let mut outcome = ExitAdvanceOutcome::default();
-            for cohort in next.exit_cohorts.values_mut() {
-                if cohort.status == ExitCohortStatus::PendingExposure
-                    && current_height >= cohort.exposure_end_height
-                {
-                    let maturity_time = current_time_seconds
-                        .checked_add(next.parameters.unbonding_seconds)
-                        .ok_or(Error::Overflow)?;
-                    cohort.exposure_end_time_seconds = Some(current_time_seconds);
-                    cohort.maturity_time_seconds = Some(maturity_time);
-                    cohort.status = ExitCohortStatus::Unbonding;
-                    outcome.exposure_recorded.insert(cohort.cohort_id);
+            let exposure_bound = ExitQueueEntry {
+                deadline: current_height,
+                cohort_id: [u8::MAX; 32],
+            };
+            let due_exposure: Vec<_> = next
+                .exit_exposure_queue
+                .range(..=exposure_bound)
+                .copied()
+                .collect();
+            for entry in due_exposure {
+                if !next.exit_exposure_queue.remove(&entry) {
+                    return Err(Error::Invariant("exit exposure queue entry is missing"));
                 }
-                if cohort.status == ExitCohortStatus::Unbonding
-                    && current_height > cohort.maturity_height
-                    && current_time_seconds
-                        > cohort
-                            .maturity_time_seconds
-                            .ok_or(Error::Invariant("exit maturity time is missing"))?
+                let cohort = next
+                    .exit_cohorts
+                    .get_mut(&entry.cohort_id)
+                    .ok_or(Error::ExitCohortNotFound)?;
+                if cohort.status != ExitCohortStatus::PendingExposure
+                    || cohort.exposure_end_height != entry.deadline
                 {
+                    return Err(Error::Invariant("exit exposure queue is inconsistent"));
+                }
+                let maturity_time = current_time_seconds
+                    .checked_add(next.parameters.unbonding_seconds)
+                    .ok_or(Error::Overflow)?;
+                cohort.exposure_end_time_seconds = Some(current_time_seconds);
+                cohort.maturity_time_seconds = Some(maturity_time);
+                cohort.status = ExitCohortStatus::Unbonding;
+                next.exit_maturity_height_queue.insert(ExitQueueEntry {
+                    deadline: cohort.maturity_height,
+                    cohort_id: cohort.cohort_id,
+                });
+                next.exit_maturity_time_queue.insert(ExitQueueEntry {
+                    deadline: maturity_time,
+                    cohort_id: cohort.cohort_id,
+                });
+                outcome.exposure_recorded.insert(cohort.cohort_id);
+            }
+
+            let height_bound = ExitQueueEntry {
+                deadline: current_height,
+                cohort_id: [0; 32],
+            };
+            let reached_height: Vec<_> = next
+                .exit_maturity_height_queue
+                .range(..height_bound)
+                .copied()
+                .collect();
+            for entry in reached_height {
+                if !next.exit_maturity_height_queue.remove(&entry) {
+                    return Err(Error::Invariant(
+                        "exit maturity-height queue entry is missing",
+                    ));
+                }
+                let cohort = next
+                    .exit_cohorts
+                    .get_mut(&entry.cohort_id)
+                    .ok_or(Error::ExitCohortNotFound)?;
+                if cohort.status != ExitCohortStatus::Unbonding
+                    || cohort.maturity_height != entry.deadline
+                {
+                    return Err(Error::Invariant(
+                        "exit maturity-height queue is inconsistent",
+                    ));
+                }
+                let time_entry = ExitQueueEntry {
+                    deadline: cohort
+                        .maturity_time_seconds
+                        .ok_or(Error::Invariant("exit maturity time is missing"))?,
+                    cohort_id: cohort.cohort_id,
+                };
+                if !next.exit_maturity_time_queue.contains(&time_entry) {
+                    cohort.status = ExitCohortStatus::Mature;
+                    outcome.matured.insert(cohort.cohort_id);
+                }
+            }
+
+            let time_bound = ExitQueueEntry {
+                deadline: current_time_seconds,
+                cohort_id: [0; 32],
+            };
+            let reached_time: Vec<_> = next
+                .exit_maturity_time_queue
+                .range(..time_bound)
+                .copied()
+                .collect();
+            for entry in reached_time {
+                if !next.exit_maturity_time_queue.remove(&entry) {
+                    return Err(Error::Invariant(
+                        "exit maturity-time queue entry is missing",
+                    ));
+                }
+                let cohort = next
+                    .exit_cohorts
+                    .get_mut(&entry.cohort_id)
+                    .ok_or(Error::ExitCohortNotFound)?;
+                if cohort.status != ExitCohortStatus::Unbonding
+                    || cohort.maturity_time_seconds != Some(entry.deadline)
+                {
+                    return Err(Error::Invariant("exit maturity-time queue is inconsistent"));
+                }
+                let height_entry = ExitQueueEntry {
+                    deadline: cohort.maturity_height,
+                    cohort_id: cohort.cohort_id,
+                };
+                if !next.exit_maturity_height_queue.contains(&height_entry) {
                     cohort.status = ExitCohortStatus::Mature;
                     outcome.matured.insert(cohort.cohort_id);
                 }
@@ -3083,6 +3258,74 @@ impl StakingBook {
             if (cohort.assets == Amount::ZERO) != (cohort.total_units == Amount::ZERO) {
                 return Err(Error::Invariant(
                     "exit cohort assets and units are inconsistent",
+                ));
+            }
+            let exposure_entry = ExitQueueEntry {
+                deadline: cohort.exposure_end_height,
+                cohort_id: *id,
+            };
+            let maturity_height_entry = ExitQueueEntry {
+                deadline: cohort.maturity_height,
+                cohort_id: *id,
+            };
+            let in_exposure_queue = self.exit_exposure_queue.contains(&exposure_entry);
+            let in_height_queue = self
+                .exit_maturity_height_queue
+                .contains(&maturity_height_entry);
+            let in_time_queue = cohort.maturity_time_seconds.is_some_and(|deadline| {
+                self.exit_maturity_time_queue.contains(&ExitQueueEntry {
+                    deadline,
+                    cohort_id: *id,
+                })
+            });
+            match cohort.status {
+                ExitCohortStatus::PendingExposure
+                    if in_exposure_queue && !in_height_queue && !in_time_queue => {}
+                ExitCohortStatus::Unbonding
+                    if !in_exposure_queue && (in_height_queue || in_time_queue) => {}
+                ExitCohortStatus::Mature
+                    if !in_exposure_queue && !in_height_queue && !in_time_queue => {}
+                _ => return Err(Error::Invariant("exit cohort queue state is inconsistent")),
+            }
+        }
+        for entry in &self.exit_exposure_queue {
+            let cohort = self
+                .exit_cohorts
+                .get(&entry.cohort_id)
+                .ok_or(Error::Invariant("exit exposure queue cohort is missing"))?;
+            if cohort.status != ExitCohortStatus::PendingExposure
+                || cohort.exposure_end_height != entry.deadline
+            {
+                return Err(Error::Invariant("exit exposure queue has a stale entry"));
+            }
+        }
+        for entry in &self.exit_maturity_height_queue {
+            let cohort = self
+                .exit_cohorts
+                .get(&entry.cohort_id)
+                .ok_or(Error::Invariant(
+                    "exit maturity-height queue cohort is missing",
+                ))?;
+            if cohort.status != ExitCohortStatus::Unbonding
+                || cohort.maturity_height != entry.deadline
+            {
+                return Err(Error::Invariant(
+                    "exit maturity-height queue has a stale entry",
+                ));
+            }
+        }
+        for entry in &self.exit_maturity_time_queue {
+            let cohort = self
+                .exit_cohorts
+                .get(&entry.cohort_id)
+                .ok_or(Error::Invariant(
+                    "exit maturity-time queue cohort is missing",
+                ))?;
+            if cohort.status != ExitCohortStatus::Unbonding
+                || cohort.maturity_time_seconds != Some(entry.deadline)
+            {
+                return Err(Error::Invariant(
+                    "exit maturity-time queue has a stale entry",
                 ));
             }
         }
@@ -3989,6 +4232,15 @@ mod tests {
             outcome.exit_assets
         );
         assert_eq!(book.totals().unwrap().exit_assets, outcome.exit_assets);
+        assert_eq!(
+            book.exit_exposure_queue().collect::<Vec<_>>(),
+            vec![ExitQueueEntry {
+                deadline: 100,
+                cohort_id: outcome.cohort_id,
+            }]
+        );
+        assert!(book.exit_maturity_height_queue().next().is_none());
+        assert!(book.exit_maturity_time_queue().next().is_none());
 
         assert!(book
             .advance_exit_cohorts(99, 999)
@@ -3999,6 +4251,21 @@ mod tests {
         assert!(advanced.exposure_recorded.contains(&outcome.cohort_id));
         let maturity_height = 100 + book.parameters().unbonding_blocks;
         let maturity_time = 1_000 + book.parameters().unbonding_seconds;
+        assert!(book.exit_exposure_queue().next().is_none());
+        assert_eq!(
+            book.exit_maturity_height_queue().collect::<Vec<_>>(),
+            vec![ExitQueueEntry {
+                deadline: maturity_height,
+                cohort_id: outcome.cohort_id,
+            }]
+        );
+        assert_eq!(
+            book.exit_maturity_time_queue().collect::<Vec<_>>(),
+            vec![ExitQueueEntry {
+                deadline: maturity_time,
+                cohort_id: outcome.cohort_id,
+            }]
+        );
         assert_eq!(
             book.claim_exit(&outcome.ticket_id, 0, maturity_height, maturity_time + 1),
             Err(Error::ExitNotMature)
@@ -4008,11 +4275,15 @@ mod tests {
             .unwrap()
             .matured
             .is_empty());
+        assert!(book.exit_maturity_height_queue().next().is_none());
+        assert_eq!(book.exit_maturity_time_queue().count(), 1);
         assert!(book
             .advance_exit_cohorts(maturity_height + 1, maturity_time + 1)
             .unwrap()
             .matured
             .contains(&outcome.cohort_id));
+        assert!(book.exit_maturity_height_queue().next().is_none());
+        assert!(book.exit_maturity_time_queue().next().is_none());
         assert_eq!(
             book.claim_exit(
                 &outcome.ticket_id,
@@ -4064,7 +4335,28 @@ mod tests {
             true,
         );
         book.activate_pending(&self_bond, 1).unwrap();
+        let delegator = open(
+            &mut book,
+            validator_id,
+            key(5),
+            10 * ATOMIC_PER_BIT,
+            0,
+            false,
+        );
+        book.activate_pending(&delegator, 1).unwrap();
         book.apply_validator_set().unwrap();
+        book.unbond(
+            &delegator,
+            1,
+            amount(ATOMIC_PER_BIT),
+            amount(ATOMIC_PER_BIT),
+            Amount::ZERO,
+            Amount::ZERO,
+            FeeSource::Shielded,
+            1,
+            100,
+        )
+        .unwrap();
 
         let parameters =
             StakingParameters::decode_persistent(&book.parameters().encode_persistent()).unwrap();
@@ -4094,6 +4386,28 @@ mod tests {
                 CandidateIndexEntry::decode_persistent(&value.encode_persistent()).unwrap()
             })
             .collect();
+        let exit_cohorts: Vec<_> = book
+            .exit_cohorts()
+            .map(|value| {
+                ExitCohort::decode_persistent(&value.encode_persistent().unwrap()).unwrap()
+            })
+            .collect();
+        let exit_tickets: Vec<_> = book
+            .exit_tickets()
+            .map(|value| ExitTicket::decode_persistent(&value.encode_persistent()).unwrap())
+            .collect();
+        let exposure_queue: Vec<_> = book
+            .exit_exposure_queue()
+            .map(|value| ExitQueueEntry::decode_persistent(&value.encode_persistent()).unwrap())
+            .collect();
+        let maturity_height_queue: Vec<_> = book
+            .exit_maturity_height_queue()
+            .map(|value| ExitQueueEntry::decode_persistent(&value.encode_persistent()).unwrap())
+            .collect();
+        let maturity_time_queue: Vec<_> = book
+            .exit_maturity_time_queue()
+            .map(|value| ExitQueueEntry::decode_persistent(&value.encode_persistent()).unwrap())
+            .collect();
         let rebuilt = StakingBook::from_records(
             book.chain_context(),
             parameters,
@@ -4102,11 +4416,21 @@ mod tests {
             positions,
             capacity,
             candidate_index,
-            [],
-            [],
+            exit_cohorts,
+            exit_tickets,
+            exposure_queue,
+            maturity_height_queue,
+            maturity_time_queue,
         )
         .unwrap();
         assert_eq!(rebuilt, book);
+
+        let mut missing_queue_entry = book.clone();
+        missing_queue_entry.exit_exposure_queue.clear();
+        assert_eq!(
+            missing_queue_entry.validate(),
+            Err(Error::Invariant("exit cohort queue state is inconsistent"))
+        );
 
         let mut trailing = book.pool(&validator_id).unwrap().encode_persistent();
         trailing.push(0);
@@ -4124,6 +4448,16 @@ mod tests {
         assert_eq!(
             StakePosition::decode_persistent(&bad_bool),
             Err(Error::InvalidEncoding("invalid boolean"))
+        );
+        let mut trailing_queue = book
+            .exit_exposure_queue()
+            .next()
+            .unwrap()
+            .encode_persistent();
+        trailing_queue.push(0);
+        assert_eq!(
+            ExitQueueEntry::decode_persistent(&trailing_queue),
+            Err(Error::InvalidEncoding("trailing record bytes"))
         );
     }
 

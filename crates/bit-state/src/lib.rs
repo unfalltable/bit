@@ -10,9 +10,10 @@ use bit_emission::{
 };
 use bit_staking::{
     ActivationCapacityRecord, ActivationOutcome, CandidateIndexEntry, CommitVote,
-    ConsensusPowerUpdate, EffectiveValidatorSet, ExitAdvanceOutcome, ExitCohort, ExitTicket,
-    PositionStatus, StakePool, StakePosition, StakingBook, StakingParameters, StakingTotals,
-    Validator, ValidatorPower, ValidatorReward, ValidatorSetTransition, ValidatorUpdate,
+    ConsensusPowerUpdate, EffectiveValidatorSet, ExitAdvanceOutcome, ExitCohort, ExitQueueEntry,
+    ExitTicket, PositionStatus, StakePool, StakePosition, StakingBook, StakingParameters,
+    StakingTotals, Validator, ValidatorPower, ValidatorReward, ValidatorSetTransition,
+    ValidatorUpdate,
 };
 use bit_transaction::{
     verify_staking_stateless, verify_transfer_stateless, ActionAuthorizationView,
@@ -36,7 +37,7 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 13;
+const STORAGE_SCHEMA_VERSION: u32 = 14;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -80,6 +81,9 @@ const STAKING_CAPACITY_PREFIX: &str = "staking/capacity/";
 const STAKING_CANDIDATE_PREFIX: &str = "staking/candidates/";
 const STAKING_EXIT_COHORT_PREFIX: &str = "staking/exits/cohorts/";
 const STAKING_EXIT_TICKET_PREFIX: &str = "staking/exits/tickets/";
+const STAKING_EXIT_EXPOSURE_QUEUE_PREFIX: &str = "staking/exits/exposure_queue/";
+const STAKING_EXIT_MATURITY_HEIGHT_QUEUE_PREFIX: &str = "staking/exits/maturity_height_queue/";
+const STAKING_EXIT_MATURITY_TIME_QUEUE_PREFIX: &str = "staking/exits/maturity_time_queue/";
 const STAKING_EFFECTIVE_SCHEDULE: &str = "staking/effective_schedule";
 
 const SUBSTORES: &[&str] = &[
@@ -2192,6 +2196,24 @@ fn write_staking_genesis(delta: &mut StateDelta<Snapshot>, staking: &StakingBook
             ticket.encode_persistent(),
         );
     }
+    for entry in staking.exit_exposure_queue() {
+        delta.put_raw(
+            staking_exit_exposure_queue_key(entry.deadline, &entry.cohort_id),
+            entry.encode_persistent(),
+        );
+    }
+    for entry in staking.exit_maturity_height_queue() {
+        delta.put_raw(
+            staking_exit_maturity_height_queue_key(entry.deadline, &entry.cohort_id),
+            entry.encode_persistent(),
+        );
+    }
+    for entry in staking.exit_maturity_time_queue() {
+        delta.put_raw(
+            staking_exit_maturity_time_queue_key(entry.deadline, &entry.cohort_id),
+            entry.encode_persistent(),
+        );
+    }
     Ok(())
 }
 
@@ -2239,6 +2261,38 @@ fn write_staking_updates(
             .exit_cohort(id)
             .ok_or_else(|| Error::CorruptState("touched exit cohort is missing".to_owned()))?;
         delta.put_raw(staking_exit_cohort_key(id), cohort.encode_persistent()?);
+        let exposure_entry = ExitQueueEntry {
+            deadline: cohort.exposure_end_height,
+            cohort_id: *id,
+        };
+        let exposure_key =
+            staking_exit_exposure_queue_key(exposure_entry.deadline, &exposure_entry.cohort_id);
+        delta.delete(exposure_key.clone());
+        if staking.exit_exposure_queue_contains(&exposure_entry) {
+            delta.put_raw(exposure_key, exposure_entry.encode_persistent());
+        }
+        let height_entry = ExitQueueEntry {
+            deadline: cohort.maturity_height,
+            cohort_id: *id,
+        };
+        let height_key =
+            staking_exit_maturity_height_queue_key(height_entry.deadline, &height_entry.cohort_id);
+        delta.delete(height_key.clone());
+        if staking.exit_maturity_height_queue_contains(&height_entry) {
+            delta.put_raw(height_key, height_entry.encode_persistent());
+        }
+        if let Some(deadline) = cohort.maturity_time_seconds {
+            let time_entry = ExitQueueEntry {
+                deadline,
+                cohort_id: *id,
+            };
+            let time_key =
+                staking_exit_maturity_time_queue_key(time_entry.deadline, &time_entry.cohort_id);
+            delta.delete(time_key.clone());
+            if staking.exit_maturity_time_queue_contains(&time_entry) {
+                delta.put_raw(time_key, time_entry.encode_persistent());
+            }
+        }
     }
     for id in &touches.exit_tickets {
         let ticket = staking
@@ -2329,6 +2383,42 @@ async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result
         require_hash_key(&key, STAKING_EXIT_TICKET_PREFIX, &ticket.ticket_id)?;
         exit_tickets.push(ticket);
     }
+    let mut exit_exposure_queue = Vec::new();
+    let mut exposure_stream = snapshot.prefix_raw(STAKING_EXIT_EXPOSURE_QUEUE_PREFIX);
+    while let Some(entry) = exposure_stream.next().await {
+        let (key, value) = entry?;
+        let record = ExitQueueEntry::decode_persistent(&value)?;
+        if key != staking_exit_exposure_queue_key(record.deadline, &record.cohort_id) {
+            return Err(Error::CorruptState(format!(
+                "exit exposure queue key does not match encoded entry: {key}"
+            )));
+        }
+        exit_exposure_queue.push(record);
+    }
+    let mut exit_maturity_height_queue = Vec::new();
+    let mut height_stream = snapshot.prefix_raw(STAKING_EXIT_MATURITY_HEIGHT_QUEUE_PREFIX);
+    while let Some(entry) = height_stream.next().await {
+        let (key, value) = entry?;
+        let record = ExitQueueEntry::decode_persistent(&value)?;
+        if key != staking_exit_maturity_height_queue_key(record.deadline, &record.cohort_id) {
+            return Err(Error::CorruptState(format!(
+                "exit maturity-height queue key does not match encoded entry: {key}"
+            )));
+        }
+        exit_maturity_height_queue.push(record);
+    }
+    let mut exit_maturity_time_queue = Vec::new();
+    let mut time_stream = snapshot.prefix_raw(STAKING_EXIT_MATURITY_TIME_QUEUE_PREFIX);
+    while let Some(entry) = time_stream.next().await {
+        let (key, value) = entry?;
+        let record = ExitQueueEntry::decode_persistent(&value)?;
+        if key != staking_exit_maturity_time_queue_key(record.deadline, &record.cohort_id) {
+            return Err(Error::CorruptState(format!(
+                "exit maturity-time queue key does not match encoded entry: {key}"
+            )));
+        }
+        exit_maturity_time_queue.push(record);
+    }
     Ok(StakingBook::from_records(
         chain_context,
         parameters,
@@ -2339,6 +2429,9 @@ async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result
         candidate_index,
         exit_cohorts,
         exit_tickets,
+        exit_exposure_queue,
+        exit_maturity_height_queue,
+        exit_maturity_time_queue,
     )?)
 }
 
@@ -2402,6 +2495,22 @@ pub fn staking_exit_cohort_key(id: &Hash32) -> String {
 
 pub fn staking_exit_ticket_key(id: &Hash32) -> String {
     hash_key("staking/exits/tickets", id)
+}
+
+fn exit_queue_key(prefix: &str, deadline: u64, id: &Hash32) -> String {
+    format!("{prefix}{deadline:016x}/{}", hex::encode(id))
+}
+
+pub fn staking_exit_exposure_queue_key(deadline: u64, id: &Hash32) -> String {
+    exit_queue_key(STAKING_EXIT_EXPOSURE_QUEUE_PREFIX, deadline, id)
+}
+
+pub fn staking_exit_maturity_height_queue_key(deadline: u64, id: &Hash32) -> String {
+    exit_queue_key(STAKING_EXIT_MATURITY_HEIGHT_QUEUE_PREFIX, deadline, id)
+}
+
+pub fn staking_exit_maturity_time_queue_key(deadline: u64, id: &Hash32) -> String {
+    exit_queue_key(STAKING_EXIT_MATURITY_TIME_QUEUE_PREFIX, deadline, id)
 }
 
 async fn read_fee_policy(snapshot: &Snapshot) -> Result<FeePolicy> {
@@ -2988,6 +3097,9 @@ mod tests {
                     StakingParameters::reference_testnet(),
                     [validator],
                     [pool],
+                    [],
+                    [],
+                    [],
                     [],
                     [],
                     [],
@@ -3938,6 +4050,7 @@ mod tests {
         for key in [
             staking_exit_cohort_key(&expected_cohort),
             staking_exit_ticket_key(&expected_ticket),
+            staking_exit_exposure_queue_key(4, &expected_cohort),
         ] {
             let proof = state.query_latest_with_proof(&key).await.unwrap();
             assert!(proof.value.is_some(), "missing exit key {key}");
@@ -3954,6 +4067,7 @@ mod tests {
             reopened.exit_cohort(&expected_cohort).unwrap().status,
             bit_staking::ExitCohortStatus::PendingExposure
         );
+        assert_eq!(reopened.exit_exposure_queue().count(), 1);
 
         for height in 2..=6 {
             let previous_set = state.effective_validator_set_at(height - 1).await.unwrap();
@@ -3999,6 +4113,22 @@ mod tests {
                 ));
             }
             state.commit(block.prepare().await.unwrap()).unwrap();
+            if height == 4 {
+                let exposure = state
+                    .query_latest_with_proof(&staking_exit_exposure_queue_key(4, &expected_cohort))
+                    .await
+                    .unwrap();
+                assert!(exposure.value.is_none());
+                exposure.verify().unwrap();
+                for key in [
+                    staking_exit_maturity_height_queue_key(6, &expected_cohort),
+                    staking_exit_maturity_time_queue_key(6, &expected_cohort),
+                ] {
+                    let proof = state.query_latest_with_proof(&key).await.unwrap();
+                    assert!(proof.value.is_some(), "missing maturity queue key {key}");
+                    proof.verify().unwrap();
+                }
+            }
         }
 
         let previous_set = state.effective_validator_set_at(6).await.unwrap();
@@ -4063,6 +4193,15 @@ mod tests {
         ] {
             let proof = reopened.query_latest_with_proof(&key).await.unwrap();
             assert!(proof.value.is_some());
+            proof.verify().unwrap();
+        }
+        for key in [
+            staking_exit_exposure_queue_key(4, &expected_cohort),
+            staking_exit_maturity_height_queue_key(6, &expected_cohort),
+            staking_exit_maturity_time_queue_key(6, &expected_cohort),
+        ] {
+            let proof = reopened.query_latest_with_proof(&key).await.unwrap();
+            assert!(proof.value.is_none(), "stale exit queue key {key}");
             proof.verify().unwrap();
         }
         reopened.close().await;

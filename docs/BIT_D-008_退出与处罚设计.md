@@ -32,7 +32,7 @@ maturity_height = exposure_end_height + unbonding_blocks
 maturity_time = exposure_end_time + unbonding_seconds
 ```
 
-只有 `current_height > maturity_height` 且 `current_chain_time > maturity_time` 时，cohort 才进入 `Mature`。参考参数为 241920 块和 1209600 秒，并在参数校验中强制两项退出窗口分别大于证据窗口。当前成熟推进会遍历 cohort；按高度持久化的到期队列仍是本任务后续工作，不能用本切片宣称已有长期有界执行成本。
+只有 `current_height > maturity_height` 且 `current_chain_time > maturity_time` 时，cohort 才进入 `Mature`。参考参数为 241920 块和 1209600 秒，并在参数校验中强制两项退出窗口分别大于证据窗口。暴露高度、成熟高度和成熟时间分别使用按 deadline/cohort 排序的持久化队列；每项达到对应条件时删除一次，两个成熟索引都删除后才置为 Mature。链时间停滞不会造成已经达到高度的历史 cohort 被每块反复扫描。
 
 ClaimExit 从当前状态重新计算票据 quote，并要求它精确等于信封签名的 `expected_release`。未成熟、重复领取、过期 sequence 或报价变化都会在任何状态写入前拒绝。领取费用同样支持：
 
@@ -41,14 +41,13 @@ ClaimExit 从当前状态重新计算票据 quote，并要求它精确等于信�
 
 ## 4. 持久化与验证证据
 
-schema v13 新增 `staking/exits/cohorts/<cohort_id>` 和 `staking/exits/tickets/<ticket_id>`。创世、区块触及写入、重启读取、账本校验和 `sum(cohort.assets)=supply/exit_total` 全部已接入；两个记录都可生成针对最新 app hash 的 ICS23 证明。
+schema v13 新增 `staking/exits/cohorts/<cohort_id>` 和 `staking/exits/tickets/<ticket_id>`；schema v14 增加 exposure、maturity-height 和 maturity-time 三个 ExitQueueEntry 索引。创世、区块触及写入、重启读取、账本校验和 `sum(cohort.assets)=supply/exit_total` 全部已接入；对象及队列均可生成针对最新 app hash 的 ICS23 成员或非成员证明。
 
 测试覆盖池份额退出、cohort 份额、最后领取尾差、双条件严格大于边界、未成熟与重复领取拒绝、最后验证者自质押保护、两类费用容器变化、跨七个区块推进、epoch 奖励交错、落盘、重启和 ICS23 证明。真实信封测试使用 Spend/Output Groth16 证明、PositionOwner Ed25519 授权、binding、实时 sequence/quote 和统一正式交易分发入口执行 Unbond 与 ClaimExit。
 
 ## 5. 下一切片
 
-1. 建立并持久化 exposure/maturity 队列，避免每块遍历全部历史 cohort。
-2. 接入 CometBFT Byzantine evidence 的规范校验、历史责任集合和 evidence hash 去重。
-3. 实现永久 tombstone、活动池罚没、供应 Burn 及按 `exposure_end_height >= infraction_height` 选择未成熟 cohort。
-4. 将 cohort 扣罚拆成每块最多 128 项的持久化 SlashJob；任务存在时冻结该验证人的激活、Unbond 和 ClaimExit，崩溃重启不得重复扣罚。
-5. 把真实退出和处罚故障恢复加入多节点 CometBFT 场景。
+1. 接入 CometBFT Byzantine evidence 的规范校验、历史责任集合和 evidence hash 去重。
+2. 实现永久 tombstone、活动池罚没、供应 Burn 及按 `exposure_end_height >= infraction_height` 选择未成熟 cohort。
+3. 将 cohort 扣罚拆成每块最多 128 项的持久化 SlashJob；任务存在时冻结该验证人的激活、Unbond 和 ClaimExit，崩溃重启不得重复扣罚。
+4. 把真实退出和处罚故障恢复加入多节点 CometBFT 场景。

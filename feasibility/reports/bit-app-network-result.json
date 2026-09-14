@@ -1,49 +1,49 @@
 {
   "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T102433498370",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T104756884870",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "application_sha256": "f2c78e760abc22cc8f1dff8b87ca985ebcbff4ce9e8c77561408082da8525a2a"
+    "application_sha256": "fa99658e1c57e5d55d98ef43e91faedd66028491dcc583ac54ad36163ce79fdd"
   },
   "checks": {
     "validator_powers_h6_h7_h8": {
       "6": {
-        "464f61b2923cddd3250e70e8b513c09a2ba0739b877e5b2f32953c12e0e8c103": 10,
-        "b59ac00b8c9bb5eaf9e88685ad0e1c45553db4a7d460db57530bb845225cfc33": 10,
-        "b5cfa7eb10fecda6746e6953e03d1da6373a83064150ef59839e825eda29959a": 10,
-        "8c61470439d523e332838b523d2a4b7ba099ef8deb153156ca0ea66f412856ae": 10
+        "d3760213a99051ae9177cd947a2e291871c82511d691cfdaaf80ccfbb2ef113c": 10,
+        "dd4ec20911e32c2325f998f4869fb7f28977144a87123ccad577005f9fbbbce0": 10,
+        "7655b188ed9d5f9bc67c2e6a61c6f82f4971b6cab142e0009258d6cb9006bf89": 10,
+        "28912dcbcae756a27ccee19213709a0df91e07261b83c9039b7371adc2696f4a": 10
       },
       "7": {
-        "464f61b2923cddd3250e70e8b513c09a2ba0739b877e5b2f32953c12e0e8c103": 10,
-        "b59ac00b8c9bb5eaf9e88685ad0e1c45553db4a7d460db57530bb845225cfc33": 10,
-        "b5cfa7eb10fecda6746e6953e03d1da6373a83064150ef59839e825eda29959a": 10,
-        "8c61470439d523e332838b523d2a4b7ba099ef8deb153156ca0ea66f412856ae": 10
+        "d3760213a99051ae9177cd947a2e291871c82511d691cfdaaf80ccfbb2ef113c": 10,
+        "dd4ec20911e32c2325f998f4869fb7f28977144a87123ccad577005f9fbbbce0": 10,
+        "7655b188ed9d5f9bc67c2e6a61c6f82f4971b6cab142e0009258d6cb9006bf89": 10,
+        "28912dcbcae756a27ccee19213709a0df91e07261b83c9039b7371adc2696f4a": 10
       },
       "8": {
-        "464f61b2923cddd3250e70e8b513c09a2ba0739b877e5b2f32953c12e0e8c103": 3659,
-        "b5cfa7eb10fecda6746e6953e03d1da6373a83064150ef59839e825eda29959a": 3659,
-        "8c61470439d523e332838b523d2a4b7ba099ef8deb153156ca0ea66f412856ae": 3659,
-        "b59ac00b8c9bb5eaf9e88685ad0e1c45553db4a7d460db57530bb845225cfc33": 2929
+        "d3760213a99051ae9177cd947a2e291871c82511d691cfdaaf80ccfbb2ef113c": 3476,
+        "dd4ec20911e32c2325f998f4869fb7f28977144a87123ccad577005f9fbbbce0": 3476,
+        "7655b188ed9d5f9bc67c2e6a61c6f82f4971b6cab142e0009258d6cb9006bf89": 3476,
+        "28912dcbcae756a27ccee19213709a0df91e07261b83c9039b7371adc2696f4a": 3476
       }
     },
     "h_plus_two_update": true,
     "process_restart_from_durable_jmt_height": 10,
     "resumed_heights": [
-      15,
-      15,
-      15,
-      15
+      16,
+      18,
+      18,
+      18
     ],
-    "same_app_hash_height": 14,
-    "same_app_hash": "b0c951b25c64746de69be171c3c7a6ef8ed561be4f65a54c71721b3b946e6beb",
+    "same_app_hash_height": 15,
+    "same_app_hash": "8b32c1a99c617916d92fe5f4697261ffc720e4cce63018974c2b101a2ee4ba71",
     "latest_ics23_proof": true,
-    "quorum_halt_height": 15,
+    "quorum_halt_height": 18,
     "quorum_recovery_heights": [
-      19,
-      19,
-      19
+      22,
+      22,
+      22
     ]
   },
   "limitations": [
@@ -54,6 +54,6 @@
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T10:24:33.498470+00:00",
-  "finished_at": "2026-09-14T10:25:07.471481+00:00"
+  "started_at": "2026-09-14T10:47:56.884989+00:00",
+  "finished_at": "2026-09-14T10:48:35.404690+00:00"
 }
