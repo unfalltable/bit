@@ -1,0 +1,34 @@
+{
+  "scope": "official bit-node genesis bundle replay, exact InitChain, real CometBFT blocks, proved state, and application restart",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-genesis-node-20260914T221335606741",
+  "toolchain": {
+    "cometbft_module": "v0.38.23",
+    "cometbft_self_reported": "0.38.22",
+    "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
+    "bit_sha256": "3d067174bf6f3bbd4d45e35f36a10b90eb10a61f7759559401572638dec0662c",
+    "bit_node_sha256": "fcf2d863e1982b210d7240ff6848d46d56f8e5b1073ceb10af733dd97ba387e2"
+  },
+  "checks": {
+    "identity_manifest_hash": "78ac2a7ede6cc2b6e85e6a1f3e559164f04d4377f55c450f60f03eb06ee4b6d3",
+    "derived_manifest_hash": "46dba1771ddad019cad4238e8915df3062a4334f25e3d4b9ccaac315334e9c65",
+    "genesis_app_hash": "674e563525928add5db60e7b01ae2068b6e08228bf280fe93db7633c142f6b43",
+    "identity_approval_count": 2,
+    "derived_approval_count": 2,
+    "independent_bundle_replay": true,
+    "exact_init_chain_accepted": true,
+    "block_one_commits_genesis_app_hash": true,
+    "genesis_validator_power": 4,
+    "genesis_manifest_ics23_proof": true,
+    "height_before_restart": 4,
+    "height_after_restart": 7,
+    "initial_observed_height": 4
+  },
+  "limitations": [
+    "public deterministic fixture and test approval keys",
+    "single process host and one CometBFT validator",
+    "production service management is outside this smoke test"
+  ],
+  "status": "PASS",
+  "started_at": "2026-09-14T22:13:35.606843+00:00",
+  "finished_at": "2026-09-14T22:13:59.477898+00:00"
+}

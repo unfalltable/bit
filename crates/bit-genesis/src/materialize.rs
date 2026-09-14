@@ -1,13 +1,17 @@
 use crate::{
-    genesis_claims_hash, genesis_commitments_hash, AllocationKind, DerivedClaim, DerivedValidator,
-    GenesisDerivedManifest, GenesisIdentityManifest, Hash32, SignaturePackage, MAX_GENESIS_ENTRIES,
+    genesis_claims_hash, genesis_commitments_hash, AllocationKind, DerivedClaim,
+    DerivedSignaturePackage, DerivedValidator, GenesisDerivedManifest, GenesisIdentityManifest,
+    Hash32, SignaturePackage, MAX_GENESIS_ENTRIES,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use bit_emission::{FeePolicy, GenesisAllocation};
-use bit_staking::{consensus_address, StakingBook, StakingParameters, RECOVERY_RECEIPT_BYTES};
+use bit_staking::{
+    consensus_address, ConsensusPowerUpdate, StakingBook, StakingParameters, RECOVERY_RECEIPT_BYTES,
+};
 use bit_state::{GenesisClaim, GenesisConfig, PersistentState};
 use bit_types::{position_id, validator_id, Amount};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::Path};
 use thiserror::Error;
@@ -17,6 +21,7 @@ pub const RUNTIME_INPUT_VERSION: u64 = 1;
 pub const MATERIALIZED_BUNDLE_FORMAT: &str = "BIT-GENESIS-BUNDLE";
 pub const MATERIALIZED_BUNDLE_VERSION: u64 = 1;
 const MAX_RUNTIME_INPUT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_BUNDLE_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_GENESIS_TIME: u64 = 253_402_300_799;
 
 #[derive(Debug, Error)]
@@ -133,9 +138,10 @@ pub struct CometBftRuntimeParameters {
     pub vote_extensions_enable_height: i64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct MaterializedGenesis {
-    pub format: &'static str,
+    pub format: String,
     pub version: u64,
     pub identity_manifest_hash: String,
     pub runtime_inputs_sha256: String,
@@ -150,6 +156,49 @@ pub struct MaterializedGenesis {
     pub claim_count: usize,
     pub commitment_count: usize,
     pub validator_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GenesisInitValidator {
+    pub consensus_pubkey: Hash32,
+    pub power: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GenesisInitChain {
+    pub genesis_time_seconds: i64,
+    pub chain_id: String,
+    pub initial_height: i64,
+    pub max_block_bytes: i64,
+    pub max_gas: i64,
+    pub evidence_max_age_blocks: i64,
+    pub evidence_max_age_seconds: i64,
+    pub evidence_max_bytes: i64,
+    pub validator_key_types: Vec<String>,
+    pub protocol_version: u64,
+    pub vote_extensions_enable_height: i64,
+    pub validators: Vec<GenesisInitValidator>,
+    pub app_state_json: Vec<u8>,
+}
+
+pub struct VerifiedGenesisBundle {
+    pub genesis_config: GenesisConfig,
+    pub init_chain: GenesisInitChain,
+    pub report: MaterializedGenesis,
+    pub derived_approval_count: usize,
+}
+
+struct PreparedGenesis {
+    config: GenesisConfig,
+    validators: Vec<ConsensusPowerUpdate>,
+    derived_claims: Vec<DerivedClaim>,
+    derived_validators: Vec<DerivedValidator>,
+    commitments_hash: Hash32,
+    claims_hash: Hash32,
+    identity_hash: Hash32,
+    runtime_hash: Hash32,
+    genesis_execution_hash: Hash32,
+    genesis_compact_hash: Hash32,
 }
 
 impl RuntimeInputDocument {
@@ -200,7 +249,7 @@ impl RuntimeInputDocument {
         }
         if self.cometbft.max_gas < -1
             || self.cometbft.evidence_max_bytes <= 0
-            || self.cometbft.vote_extensions_enable_height < 0
+            || self.cometbft.vote_extensions_enable_height != 0
         {
             return Err(MaterializeError::Invalid("invalid CometBFT parameters"));
         }
@@ -211,6 +260,8 @@ impl RuntimeInputDocument {
             .ok_or(MaterializeError::Invalid(
                 "evidence max age does not fit CometBFT duration",
             ))?;
+        i64::try_from(self.staking.evidence_max_age_blocks)
+            .map_err(|_| MaterializeError::Invalid("evidence block age does not fit CometBFT"))?;
         Ok(())
     }
 
@@ -252,9 +303,10 @@ impl RuntimeInputDocument {
     }
 }
 
-/// Materialize a complete, self-contained height-zero bundle in a sibling
+/// Materialize a deterministic height-zero construction bundle in a sibling
 /// temporary directory and publish it with one final rename. Existing output is
-/// always rejected. The identity approval threshold must already be satisfied.
+/// always rejected. The identity approval threshold must already be satisfied;
+/// the derived manifest is approved after materialization.
 pub async fn materialize_bundle(
     identity_bytes: &[u8],
     signature_bytes: &[u8],
@@ -279,6 +331,256 @@ pub async fn materialize_bundle(
     let runtime = RuntimeInputDocument::decode(runtime_bytes)?;
     validate_runtime_against_identity(&runtime, &identity)?;
 
+    let prepared = prepare_genesis(&identity, &runtime, runtime_hash)?;
+
+    let parent = output.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".bit-genesis-staging-")
+        .tempdir_in(parent)?;
+    let state_path = staging.path().join("state");
+    fs::create_dir(&state_path)?;
+    let state = PersistentState::open(state_path, prepared.config.clone()).await?;
+    let summary = state.summary().await?;
+    state.close().await;
+
+    let comet_bytes = encode_cometbft_genesis(
+        &identity,
+        &runtime,
+        &prepared.validators,
+        summary.app_hash,
+        summary.shielded_tree_root,
+        prepared.commitments_hash,
+        prepared.claims_hash,
+        prepared.genesis_execution_hash,
+        prepared.genesis_compact_hash,
+        prepared.runtime_hash,
+    )?;
+    let comet_hash: Hash32 = Sha256::digest(&comet_bytes).into();
+    let derived = GenesisDerivedManifest {
+        identity_manifest_hash: prepared.identity_hash,
+        chain_context: prepared.config.chain_context,
+        runtime_inputs_sha256: prepared.runtime_hash,
+        claims: prepared.derived_claims.clone(),
+        validators: prepared.derived_validators.clone(),
+        genesis_commitments_hash: prepared.commitments_hash,
+        genesis_claims_hash: prepared.claims_hash,
+        shielded_tree_root: summary.shielded_tree_root,
+        app_hash: summary.app_hash,
+        genesis_execution_hash: prepared.genesis_execution_hash,
+        genesis_compact_hash: prepared.genesis_compact_hash,
+        cometbft_genesis_sha256: comet_hash,
+    };
+    let derived_bytes = derived.encode_canonical(&identity)?;
+    let derived_hash = derived.hash(&identity)?;
+    let derived_sha256: Hash32 = Sha256::digest(&derived_bytes).into();
+
+    fs::write(staging.path().join("identity.cbor"), identity_bytes)?;
+    fs::write(
+        staging.path().join("identity-signatures.cbor"),
+        signature_bytes,
+    )?;
+    fs::write(staging.path().join("runtime-inputs.json"), runtime_bytes)?;
+    fs::write(staging.path().join("genesis.json"), &comet_bytes)?;
+    fs::write(staging.path().join("derived.cbor"), &derived_bytes)?;
+    let report = MaterializedGenesis {
+        format: MATERIALIZED_BUNDLE_FORMAT.to_owned(),
+        version: MATERIALIZED_BUNDLE_VERSION,
+        identity_manifest_hash: hex::encode(prepared.identity_hash),
+        runtime_inputs_sha256: hex::encode(prepared.runtime_hash),
+        derived_manifest_hash: hex::encode(derived_hash),
+        derived_manifest_sha256: hex::encode(derived_sha256),
+        cometbft_genesis_sha256: hex::encode(comet_hash),
+        app_hash: hex::encode(summary.app_hash),
+        shielded_tree_root: hex::encode(summary.shielded_tree_root),
+        genesis_execution_hash: hex::encode(prepared.genesis_execution_hash),
+        genesis_compact_hash: hex::encode(prepared.genesis_compact_hash),
+        identity_approval_count: approval_count,
+        claim_count: identity.claims.len(),
+        commitment_count: identity.commitments.len(),
+        validator_count: identity.validators.len(),
+    };
+    let mut report_bytes = serde_json::to_vec_pretty(&report)?;
+    report_bytes.push(b'\n');
+    fs::write(staging.path().join("build-report.json"), report_bytes)?;
+
+    let staging_path = staging.keep();
+    if let Err(error) = fs::rename(&staging_path, output) {
+        let _ = fs::remove_dir_all(&staging_path);
+        return Err(error.into());
+    }
+    Ok(report)
+}
+
+/// Verify both approval stages and independently replay every deterministic
+/// height-zero protocol artifact. The bundled RocksDB directory is required as
+/// a construction artifact but is never trusted as node input.
+pub async fn verify_bundle(
+    bundle: &Path,
+    derived_signatures: &Path,
+) -> MaterializeResult<VerifiedGenesisBundle> {
+    require_plain_directory(bundle, "genesis bundle")?;
+    require_plain_directory(&bundle.join("state"), "bundled state")?;
+    let identity_bytes = read_plain_file(&bundle.join("identity.cbor"))?;
+    let signature_bytes = read_plain_file(&bundle.join("identity-signatures.cbor"))?;
+    let runtime_bytes = read_plain_file(&bundle.join("runtime-inputs.json"))?;
+    let comet_bytes = read_plain_file(&bundle.join("genesis.json"))?;
+    let derived_bytes = read_plain_file(&bundle.join("derived.cbor"))?;
+    let report_bytes = read_plain_file(&bundle.join("build-report.json"))?;
+    let derived_signature_bytes = read_plain_file(derived_signatures)?;
+
+    let identity = GenesisIdentityManifest::decode_canonical(&identity_bytes)?;
+    let signatures = SignaturePackage::decode_canonical(&signature_bytes)?;
+    let identity_approval_count = signatures.verify(&identity)?;
+    let runtime_hash: Hash32 = Sha256::digest(&runtime_bytes).into();
+    if runtime_hash != identity.consensus_parameters_sha256 {
+        return Err(MaterializeError::Invalid(
+            "runtime input SHA-256 differs from identity consensus_parameters_sha256",
+        ));
+    }
+    let runtime = RuntimeInputDocument::decode(&runtime_bytes)?;
+    validate_runtime_against_identity(&runtime, &identity)?;
+    let prepared = prepare_genesis(&identity, &runtime, runtime_hash)?;
+    let derived = GenesisDerivedManifest::decode_canonical(&derived_bytes, &identity)?;
+    let derived_signature_package =
+        DerivedSignaturePackage::decode_canonical(&derived_signature_bytes)?;
+    let derived_approval_count = derived_signature_package.verify(&identity, &derived)?;
+
+    if <[u8; 32]>::from(Sha256::digest(&comet_bytes)) != derived.cometbft_genesis_sha256 {
+        return Err(MaterializeError::Invalid(
+            "CometBFT genesis SHA-256 differs from derived manifest",
+        ));
+    }
+    let comet: CometGenesis = serde_json::from_slice(&comet_bytes)?;
+    let mut canonical_comet = serde_json::to_vec_pretty(&comet)?;
+    canonical_comet.push(b'\n');
+    if canonical_comet != comet_bytes {
+        return Err(MaterializeError::Invalid(
+            "CometBFT genesis is not the canonical generated JSON",
+        ));
+    }
+
+    let report: MaterializedGenesis = serde_json::from_slice(&report_bytes)?;
+    let mut canonical_report = serde_json::to_vec_pretty(&report)?;
+    canonical_report.push(b'\n');
+    if canonical_report != report_bytes {
+        return Err(MaterializeError::Invalid(
+            "build report is not the canonical generated JSON",
+        ));
+    }
+
+    let replay_root = tempfile::tempdir()?;
+    let replay_bundle = replay_root.path().join("replay");
+    let replay_report = materialize_bundle(
+        &identity_bytes,
+        &signature_bytes,
+        &runtime_bytes,
+        &replay_bundle,
+    )
+    .await?;
+    if report != replay_report || report.identity_approval_count != identity_approval_count {
+        return Err(MaterializeError::Invalid(
+            "build report differs from independent replay",
+        ));
+    }
+    for name in [
+        "identity.cbor",
+        "identity-signatures.cbor",
+        "runtime-inputs.json",
+        "genesis.json",
+        "derived.cbor",
+        "build-report.json",
+    ] {
+        if read_plain_file(&bundle.join(name))? != read_plain_file(&replay_bundle.join(name))? {
+            return Err(MaterializeError::InvalidOwned(format!(
+                "bundle file differs from independent replay: {name}"
+            )));
+        }
+    }
+    let init_chain = build_init_chain(&identity, &runtime, &prepared, &comet, &comet_bytes)?;
+    Ok(VerifiedGenesisBundle {
+        genesis_config: prepared.config,
+        init_chain,
+        report,
+        derived_approval_count,
+    })
+}
+
+fn require_plain_directory(path: &Path, name: &'static str) -> MaterializeResult<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(MaterializeError::InvalidOwned(format!(
+            "{name} must be a real directory: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn read_plain_file(path: &Path) -> MaterializeResult<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() > MAX_BUNDLE_FILE_BYTES
+    {
+        return Err(MaterializeError::InvalidOwned(format!(
+            "bundle input must be a real file no larger than 16 MiB: {}",
+            path.display()
+        )));
+    }
+    Ok(fs::read(path)?)
+}
+
+fn build_init_chain(
+    identity: &GenesisIdentityManifest,
+    runtime: &RuntimeInputDocument,
+    prepared: &PreparedGenesis,
+    comet: &CometGenesis,
+    comet_bytes: &[u8],
+) -> MaterializeResult<GenesisInitChain> {
+    if comet.genesis_time != rfc3339(identity.genesis_time_unix_seconds)?
+        || comet.chain_id != identity.chain_id
+        || comet.initial_height != "1"
+    {
+        return Err(MaterializeError::Invalid(
+            "CometBFT identity fields differ from signed identity",
+        ));
+    }
+    let raw: RawCometGenesis<'_> = serde_json::from_slice(comet_bytes)?;
+    let app_state_json = raw.app_state.get().as_bytes().to_vec();
+    Ok(GenesisInitChain {
+        genesis_time_seconds: i64::try_from(identity.genesis_time_unix_seconds)
+            .map_err(|_| MaterializeError::Invalid("genesis time exceeds i64"))?,
+        chain_id: identity.chain_id.clone(),
+        initial_height: 1,
+        max_block_bytes: i64::try_from(identity.resource_limits.max_block_bytes)
+            .map_err(|_| MaterializeError::Invalid("max block bytes exceeds i64"))?,
+        max_gas: runtime.cometbft.max_gas,
+        evidence_max_age_blocks: i64::try_from(runtime.staking.evidence_max_age_blocks)
+            .map_err(|_| MaterializeError::Invalid("evidence block age exceeds i64"))?,
+        evidence_max_age_seconds: i64::try_from(runtime.staking.evidence_max_age_seconds)
+            .map_err(|_| MaterializeError::Invalid("evidence time age exceeds i64"))?,
+        evidence_max_bytes: runtime.cometbft.evidence_max_bytes,
+        validator_key_types: vec!["ed25519".to_owned()],
+        protocol_version: identity.resource_limits.protocol_version,
+        vote_extensions_enable_height: runtime.cometbft.vote_extensions_enable_height,
+        validators: prepared
+            .validators
+            .iter()
+            .map(|validator| GenesisInitValidator {
+                consensus_pubkey: validator.consensus_pubkey,
+                power: validator.power,
+            })
+            .collect(),
+        app_state_json,
+    })
+}
+
+fn prepare_genesis(
+    identity: &GenesisIdentityManifest,
+    runtime: &RuntimeInputDocument,
+    runtime_hash: Hash32,
+) -> MaterializeResult<PreparedGenesis> {
     let identity_hash = identity.hash()?;
     let chain_context = identity.chain_context()?;
     let allocation_by_id: BTreeMap<_, _> = identity
@@ -363,6 +665,7 @@ pub async fn materialize_bundle(
                 })
             })
             .collect::<MaterializeResult<Vec<_>>>()?;
+    let validators = effective_set.validators().to_vec();
 
     let genesis_claims = identity
         .claims
@@ -409,6 +712,8 @@ pub async fn materialize_bundle(
         bound_genesis_hash(b"BIT-GENESIS-COMPACT-V1", &identity_hash, &runtime_hash);
     let max_envelope_bytes = usize::try_from(identity.resource_limits.max_envelope_bytes)
         .map_err(|_| MaterializeError::Invalid("max_envelope_bytes does not fit usize"))?;
+    let commitments_hash = genesis_commitments_hash(identity);
+    let claims_hash = genesis_claims_hash(identity, &derived_claims)?;
     let config = GenesisConfig {
         genesis_manifest_hash: identity_hash,
         chain_context,
@@ -427,87 +732,18 @@ pub async fn materialize_bundle(
         genesis_execution_hash,
         genesis_compact_hash,
     };
-
-    let parent = output.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
-    let staging = tempfile::Builder::new()
-        .prefix(".bit-genesis-staging-")
-        .tempdir_in(parent)?;
-    let state_path = staging.path().join("state");
-    fs::create_dir(&state_path)?;
-    let state = PersistentState::open(state_path, config).await?;
-    let summary = state.summary().await?;
-    state.close().await;
-
-    let commitments_hash = genesis_commitments_hash(&identity);
-    let claims_hash = genesis_claims_hash(&identity, &derived_claims)?;
-    let comet_bytes = encode_cometbft_genesis(
-        &identity,
-        &runtime,
-        &runtime_by_allocation,
-        effective_set.validators(),
-        summary.app_hash,
-        summary.shielded_tree_root,
+    Ok(PreparedGenesis {
+        config,
+        validators,
+        derived_claims,
+        derived_validators,
         commitments_hash,
         claims_hash,
-        genesis_execution_hash,
-        genesis_compact_hash,
+        identity_hash,
         runtime_hash,
-    )?;
-    let comet_hash: Hash32 = Sha256::digest(&comet_bytes).into();
-    let derived = GenesisDerivedManifest {
-        identity_manifest_hash: identity_hash,
-        chain_context,
-        runtime_inputs_sha256: runtime_hash,
-        claims: derived_claims,
-        validators: derived_validators,
-        genesis_commitments_hash: commitments_hash,
-        genesis_claims_hash: claims_hash,
-        shielded_tree_root: summary.shielded_tree_root,
-        app_hash: summary.app_hash,
         genesis_execution_hash,
         genesis_compact_hash,
-        cometbft_genesis_sha256: comet_hash,
-    };
-    let derived_bytes = derived.encode_canonical(&identity)?;
-    let derived_hash = derived.hash(&identity)?;
-    let derived_sha256: Hash32 = Sha256::digest(&derived_bytes).into();
-
-    fs::write(staging.path().join("identity.cbor"), identity_bytes)?;
-    fs::write(
-        staging.path().join("identity-signatures.cbor"),
-        signature_bytes,
-    )?;
-    fs::write(staging.path().join("runtime-inputs.json"), runtime_bytes)?;
-    fs::write(staging.path().join("genesis.json"), &comet_bytes)?;
-    fs::write(staging.path().join("derived.cbor"), &derived_bytes)?;
-    let report = MaterializedGenesis {
-        format: MATERIALIZED_BUNDLE_FORMAT,
-        version: MATERIALIZED_BUNDLE_VERSION,
-        identity_manifest_hash: hex::encode(identity_hash),
-        runtime_inputs_sha256: hex::encode(runtime_hash),
-        derived_manifest_hash: hex::encode(derived_hash),
-        derived_manifest_sha256: hex::encode(derived_sha256),
-        cometbft_genesis_sha256: hex::encode(comet_hash),
-        app_hash: hex::encode(summary.app_hash),
-        shielded_tree_root: hex::encode(summary.shielded_tree_root),
-        genesis_execution_hash: hex::encode(genesis_execution_hash),
-        genesis_compact_hash: hex::encode(genesis_compact_hash),
-        identity_approval_count: approval_count,
-        claim_count: identity.claims.len(),
-        commitment_count: identity.commitments.len(),
-        validator_count: identity.validators.len(),
-    };
-    let mut report_bytes = serde_json::to_vec_pretty(&report)?;
-    report_bytes.push(b'\n');
-    fs::write(staging.path().join("build-report.json"), report_bytes)?;
-
-    let staging_path = staging.keep();
-    if let Err(error) = fs::rename(&staging_path, output) {
-        let _ = fs::remove_dir_all(&staging_path);
-        return Err(error.into());
-    }
-    Ok(report)
+    })
 }
 
 fn validate_runtime_against_identity(
@@ -569,8 +805,7 @@ fn validate_runtime_against_identity(
 fn encode_cometbft_genesis(
     identity: &GenesisIdentityManifest,
     runtime: &RuntimeInputDocument,
-    runtime_by_allocation: &BTreeMap<Hash32, &ValidatorRuntimeInput>,
-    validators: &[bit_staking::ConsensusPowerUpdate],
+    validators: &[ConsensusPowerUpdate],
     app_hash: Hash32,
     shielded_tree_root: Hash32,
     commitments_hash: Hash32,
@@ -582,10 +817,8 @@ fn encode_cometbft_genesis(
     let names: BTreeMap<_, _> = identity
         .validators
         .iter()
-        .map(|source| {
-            let runtime_entry = runtime_by_allocation
-                .get(&source.allocation_id)
-                .expect("runtime mapping was validated");
+        .zip(&runtime.validators)
+        .map(|(source, runtime_entry)| {
             (source.consensus_pubkey, runtime_entry.display_name.clone())
         })
         .collect();
@@ -594,7 +827,7 @@ fn encode_cometbft_genesis(
         .map(|validator| CometValidator {
             address: hex::encode_upper(consensus_address(&validator.consensus_pubkey)),
             pub_key: CometPublicKey {
-                key_type: "tendermint/PubKeyEd25519",
+                key_type: "tendermint/PubKeyEd25519".to_owned(),
                 value: BASE64.encode(validator.consensus_pubkey),
             },
             power: validator.power.to_string(),
@@ -607,7 +840,7 @@ fn encode_cometbft_genesis(
     let document = CometGenesis {
         genesis_time: rfc3339(identity.genesis_time_unix_seconds)?,
         chain_id: identity.chain_id.clone(),
-        initial_height: "1",
+        initial_height: "1".to_owned(),
         consensus_params: CometConsensusParams {
             block: CometBlockParams {
                 max_bytes: identity.resource_limits.max_block_bytes.to_string(),
@@ -624,7 +857,7 @@ fn encode_cometbft_genesis(
                 max_bytes: runtime.cometbft.evidence_max_bytes.to_string(),
             },
             validator: CometValidatorParams {
-                pub_key_types: ["ed25519"],
+                pub_key_types: vec!["ed25519".to_owned()],
             },
             version: CometVersionParams {
                 app: identity.resource_limits.protocol_version.to_string(),
@@ -639,7 +872,7 @@ fn encode_cometbft_genesis(
         validators,
         app_hash: hex::encode_upper(app_hash),
         app_state: CometAppState {
-            format: "BIT-APP-GENESIS",
+            format: "BIT-APP-GENESIS".to_owned(),
             version: 1,
             genesis_manifest_hash: hex::encode(identity.hash()?),
             runtime_inputs_sha256: hex::encode(runtime_hash),
@@ -656,18 +889,26 @@ fn encode_cometbft_genesis(
     Ok(bytes)
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometGenesis {
     genesis_time: String,
     chain_id: String,
-    initial_height: &'static str,
+    initial_height: String,
     consensus_params: CometConsensusParams,
     validators: Vec<CometValidator>,
     app_hash: String,
     app_state: CometAppState,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize)]
+struct RawCometGenesis<'a> {
+    #[serde(borrow)]
+    app_state: &'a RawValue,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometConsensusParams {
     block: CometBlockParams,
     evidence: CometEvidenceParams,
@@ -676,35 +917,41 @@ struct CometConsensusParams {
     abci: CometAbciParams,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometBlockParams {
     max_bytes: String,
     max_gas: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometEvidenceParams {
     max_age_num_blocks: String,
     max_age_duration: String,
     max_bytes: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometValidatorParams {
-    pub_key_types: [&'static str; 1],
+    pub_key_types: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometVersionParams {
     app: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometAbciParams {
     vote_extensions_enable_height: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometValidator {
     address: String,
     pub_key: CometPublicKey,
@@ -712,16 +959,18 @@ struct CometValidator {
     name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometPublicKey {
     #[serde(rename = "type")]
-    key_type: &'static str,
+    key_type: String,
     value: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CometAppState {
-    format: &'static str,
+    format: String,
     version: u64,
     genesis_manifest_hash: String,
     runtime_inputs_sha256: String,
@@ -803,7 +1052,7 @@ fn rfc3339(unix_seconds: u64) -> MaterializeResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{IdentityInputDocument, SignaturePackage};
+    use crate::{DerivedSignaturePackage, IdentityInputDocument, SignaturePackage};
 
     fn runtime_bytes() -> Vec<u8> {
         include_bytes!("../../../tests/fixtures/genesis-runtime-inputs.test.json").to_vec()
@@ -843,6 +1092,10 @@ mod tests {
         value["staking"]["max_total_voting_power"] = serde_json::json!("01");
         assert!(RuntimeInputDocument::decode(&serde_json::to_vec(&value).unwrap()).is_err());
         value["staking"]["max_total_voting_power"] = serde_json::json!("1152921504606846975");
+        value["staking"]["evidence_max_age_blocks"] =
+            serde_json::json!(9_223_372_036_854_775_808_u64);
+        assert!(RuntimeInputDocument::decode(&serde_json::to_vec(&value).unwrap()).is_err());
+        value["staking"]["evidence_max_age_blocks"] = serde_json::json!(120960);
         value["validators"][0]["recovery_receipt"] =
             serde_json::Value::String("00".repeat(RECOVERY_RECEIPT_BYTES));
         assert!(RuntimeInputDocument::decode(&serde_json::to_vec(&value).unwrap()).is_err());
@@ -898,6 +1151,48 @@ mod tests {
         )
         .unwrap();
         assert_eq!(hex::encode(derived.app_hash), report.app_hash);
+        let mut derived_signatures = DerivedSignaturePackage {
+            identity_manifest_hash: identity_manifest.hash().unwrap(),
+            derived_manifest_hash: derived.hash(&identity_manifest).unwrap(),
+            approvals: Vec::new(),
+        };
+        derived_signatures
+            .add_signature(&identity_manifest, &derived, [5; 32])
+            .unwrap();
+        let partial_path = directory.path().join("partial-derived-signatures.cbor");
+        fs::write(
+            &partial_path,
+            derived_signatures.encode_canonical().unwrap(),
+        )
+        .unwrap();
+        assert!(verify_bundle(&first, &partial_path).await.is_err());
+        derived_signatures
+            .add_signature(&identity_manifest, &derived, [6; 32])
+            .unwrap();
+        let derived_signature_path = first.join("derived-signatures.cbor");
+        fs::write(
+            &derived_signature_path,
+            derived_signatures.encode_canonical().unwrap(),
+        )
+        .unwrap();
+        let verified = verify_bundle(&first, &derived_signature_path)
+            .await
+            .unwrap();
+        assert_eq!(verified.report, report);
+        assert_eq!(verified.derived_approval_count, 2);
+        assert_eq!(
+            verified.genesis_config.genesis_manifest_hash,
+            identity_manifest.hash().unwrap()
+        );
+        assert_eq!(verified.init_chain.chain_id, identity_manifest.chain_id);
+        assert_eq!(verified.init_chain.validators.len(), 1);
+        assert_eq!(verified.init_chain.validators[0].power, 4);
+        let genesis_bytes = fs::read(first.join("genesis.json")).unwrap();
+        let raw: RawCometGenesis<'_> = serde_json::from_slice(&genesis_bytes).unwrap();
+        assert_eq!(
+            verified.init_chain.app_state_json,
+            raw.app_state.get().as_bytes()
+        );
         let comet: serde_json::Value =
             serde_json::from_slice(&fs::read(first.join("genesis.json")).unwrap()).unwrap();
         assert_eq!(comet["chain_id"], identity_manifest.chain_id);
@@ -907,6 +1202,10 @@ mod tests {
         );
         assert_eq!(comet["app_state"]["app_hash"], report.app_hash);
         assert!(materialize_bundle(&identity, &signatures, &runtime, &first)
+            .await
+            .is_err());
+        fs::write(first.join("genesis.json"), b"{}\n").unwrap();
+        assert!(verify_bundle(&first, &derived_signature_path)
             .await
             .is_err());
     }

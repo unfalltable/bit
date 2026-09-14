@@ -6,7 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[[bin]]
+name = "bit-node"
+path = "src/main.rs"
+
 [dependencies]
+bit-genesis = { path = "../bit-genesis" }
 bit-emission = { path = "../bit-emission" }
 bit-shielded = { path = "../bit-shielded" }
 bit-staking = { path = "../bit-staking" }

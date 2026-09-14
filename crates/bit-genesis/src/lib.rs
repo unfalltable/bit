@@ -7,8 +7,9 @@
 mod materialize;
 
 pub use materialize::{
-    materialize_bundle, CometBftRuntimeParameters, FeeRuntimeParameters, MaterializeError,
-    MaterializedGenesis, RuntimeInputDocument, StakingRuntimeParameters, ValidatorRuntimeInput,
+    materialize_bundle, verify_bundle, CometBftRuntimeParameters, FeeRuntimeParameters,
+    GenesisInitChain, GenesisInitValidator, MaterializeError, MaterializedGenesis,
+    RuntimeInputDocument, StakingRuntimeParameters, ValidatorRuntimeInput, VerifiedGenesisBundle,
     MATERIALIZED_BUNDLE_FORMAT, MATERIALIZED_BUNDLE_VERSION, RUNTIME_INPUT_FORMAT,
     RUNTIME_INPUT_VERSION,
 };

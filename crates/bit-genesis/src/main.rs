@@ -1,7 +1,8 @@
 use bit_genesis::{
-    materialize_bundle, DerivedInputDocument, DerivedSignaturePackage, GenesisDerivedManifest,
-    GenesisIdentityManifest, IdentityInputDocument, RuntimeInputDocument, SignaturePackage,
-    APPROVAL_VERSION, DERIVED_APPROVAL_VERSION, DERIVED_VERSION, IDENTITY_VERSION,
+    materialize_bundle, verify_bundle, DerivedInputDocument, DerivedSignaturePackage,
+    GenesisDerivedManifest, GenesisIdentityManifest, IdentityInputDocument, RuntimeInputDocument,
+    SignaturePackage, APPROVAL_VERSION, DERIVED_APPROVAL_VERSION, DERIVED_VERSION,
+    IDENTITY_VERSION,
 };
 use bit_types::{genesis_claim_id, position_id, validator_id};
 use serde_json::{json, Value};
@@ -37,6 +38,7 @@ fn run(args: Vec<String>) -> DynResult<()> {
             "sign-derived" => genesis_sign_derived(rest),
             "inspect-runtime" | "validate-runtime" => genesis_inspect_runtime(rest),
             "materialize" => genesis_materialize(rest),
+            "verify-bundle" => genesis_verify_bundle(rest),
             _ => Err(usage().into()),
         },
         [group, command, rest @ ..] if group == "release" && command == "preflight" => {
@@ -90,6 +92,28 @@ fn genesis_materialize(args: &[String]) -> DynResult<()> {
         &output,
     ))?;
     println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn genesis_verify_bundle(args: &[String]) -> DynResult<()> {
+    validate_options(args, &["--bundle", "--derived-signatures"])?;
+    let bundle = required_path(args, "--bundle")?;
+    let derived_signatures = required_path(args, "--derived-signatures")?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let verified = runtime.block_on(verify_bundle(&bundle, &derived_signatures))?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "status": "verified",
+            "bundle": bundle,
+            "identity_manifest_hash": verified.report.identity_manifest_hash,
+            "derived_manifest_hash": verified.report.derived_manifest_hash,
+            "app_hash": verified.report.app_hash,
+            "identity_approval_count": verified.report.identity_approval_count,
+            "derived_approval_count": verified.derived_approval_count,
+            "validator_count": verified.report.validator_count,
+        }))?
+    );
     Ok(())
 }
 
@@ -1008,7 +1032,7 @@ fn validate_release_artifacts(root: &Value, base: Option<&Path>, blockers: &mut 
 }
 
 fn usage() -> &'static str {
-    "usage:\n  bit genesis build --input INPUT.json --output identity.cbor\n  bit genesis verify --manifest identity.cbor [--signatures approvals.cbor]\n  bit genesis inspect --manifest identity.cbor\n  bit genesis sign --manifest identity.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit genesis inspect-runtime --input runtime-inputs.json\n  bit genesis materialize --manifest identity.cbor --signatures approvals.cbor --runtime-inputs runtime-inputs.json --output BUNDLE_DIR\n  bit genesis build-derived --manifest identity.cbor --input DERIVED.json --output derived.cbor\n  bit genesis verify-derived --manifest identity.cbor --derived derived.cbor [--signatures approvals.cbor]\n  bit genesis inspect-derived --manifest identity.cbor --derived derived.cbor\n  bit genesis sign-derived --manifest identity.cbor --derived derived.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit release preflight --input mainnet.json [--manifest identity.cbor --signatures approvals.cbor --crypto-manifest FILE --derived-manifest derived.cbor --derived-signatures approvals.cbor --runtime-inputs FILE --cometbft-genesis genesis.json]"
+    "usage:\n  bit genesis build --input INPUT.json --output identity.cbor\n  bit genesis verify --manifest identity.cbor [--signatures approvals.cbor]\n  bit genesis inspect --manifest identity.cbor\n  bit genesis sign --manifest identity.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit genesis inspect-runtime --input runtime-inputs.json\n  bit genesis materialize --manifest identity.cbor --signatures approvals.cbor --runtime-inputs runtime-inputs.json --output BUNDLE_DIR\n  bit genesis verify-bundle --bundle BUNDLE_DIR --derived-signatures approvals.cbor\n  bit genesis build-derived --manifest identity.cbor --input DERIVED.json --output derived.cbor\n  bit genesis verify-derived --manifest identity.cbor --derived derived.cbor [--signatures approvals.cbor]\n  bit genesis inspect-derived --manifest identity.cbor --derived derived.cbor\n  bit genesis sign-derived --manifest identity.cbor --derived derived.cbor --key-file KEY --output approvals.cbor [--append OLD.cbor]\n  bit release preflight --input mainnet.json [--manifest identity.cbor --signatures approvals.cbor --crypto-manifest FILE --derived-manifest derived.cbor --derived-signatures approvals.cbor --runtime-inputs FILE --cometbft-genesis genesis.json]"
 }
 
 #[cfg(test)]

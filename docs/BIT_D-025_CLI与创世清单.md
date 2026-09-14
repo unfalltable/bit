@@ -1,6 +1,6 @@
 # BIT D-025 CLI 与创世清单
 
-状态：`IN_PROGRESS`。创世公开领取权的共识身份、状态编码、交易执行和证明查询已经实现；identity manifest v1、派生结果 manifest v1、两阶段多方签名包、运行时输入合同、确定性高度零构建器、离线 CLI 与 release preflight 已实现。manifest hash 已绑定高度零状态、chain context 和网关证明；正式节点消费创世 bundle、独立重放校验和真实外部输入仍待完成。
+状态：`IN_PROGRESS`。创世公开领取权的共识身份、状态编码、交易执行和证明查询已经实现；identity manifest v1、派生结果 manifest v1、两阶段多方签名包、运行时输入合同、确定性高度零构建器、独立重放校验器、正式节点入口、离线 CLI 与 release preflight 已实现。manifest hash 已绑定高度零状态、chain context 和网关证明；真实外部输入、发布证据合同与生产运维仍待完成。
 
 ## 1. 哈希依赖顺序
 
@@ -18,7 +18,7 @@
 
 `claim_id` 不进入产生 `genesis_manifest_hash` 的身份主体。身份主体只记录领取公钥和金额；节点在得到 `chain_context` 后使用 `SHA256("bit/genesis-claim-id/v1" || chain_context || claim_pubkey || amount_be_16)` 派生领取 ID。最终派生结果可以列出 `claim_id`、状态根和 app hash 供签署者复核，但不能反向改变身份 hash。
 
-当前代码已固定上述 `claim_id` 公式。identity manifest 的机器合同位于 `bit-genesis`；`GenesisConfig` 必须携带非零 manifest hash，并要求其派生结果等于 chain context。manifest hash 与 chain context 会写入高度零 JMT，重启时作为不可变配置核对。`genesis materialize` 已把 identity、达到阈值的第一阶段签名和运行时输入转换成完整配置及高度零状态；主网仍必须由真实参与者提供并签署外部输入。
+当前代码已固定上述 `claim_id` 公式。identity manifest 的机器合同位于 `bit-genesis`；`GenesisConfig` 必须携带非零 manifest hash，并要求其派生结果等于 chain context。manifest hash 与 chain context 会写入高度零 JMT，重启时作为不可变配置核对。`genesis materialize` 已把 identity、达到阈值的第一阶段签名和运行时输入转换成完整配置及高度零状态；`verify-bundle` 与 `bit-node` 会再次清空状态重放，并验证第二阶段阈值后才允许启动。主网仍必须由真实参与者提供并签署外部输入。
 
 ## 2. 创世领取状态
 
@@ -131,7 +131,9 @@ identity 的 `consensus_parameters_sha256` 是这份运行时输入文件原始�
 
 创世 execution/compact 标记分别使用 `SHA256("BIT-GENESIS-EXECUTION-V1" || identity_hash || runtime_hash)` 和对应 COMPACT 域。它们是高度零初始化标记；正常高度从 1 开始，继续使用 D-002 的规范区块产物编码与 hash 域。
 
-公开 fixture 连续构建两次会得到相同的 app hash、TCT 根、CometBFT genesis 和 derived bytes；黄金结果位于 `tests/vectors/genesis-materialized-vectors.json`。由 Go module v0.38.23 构建的实际 CometBFT 二进制（自报 0.38.22）已读取生成文件并进入 ABCI 连接阶段，说明 JSON 和共识参数结构可被目标二进制接受。
+公开 fixture 连续构建两次会得到相同的 app hash、TCT 根、CometBFT genesis 和 derived bytes；黄金结果位于 `tests/vectors/genesis-materialized-vectors.json`。`verify-bundle` 不信任 bundle 内的 RocksDB，而是在新的临时目录从 identity、第一阶段签名和运行时输入重建全部确定性文件，逐字节比较 genesis、derived 和报告，再验证第二阶段签名。输入必须是普通文件/目录，拒绝符号链接、超限文件、缺项、非规范 JSON 和任何重放差异。
+
+`bit-node start` 只接受 bundle、第二阶段签名、独立状态目录和 loopback ABCI 地址。它从已验证结果构造 `GenesisConfig` 和完整 `RequestInitChain`，保留 `genesis.json` 中 CometBFT 实际传递的原始 `app_state` JSON 字节，拒绝本地参数覆盖和 bundle/state 路径重叠。由 Go module v0.38.23 构建的实际 CometBFT 二进制（自报 0.38.22）已完成 InitChain 并连续出块；区块 1 header 的 app hash、初始验证人投票权和 ICS23 manifest 证明均与重放结果一致，应用与 CometBFT 成对重启后继续推进。
 
 ## 8. CLI 与 preflight
 
@@ -148,6 +150,8 @@ bit genesis inspect-runtime --input runtime-inputs.json
 bit genesis materialize --manifest identity.cbor \
   --signatures approvals.cbor --runtime-inputs runtime-inputs.json \
   --output genesis-bundle
+bit genesis verify-bundle --bundle genesis-bundle \
+  --derived-signatures genesis-bundle/derived-signatures.cbor
 bit genesis build-derived --manifest identity.cbor \
   --input DERIVED.json --output derived.cbor
 bit genesis verify-derived --manifest identity.cbor \
@@ -160,18 +164,19 @@ bit release preflight --input mainnet.json \
   --crypto-manifest crypto/manifest.json \
   --derived-manifest derived.cbor --derived-signatures derived-approvals.cbor \
   --runtime-inputs runtime-inputs.json --cometbft-genesis genesis.json
+bit-node start --bundle genesis-bundle --state-dir node-state \
+  --listen 127.0.0.1:26658
 ```
 
-identity `inspect` 输出 manifest/policy hash、chain context、四类分配合计，以及派生的 claim、validator 和自质押 position ID。`inspect-runtime` 严格解码运行时合同并输出文件 SHA-256。derived `inspect` 输出两阶段 manifest hash、运行时输入 hash、状态根、app hash 和 CometBFT genesis hash。`materialize` 和所有 `build`、`sign` 命令默认拒绝覆盖已有目标。
+identity `inspect` 输出 manifest/policy hash、chain context、四类分配合计，以及派生的 claim、validator 和自质押 position ID。`inspect-runtime` 严格解码运行时合同并输出文件 SHA-256。derived `inspect` 输出两阶段 manifest hash、运行时输入 hash、状态根、app hash 和 CometBFT genesis hash。`verify-bundle` 输出两阶段审批数和已复算的关键哈希。`materialize` 和所有 `build`、`sign` 命令默认拒绝覆盖已有目标；节点未指定 `--derived-signatures` 时只读取 bundle 内的 `derived-signatures.cbor`。
 
 preflight 从实际证据计算 `mainnet_ready`，不采信输入 JSON 中的同名布尔值。它核对 identity manifest 与 JSON 身份逐字节一致、第一阶段签名阈值、crypto/参数文件 SHA-256、派生 manifest 文件哈希与全部摘要字段、第二阶段签名阈值、运行时输入和 CometBFT genesis 文件哈希、当前 Git HEAD 与干净工作区、G0 分配闭环、`Mint/Burn/K/e=0`、`Future=M-G0`、发布产物文件哈希，并要求非空检查点、独立端点、安全审查和平台签名材料。默认模板会明确列出 blockers 并以非零退出码结束。
 
 ## 9. 尚未完成的 D-025 范围
 
-1. 正式节点命令从 bundle 重构并锁定完整 `GenesisConfig` 与 `RequestInitChain`，启动时核对 derived 第二阶段签名并拒绝本地覆盖。
-2. 增加独立 `verify-bundle` 重放器，清空临时状态后从 identity/runtime 复算 JMT/TCT、CometBFT JSON 和 derived bytes，并逐项比较现有 bundle。
-3. 对初始私密承诺执行资产语义检查；当前已经拒绝非法曲线字段、重复承诺，并对验证者自质押执行 staking 参数、投票权、元数据和恢复收据检查。
-4. 将检查点、独立端点、安全审查、平台证书和发布产物升级为有明确字段、签名范围及撤销语义的证据合同。
-5. 实现 `genesis claim` 的钱包构造流程，并由真实参与者填写、独立签署主网公钥、金额、验证人和发布材料。
+1. 对初始私密承诺执行资产语义检查；当前已经拒绝非法曲线字段、重复承诺，并对验证者自质押执行 staking 参数、投票权、元数据和恢复收据检查。
+2. 将检查点、独立端点、安全审查、平台证书和发布产物升级为有明确字段、签名范围及撤销语义的证据合同。
+3. 实现 `genesis claim` 的钱包构造流程，并由真实参与者填写、独立签署主网公钥、金额、验证人和发布材料。
+4. 补生产服务管理、节点目录权限、备份恢复、发布安装包和多机创世演练；单机集成证据不能替代独立故障域验收。
 
 `config/mainnet-inputs.template.json` 继续保持 `mainnet_ready=false`。空数组和布尔值不构成经济批准、分配授权或发布证据。

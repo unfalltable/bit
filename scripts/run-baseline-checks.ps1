@@ -64,6 +64,8 @@ try {
     Invoke-BitCheck 'rust-unit' 'cargo' @('test', '--workspace', '--locked')
     Invoke-BitCheck 'python-oracle' 'py' @('-B', '-m', 'unittest', 'discover', '-s', 'reference', '-p', 'test_*.py', '-v')
     Invoke-BitCheck 'comet-evidence-build' (Join-Path $bitRoot 'feasibility\.tools\go\bin\go.exe') @('-C', (Join-Path $bitRoot 'feasibility\evidence-injector'), 'build', '-trimpath', '-o', (Join-Path $bitRoot 'feasibility\.tools\bin\bit-evidence-injector.exe'), '.')
+    Invoke-BitCheck 'genesis-node-build' 'cargo' @('build', '-p', 'bit-genesis', '--bin', 'bit', '-p', 'bit-app', '--bin', 'bit-node', '--locked')
+    Invoke-BitCheck 'genesis-node-smoke' 'py' @('-B', 'scripts/run-genesis-node-smoke.py')
     Invoke-BitCheck 'comet-app-build' 'cargo' @('build', '-p', 'bit-app', '--example', 'comet_network_probe', '--locked')
     Invoke-BitCheck 'comet-app-network' 'py' @('-B', 'feasibility/scripts/run_bit_app_network.py')
 } finally {
@@ -94,6 +96,7 @@ $bitReport = [ordered]@{
     mobile = 'SKIPPED_BY_USER'
     upstream_warnings = 'Present in pinned Penumbra dependencies; BIT crates pass clippy -D warnings'
     artifacts = @(
+        [ordered]@{ path = 'reports/genesis-node-smoke.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'reports\genesis-node-smoke.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/reports/bit-app-network-result.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\reports\bit-app-network-result.json') -Algorithm SHA256).Hash.ToLowerInvariant() }
     )
     inputs = @(
@@ -129,6 +132,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'crates/bit-state/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-state\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-state/src/state_snapshot.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-state\src\state_snapshot.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'crates/bit-app/src/main.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\main.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/abci.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\abci.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/artifact_archive.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\artifact_archive.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
@@ -167,6 +171,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'feasibility/scripts/run_bit_app_network.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\run_bit_app_network.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/rust_env.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\rust_env.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/bootstrap_tools.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\bootstrap_tools.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'scripts/run-genesis-node-smoke.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'scripts\run-genesis-node-smoke.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'scripts/run-baseline-checks.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'scripts\run-baseline-checks.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() }
     )
 }

@@ -1,12 +1,12 @@
 {
   "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, canonical block artifacts, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T213144308513",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T221404586463",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "application_sha256": "53a1f1f4297ca7b6238dded6c96b0ef65983c2e22530107c36aea7ff34263435",
-    "evidence_injector_sha256": "ded6610ff26002e3121a3f659c4c9c3f45fd95282b9b7cca8594ad0d20b62d13"
+    "application_sha256": "d0070ed938dac3294f27e3380e54e281d1261207050e36364e4d436ce42719ae",
+    "evidence_injector_sha256": "59736a28fef609a9959803f8c36ace4a390d8d854ae93ea155e0fac3cc9f24ab"
   },
   "checks": {
     "real_transfer": {
@@ -26,12 +26,12 @@
       "transaction_record_proved_on_nodes": 4,
       "nullifier_records_proved_on_nodes": 4,
       "post_transfer_tree_root": "c7c2a01a326fa450ea94e065adff45fa0d4d6c28c8280eab147dc0db288a0001",
-      "post_transfer_app_hash": "9c98e4fa0a638f7b764ae2ed7ddde980ea3429b05b1873dc77824381abcae7ee"
+      "post_transfer_app_hash": "50c4943fc871d396ef0f1bba4c0bc0f62e6e2d9a5b097c16702895e6a17c6f08"
     },
     "canonical_block_artifacts": {
       "height": 12,
-      "execution_hash": "6b11d10ff6abc33abdc8f48ee20cfc500929c8832c25729ae67347544396891c",
-      "compact_hash": "fe60ec8c02d24f4dc8b7cc1809f6402106e569b08a318d613d53945965661670",
+      "execution_hash": "bbf1602d047a8def463145b752d01174441da12eb2a93194d56d94c085cdc608",
+      "compact_hash": "6781f9f78cec56f8f1dcd0fb37c2b80663fbc86c6b3e87a05906cd31126d5bc9",
       "execution_bytes": 237,
       "compact_bytes": 1577,
       "state_proofs_and_abci_event_match_on_nodes": 4,
@@ -42,27 +42,27 @@
     },
     "canonical_supply_audit": {
       "canonical_bytes": 309,
-      "sha256": "66f9a6b6d12b9503011a93dcbf5965c97f3a38e3e71502f76426e511048075ee",
+      "sha256": "1ba362517ae30213f0a5048e88b2839c5f2f2193a054414d33d0d0ed80792102",
       "state_proved_on_nodes": 4
     },
     "validator_powers_h6_h7_h8": {
       "6": {
-        "f2069bd9ac36036478fec4cacc4f5a999577d07917af28374be81f301e75af4e": 10,
-        "da7b577da4f7f8f300da9253cea27b89136f9109d7041885be73762c35e65f49": 10,
-        "ea50307ac3c8c55f68a49cf41c3608f27daa86dde7de4c226ecea3aa91b89b2b": 10,
-        "14c80e504f5dfd7c273c147602417ee7ccdef40a2002e8882206a0c001450364": 10
+        "f7cdb59f8d150095e76605f9567d9e34752e30b5dbfbeb137b5c1d81aacc1ab6": 10,
+        "fa815cfb06b3816d5f31bead44e7451e0d438df8498111d6b4096c44d31b8a5c": 10,
+        "84305d3470d93048343562c0bb0cc072cbb571c7cfbb0f0da55f3f84ad6df984": 10,
+        "55c448f979e598df58701d2a66764999b923cd351a59c5556873a3ef9acc374d": 10
       },
       "7": {
-        "f2069bd9ac36036478fec4cacc4f5a999577d07917af28374be81f301e75af4e": 10,
-        "da7b577da4f7f8f300da9253cea27b89136f9109d7041885be73762c35e65f49": 10,
-        "ea50307ac3c8c55f68a49cf41c3608f27daa86dde7de4c226ecea3aa91b89b2b": 10,
-        "14c80e504f5dfd7c273c147602417ee7ccdef40a2002e8882206a0c001450364": 10
+        "f7cdb59f8d150095e76605f9567d9e34752e30b5dbfbeb137b5c1d81aacc1ab6": 10,
+        "fa815cfb06b3816d5f31bead44e7451e0d438df8498111d6b4096c44d31b8a5c": 10,
+        "84305d3470d93048343562c0bb0cc072cbb571c7cfbb0f0da55f3f84ad6df984": 10,
+        "55c448f979e598df58701d2a66764999b923cd351a59c5556873a3ef9acc374d": 10
       },
       "8": {
-        "f2069bd9ac36036478fec4cacc4f5a999577d07917af28374be81f301e75af4e": 3476,
-        "da7b577da4f7f8f300da9253cea27b89136f9109d7041885be73762c35e65f49": 3476,
-        "ea50307ac3c8c55f68a49cf41c3608f27daa86dde7de4c226ecea3aa91b89b2b": 3476,
-        "14c80e504f5dfd7c273c147602417ee7ccdef40a2002e8882206a0c001450364": 3476
+        "f7cdb59f8d150095e76605f9567d9e34752e30b5dbfbeb137b5c1d81aacc1ab6": 3659,
+        "fa815cfb06b3816d5f31bead44e7451e0d438df8498111d6b4096c44d31b8a5c": 3659,
+        "84305d3470d93048343562c0bb0cc072cbb571c7cfbb0f0da55f3f84ad6df984": 3659,
+        "55c448f979e598df58701d2a66764999b923cd351a59c5556873a3ef9acc374d": 2929
       }
     },
     "h_plus_two_update": true,
@@ -74,31 +74,31 @@
       19
     ],
     "same_app_hash_height": 18,
-    "same_app_hash": "0d7a1c8717ea926748594bafeffc50c76413834cd7eb6c79f284d9fb6d496350",
+    "same_app_hash": "2a687f6efcf68d893b0146c187b4e31f8894b2855dfcbff9c4cb1a6ba96643f5",
     "latest_and_historical_ics23_proofs": true,
     "real_duplicate_vote_evidence": {
-      "comet_evidence_hash": "d9df6982ffcf774bace0a268414307f431c6a7f88b2a32396b29815b45fad29d",
-      "validator_address": "bcb33327bd529957a8b95284069c8ce28fc0294a",
-      "validator_power": 6943,
+      "comet_evidence_hash": "2b66cf0f490269022ef77a95b9096cb6c99dd2bc834a0174b641f54cecff25dd",
+      "validator_address": "0759c176fefc491e4df3d3d486314a3ad16a8d6a",
+      "validator_power": 7307,
       "infraction_height": 17,
-      "infraction_time_seconds": 1789421531,
-      "infraction_time_nanos": 609059200,
+      "infraction_time_seconds": 1789424071,
+      "infraction_time_nanos": 452771500,
       "total_voting_power": 27772,
-      "inclusion_height": 20,
-      "bit_evidence_hash": "0cc374f1001a10f30e5f0bd82f00914b9ba329b70c83ef0aebd4226dc4fd158d",
+      "inclusion_height": 22,
+      "bit_evidence_hash": "5658a5d58363c6f3616bdf068bb5f969667c2842737816d4d21a0970f5123888",
       "validator_present_at_h_plus_one": true,
       "validator_removed_at_h_plus_two": true,
       "post_evidence_validator_count": 3,
-      "burned_atomic": "4858822721098",
-      "same_app_hash": "e739d7f3d1541fdb1a3a226b9684a64d4a5ef0babdf154911558949b26845195",
+      "burned_atomic": "6641114256738",
+      "same_app_hash": "0e937e6b98021a5752b4640570e965bebc61d15cb6faf721df946e2eac181473",
       "ics23_evidence_membership": true
     },
-    "quorum_halt_height": 23,
+    "quorum_halt_height": 25,
     "quorum_recovery_heights": [
-      27,
-      27,
-      27,
-      27
+      29,
+      29,
+      29,
+      29
     ]
   },
   "limitations": [
@@ -107,6 +107,6 @@
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T21:31:44.308626+00:00",
-  "finished_at": "2026-09-14T21:32:30.318284+00:00"
+  "started_at": "2026-09-14T22:14:04.586561+00:00",
+  "finished_at": "2026-09-14T22:14:51.206489+00:00"
 }
