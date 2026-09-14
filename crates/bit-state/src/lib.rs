@@ -6,14 +6,16 @@
 //! tree, anchors, nullifiers, and transaction markers in one RocksDB batch.
 
 use bit_emission::{
-    completed_epochs_after_height, FeeClass, FeePolicy, GenesisAllocation, SupplyAudit, SupplyState,
+    completed_epochs_after_height, FeeClass, FeePolicy, GenesisAllocation, SupplyAudit,
+    SupplyContainer, SupplyState,
 };
 use bit_staking::{
-    ActivationCapacityRecord, ActivationOutcome, CandidateIndexEntry, CommitVote,
-    ConsensusPowerUpdate, EffectiveValidatorSet, ExitAdvanceOutcome, ExitCohort, ExitQueueEntry,
-    ExitTicket, PositionStatus, StakePool, StakePosition, StakingBook, StakingParameters,
-    StakingTotals, Validator, ValidatorPower, ValidatorReward, ValidatorSetTransition,
-    ValidatorUpdate,
+    consensus_address, ActivationCapacityRecord, ActivationOutcome, CandidateIndexEntry,
+    CommitVote, ConsensusPowerUpdate, EffectiveValidatorSet, ExitAdvanceOutcome, ExitCohort,
+    ExitQueueEntry, ExitTicket, PositionStatus, SlashAdvanceOutcome, SlashJob, StakePool,
+    StakePosition, StakingBook, StakingParameters, StakingTotals, Validator, ValidatorPower,
+    ValidatorReward, ValidatorSetTransition, ValidatorStatus, ValidatorUpdate,
+    COMETBFT_ADDRESS_BYTES,
 };
 use bit_transaction::{
     verify_staking_stateless, verify_transfer_stateless, ActionAuthorizationView,
@@ -37,7 +39,7 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 15;
+const STORAGE_SCHEMA_VERSION: u32 = 16;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -86,6 +88,8 @@ const STAKING_EXIT_MATURITY_HEIGHT_QUEUE_PREFIX: &str = "staking/exits/maturity_
 const STAKING_EXIT_MATURITY_TIME_QUEUE_PREFIX: &str = "staking/exits/maturity_time_queue/";
 const STAKING_EFFECTIVE_SCHEDULE: &str = "staking/effective_schedule";
 const STAKING_EFFECTIVE_HISTORY_PREFIX: &str = "staking/effective_history/";
+const STAKING_SLASH_JOB_PREFIX: &str = "staking/slash_jobs/";
+const STAKING_EVIDENCE_PREFIX: &str = "staking/evidence/";
 
 const SUBSTORES: &[&str] = &[
     "shielded",
@@ -225,6 +229,8 @@ pub enum Error {
     InvalidSystemPhase(&'static str),
     #[error("next_validators_hash does not match the persisted H+1 validator set")]
     NextValidatorsHashMismatch,
+    #[error("invalid Byzantine evidence: {0}")]
+    InvalidByzantineEvidence(&'static str),
     #[error(
         "HALT_NO_SAFE_VALIDATOR_SET: validator updates would remove the last effective validator"
     )]
@@ -266,6 +272,8 @@ pub struct SystemBlockOutcome {
     pub activations: Vec<(Hash32, ActivationOutcome)>,
     pub validator_set: Option<Vec<ValidatorPower>>,
     pub validator_updates: Vec<ConsensusPowerUpdate>,
+    pub evidence: Vec<EvidenceOutcome>,
+    pub slash_advance: SlashAdvanceOutcome,
     pub exit_advance: ExitAdvanceOutcome,
 }
 
@@ -339,6 +347,127 @@ impl ValidatorSetHistoryRecord {
             validator_set,
         })
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+pub enum ByzantineEvidenceKind {
+    DuplicateVote = 1,
+    LightClientAttack = 2,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ByzantineEvidence {
+    pub kind: ByzantineEvidenceKind,
+    pub validator_address: [u8; COMETBFT_ADDRESS_BYTES],
+    pub validator_power: u64,
+    pub infraction_height: u64,
+    pub infraction_time_seconds: u64,
+    pub infraction_time_nanos: u32,
+    pub total_voting_power: u64,
+}
+
+impl ByzantineEvidence {
+    pub fn canonical_hash(&self, chain_context: &Hash32) -> Hash32 {
+        let mut hasher = Sha256::new();
+        hasher.update(b"BIT-EVIDENCE-V1");
+        hasher.update(chain_context);
+        hasher.update([self.kind as u8]);
+        hasher.update(self.validator_address);
+        hasher.update(self.validator_power.to_be_bytes());
+        hasher.update(self.infraction_height.to_be_bytes());
+        hasher.update(self.infraction_time_seconds.to_be_bytes());
+        hasher.update(self.infraction_time_nanos.to_be_bytes());
+        hasher.update(self.total_voting_power.to_be_bytes());
+        hasher.finalize().into()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EvidenceRecord {
+    pub evidence_hash: Hash32,
+    pub evidence: ByzantineEvidence,
+    pub validator_id: Hash32,
+    pub accepted_height: u64,
+}
+
+impl EvidenceRecord {
+    fn encode_persistent(&self) -> Vec<u8> {
+        let evidence = &self.evidence;
+        let mut out = Vec::with_capacity(130);
+        out.push(1);
+        out.extend_from_slice(&self.evidence_hash);
+        out.push(evidence.kind as u8);
+        out.extend_from_slice(&evidence.validator_address);
+        out.extend_from_slice(&evidence.validator_power.to_be_bytes());
+        out.extend_from_slice(&evidence.infraction_height.to_be_bytes());
+        out.extend_from_slice(&evidence.infraction_time_seconds.to_be_bytes());
+        out.extend_from_slice(&evidence.infraction_time_nanos.to_be_bytes());
+        out.extend_from_slice(&evidence.total_voting_power.to_be_bytes());
+        out.extend_from_slice(&self.validator_id);
+        out.extend_from_slice(&self.accepted_height.to_be_bytes());
+        out
+    }
+
+    fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut offset = 0usize;
+        if take_evidence(bytes, &mut offset, 1)?[0] != 1 {
+            return Err(Error::CorruptState(
+                "unsupported evidence record version".to_owned(),
+            ));
+        }
+        let evidence_hash = take_evidence(bytes, &mut offset, 32)?
+            .try_into()
+            .expect("slice length is checked");
+        let kind = match take_evidence(bytes, &mut offset, 1)?[0] {
+            1 => ByzantineEvidenceKind::DuplicateVote,
+            2 => ByzantineEvidenceKind::LightClientAttack,
+            _ => return Err(Error::CorruptState("unknown evidence kind".to_owned())),
+        };
+        let validator_address = take_evidence(bytes, &mut offset, COMETBFT_ADDRESS_BYTES)?
+            .try_into()
+            .expect("slice length is checked");
+        let validator_power = read_evidence_u64(bytes, &mut offset)?;
+        let infraction_height = read_evidence_u64(bytes, &mut offset)?;
+        let infraction_time_seconds = read_evidence_u64(bytes, &mut offset)?;
+        let infraction_time_nanos = u32::from_be_bytes(
+            take_evidence(bytes, &mut offset, 4)?
+                .try_into()
+                .expect("slice length is checked"),
+        );
+        let total_voting_power = read_evidence_u64(bytes, &mut offset)?;
+        let validator_id = take_evidence(bytes, &mut offset, 32)?
+            .try_into()
+            .expect("slice length is checked");
+        let accepted_height = read_evidence_u64(bytes, &mut offset)?;
+        if offset != bytes.len() {
+            return Err(Error::CorruptState(
+                "trailing evidence record bytes".to_owned(),
+            ));
+        }
+        Ok(Self {
+            evidence_hash,
+            evidence: ByzantineEvidence {
+                kind,
+                validator_address,
+                validator_power,
+                infraction_height,
+                infraction_time_seconds,
+                infraction_time_nanos,
+                total_voting_power,
+            },
+            validator_id,
+            accepted_height,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EvidenceOutcome {
+    pub evidence_hash: Hash32,
+    pub validator_id: Hash32,
+    pub newly_tombstoned: bool,
+    pub slashed_active_assets: Amount,
 }
 
 impl EffectiveValidatorSchedule {
@@ -640,6 +769,7 @@ impl PersistentState {
             staking,
             effective_schedule,
             staking_touches: StakingTouches::default(),
+            pending_evidence: BTreeMap::new(),
             system_phases_staged: false,
             transaction_count: 0,
         })
@@ -687,6 +817,19 @@ impl PersistentState {
         height: u64,
     ) -> Result<ValidatorSetHistoryRecord> {
         read_validator_history(&self.storage.latest_snapshot(), height).await
+    }
+
+    pub async fn evidence_record(&self, evidence_hash: &Hash32) -> Result<Option<EvidenceRecord>> {
+        let snapshot = self.storage.latest_snapshot();
+        let Some(bytes) = snapshot
+            .get_raw(&staking_evidence_key(evidence_hash))
+            .await?
+        else {
+            return Ok(None);
+        };
+        let record = EvidenceRecord::decode_persistent(&bytes)?;
+        validate_stored_evidence_record(&record, evidence_hash, &self.config.chain_context)?;
+        Ok(Some(record))
     }
 
     /// Hash CometBFT must place in the height-H request for its H+1 set.
@@ -788,6 +931,7 @@ pub struct BlockSession<'a> {
     staking: StakingBook,
     effective_schedule: EffectiveValidatorSchedule,
     staking_touches: StakingTouches,
+    pending_evidence: BTreeMap<Hash32, EvidenceRecord>,
     system_phases_staged: bool,
     transaction_count: usize,
 }
@@ -800,6 +944,7 @@ struct StakingTouches {
     capacity_epochs: BTreeSet<u64>,
     exit_cohorts: BTreeSet<Hash32>,
     exit_tickets: BTreeSet<Hash32>,
+    slash_jobs: BTreeSet<Hash32>,
 }
 
 struct StakingAuthorizationSnapshot<'a>(&'a StakingBook);
@@ -883,9 +1028,10 @@ impl BlockSession<'_> {
     /// Execute the deterministic pre-transaction consensus phases for this
     /// block. At height greater than one the supplied votes are CometBFT's
     /// actual validator set for the previous height.
-    pub fn stage_consensus_system(
+    pub async fn stage_consensus_system(
         &mut self,
         last_commit: Option<&[CommitVote]>,
+        evidence: &[ByzantineEvidence],
         next_validators_hash: Hash32,
     ) -> Result<SystemBlockOutcome> {
         if self.system_phases_staged {
@@ -899,20 +1045,25 @@ impl BlockSession<'_> {
             self.staking.clone(),
             self.effective_schedule.clone(),
             self.staking_touches.clone(),
+            self.pending_evidence.clone(),
         );
-        let outcome = self.stage_consensus_system_inner(last_commit, next_validators_hash);
+        let outcome = self
+            .stage_consensus_system_inner(last_commit, evidence, next_validators_hash)
+            .await;
         if outcome.is_err() {
             self.supply = checkpoint.0;
             self.staking = checkpoint.1;
             self.effective_schedule = checkpoint.2;
             self.staking_touches = checkpoint.3;
+            self.pending_evidence = checkpoint.4;
         }
         outcome
     }
 
-    fn stage_consensus_system_inner(
+    async fn stage_consensus_system_inner(
         &mut self,
         last_commit: Option<&[CommitVote]>,
+        evidence: &[ByzantineEvidence],
         next_validators_hash: Hash32,
     ) -> Result<SystemBlockOutcome> {
         self.effective_schedule.validate_block_context(
@@ -920,6 +1071,15 @@ impl BlockSession<'_> {
             last_commit,
             next_validators_hash,
         )?;
+
+        let h_plus_one = self
+            .height
+            .checked_add(1)
+            .ok_or(Error::InvalidSystemPhase("validator set height overflow"))?;
+        let base_set = self
+            .effective_schedule
+            .effective_set_at(h_plus_one)?
+            .clone();
 
         let last_commit_height = (self.height > 1).then_some(self.height - 1);
         let mut updates = BTreeMap::new();
@@ -944,15 +1104,9 @@ impl BlockSession<'_> {
             );
         }
 
-        let exit_advance = self
-            .staking
-            .advance_exit_cohorts(self.height, self.block_time_seconds)?;
-        self.staking_touches
-            .exit_cohorts
-            .extend(exit_advance.exposure_recorded.iter().copied());
-        self.staking_touches
-            .exit_cohorts
-            .extend(exit_advance.matured.iter().copied());
+        let evidence = self
+            .stage_byzantine_evidence(evidence, &base_set, &mut updates)
+            .await?;
 
         let mut reward_settlement = None;
         let mut activations = Vec::new();
@@ -976,6 +1130,31 @@ impl BlockSession<'_> {
             }
             validator_set = Some(transition.selected);
         }
+
+        let slash_advance = self.staking.advance_slash_jobs()?;
+        self.supply.burn_from(
+            &self.owner.config.monetary_policy,
+            SupplyContainer::Exits,
+            slash_advance.slashed_exit_assets,
+        )?;
+        self.staking_touches
+            .slash_jobs
+            .extend(slash_advance.touched_jobs.iter().copied());
+        self.staking_touches
+            .exit_cohorts
+            .extend(slash_advance.touched_cohorts.iter().copied());
+
+        let exit_advance = self
+            .staking
+            .advance_exit_cohorts(self.height, self.block_time_seconds)?;
+        self.staking_touches
+            .exit_cohorts
+            .extend(exit_advance.exposure_recorded.iter().copied());
+        self.staking_touches
+            .exit_cohorts
+            .extend(exit_advance.matured.iter().copied());
+        validate_staking_supply(&self.staking, &self.supply)?;
+
         let validator_updates: Vec<_> = updates
             .into_iter()
             .map(|(consensus_pubkey, power)| ConsensusPowerUpdate {
@@ -983,14 +1162,6 @@ impl BlockSession<'_> {
                 power,
             })
             .collect();
-        let h_plus_one = self
-            .height
-            .checked_add(1)
-            .ok_or(Error::InvalidSystemPhase("validator set height overflow"))?;
-        let base_set = self
-            .effective_schedule
-            .effective_set_at(h_plus_one)?
-            .clone();
         let h_plus_two = base_set.apply_updates(&validator_updates)?;
         if !base_set.validators().is_empty() && h_plus_two.validators().is_empty() {
             return Err(Error::NoSafeValidatorSet);
@@ -1004,8 +1175,164 @@ impl BlockSession<'_> {
             activations,
             validator_set,
             validator_updates,
+            evidence,
+            slash_advance,
             exit_advance,
         })
+    }
+
+    async fn stage_byzantine_evidence(
+        &mut self,
+        evidence: &[ByzantineEvidence],
+        base_set: &EffectiveValidatorSet,
+        updates: &mut BTreeMap<Hash32, u64>,
+    ) -> Result<Vec<EvidenceOutcome>> {
+        let mut ordered = BTreeMap::new();
+        for item in evidence {
+            let hash = item.canonical_hash(&self.owner.config.chain_context);
+            if let Some(previous) = ordered.insert(hash, item.clone()) {
+                if previous != *item {
+                    return Err(Error::InvalidByzantineEvidence(
+                        "canonical evidence hash collision",
+                    ));
+                }
+            }
+        }
+
+        let mut outcomes = Vec::new();
+        for (evidence_hash, item) in ordered {
+            if self.pending_evidence.contains_key(&evidence_hash) {
+                continue;
+            }
+            let key = staking_evidence_key(&evidence_hash);
+            if let Some(bytes) = self.delta.get_raw(&key).await? {
+                let record = EvidenceRecord::decode_persistent(&bytes)?;
+                validate_stored_evidence_record(
+                    &record,
+                    &evidence_hash,
+                    &self.owner.config.chain_context,
+                )?;
+                if record.evidence != item {
+                    return Err(Error::CorruptState(
+                        "evidence hash maps to different canonical evidence".to_owned(),
+                    ));
+                }
+                continue;
+            }
+
+            validate_evidence_shape(
+                &item,
+                self.height,
+                self.block_time_seconds,
+                self.staking.parameters(),
+            )?;
+            let validator_id = self.validate_evidence_responsibility(&item).await?;
+            let slash = self.staking.begin_byzantine_slash(
+                &validator_id,
+                evidence_hash,
+                item.infraction_height,
+            )?;
+            self.supply.burn_from(
+                &self.owner.config.monetary_policy,
+                SupplyContainer::Stake,
+                slash.slashed_active_assets,
+            )?;
+            self.staking_touches.validators.insert(validator_id);
+            self.staking_touches.pools.insert(validator_id);
+            self.staking_touches.slash_jobs.insert(validator_id);
+
+            if slash.newly_tombstoned {
+                for member in base_set.validators() {
+                    let address = consensus_address(&member.consensus_pubkey);
+                    let member_validator = self
+                        .staking
+                        .validator_id_for_consensus_address(&address)
+                        .map_err(|_| {
+                            Error::CorruptState(
+                                "effective validator is absent from consensus key history"
+                                    .to_owned(),
+                            )
+                        })?;
+                    if member_validator == validator_id {
+                        updates.insert(member.consensus_pubkey, 0);
+                    }
+                }
+            }
+
+            self.pending_evidence.insert(
+                evidence_hash,
+                EvidenceRecord {
+                    evidence_hash,
+                    evidence: item,
+                    validator_id,
+                    accepted_height: self.height,
+                },
+            );
+            outcomes.push(EvidenceOutcome {
+                evidence_hash,
+                validator_id,
+                newly_tombstoned: slash.newly_tombstoned,
+                slashed_active_assets: slash.slashed_active_assets,
+            });
+        }
+        Ok(outcomes)
+    }
+
+    async fn validate_evidence_responsibility(
+        &self,
+        evidence: &ByzantineEvidence,
+    ) -> Result<Hash32> {
+        let key = staking_effective_history_key(evidence.infraction_height);
+        let bytes = self
+            .delta
+            .get_raw(&key)
+            .await?
+            .ok_or(Error::InvalidByzantineEvidence(
+                "validator history is unavailable",
+            ))?;
+        let history = ValidatorSetHistoryRecord::decode_persistent(&bytes)?;
+        if history.height != evidence.infraction_height {
+            return Err(Error::CorruptState(
+                "validator history key contains a different height".to_owned(),
+            ));
+        }
+        if history.block_time_seconds != evidence.infraction_time_seconds {
+            return Err(Error::InvalidByzantineEvidence(
+                "infraction time differs from validator history",
+            ));
+        }
+        let mut total = 0u64;
+        let mut member = None;
+        for validator in history.validator_set.validators() {
+            total = total
+                .checked_add(validator.power)
+                .ok_or(Error::InvalidByzantineEvidence(
+                    "historical total voting power overflow",
+                ))?;
+            if consensus_address(&validator.consensus_pubkey) == evidence.validator_address {
+                member = Some(validator);
+            }
+        }
+        if total != evidence.total_voting_power {
+            return Err(Error::InvalidByzantineEvidence(
+                "total voting power differs from validator history",
+            ));
+        }
+        let member = member.ok_or(Error::InvalidByzantineEvidence(
+            "validator was not responsible at the infraction height",
+        ))?;
+        if member.power != evidence.validator_power {
+            return Err(Error::InvalidByzantineEvidence(
+                "validator power differs from validator history",
+            ));
+        }
+        self.staking
+            .validator_id_for_consensus_address(&evidence.validator_address)
+            .map_err(|_| {
+                Error::CorruptState(
+                    "historical validator is absent from consensus key history".to_owned(),
+                )
+            })
     }
 
     fn boundary_epoch(&self) -> Result<u64> {
@@ -1920,6 +2247,12 @@ impl BlockSession<'_> {
             staking_effective_history_key(self.height),
             history.encode_persistent()?,
         );
+        for (evidence_hash, record) in &self.pending_evidence {
+            self.delta.put_raw(
+                staking_evidence_key(evidence_hash),
+                record.encode_persistent(),
+            );
+        }
 
         if self.height >= self.owner.config.anchor_retention_blocks {
             let prune_height = self.height - self.owner.config.anchor_retention_blocks;
@@ -2149,6 +2482,7 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
         ));
     }
     validate_staking_supply(&staking, &supply)?;
+    validate_evidence_store(&snapshot, &staking, &config.chain_context, height).await?;
     let effective_schedule = read_effective_schedule(&snapshot).await?;
     if effective_schedule.base_height != height {
         return Err(Error::CorruptState(
@@ -2317,6 +2651,12 @@ fn write_staking_genesis(delta: &mut StateDelta<Snapshot>, staking: &StakingBook
             entry.encode_persistent(),
         );
     }
+    for job in staking.slash_jobs() {
+        delta.put_raw(
+            staking_slash_job_key(&job.validator_id),
+            job.encode_persistent(),
+        );
+    }
     Ok(())
 }
 
@@ -2403,6 +2743,12 @@ fn write_staking_updates(
             .ok_or_else(|| Error::CorruptState("touched exit ticket is missing".to_owned()))?;
         delta.put_raw(staking_exit_ticket_key(id), ticket.encode_persistent());
     }
+    for id in &touches.slash_jobs {
+        let job = staking
+            .slash_job(id)
+            .ok_or_else(|| Error::CorruptState("touched slash job is missing".to_owned()))?;
+        delta.put_raw(staking_slash_job_key(id), job.encode_persistent());
+    }
     Ok(())
 }
 
@@ -2427,6 +2773,78 @@ async fn read_validator_history(
     Ok(record)
 }
 
+async fn validate_evidence_store(
+    snapshot: &Snapshot,
+    staking: &StakingBook,
+    chain_context: &Hash32,
+    current_height: u64,
+) -> Result<()> {
+    let mut stream = snapshot.prefix_raw(STAKING_EVIDENCE_PREFIX);
+    while let Some(entry) = stream.next().await {
+        let (key, bytes) = entry?;
+        let record = EvidenceRecord::decode_persistent(&bytes)?;
+        require_hash_key(&key, STAKING_EVIDENCE_PREFIX, &record.evidence_hash)?;
+        validate_stored_evidence_record(&record, &record.evidence_hash, chain_context)?;
+        if record.accepted_height > current_height {
+            return Err(Error::CorruptState(
+                "stored evidence was accepted in a future block".to_owned(),
+            ));
+        }
+        let history = read_validator_history(snapshot, record.evidence.infraction_height).await?;
+        if history.block_time_seconds != record.evidence.infraction_time_seconds {
+            return Err(Error::CorruptState(
+                "stored evidence time differs from validator history".to_owned(),
+            ));
+        }
+        let total = history
+            .validator_set
+            .validators()
+            .iter()
+            .try_fold(0u64, |total, member| total.checked_add(member.power))
+            .ok_or_else(|| {
+                Error::CorruptState("historical total voting power overflow".to_owned())
+            })?;
+        let member = history
+            .validator_set
+            .validators()
+            .iter()
+            .find(|member| {
+                consensus_address(&member.consensus_pubkey) == record.evidence.validator_address
+            })
+            .ok_or_else(|| {
+                Error::CorruptState(
+                    "stored evidence validator is absent from validator history".to_owned(),
+                )
+            })?;
+        if member.power != record.evidence.validator_power
+            || total != record.evidence.total_voting_power
+        {
+            return Err(Error::CorruptState(
+                "stored evidence power differs from validator history".to_owned(),
+            ));
+        }
+        let validator_id = staking
+            .validator_id_for_consensus_address(&record.evidence.validator_address)
+            .map_err(|_| {
+                Error::CorruptState(
+                    "stored evidence address is absent from consensus key history".to_owned(),
+                )
+            })?;
+        let validator = staking.validator(&validator_id).ok_or_else(|| {
+            Error::CorruptState("stored evidence validator is missing".to_owned())
+        })?;
+        if validator_id != record.validator_id
+            || validator.status != ValidatorStatus::Tombstoned
+            || staking.slash_job(&validator_id).is_none()
+        {
+            return Err(Error::CorruptState(
+                "stored evidence does not identify a tombstoned slash job".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn take_schedule<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<&'a [u8]> {
     let end = offset
         .checked_add(len)
@@ -2447,6 +2865,89 @@ fn take_history<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<&
         .ok_or_else(|| Error::CorruptState("truncated validator history".to_owned()))?;
     *offset = end;
     Ok(value)
+}
+
+fn take_evidence<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<&'a [u8]> {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| Error::CorruptState("evidence record length overflow".to_owned()))?;
+    let value = bytes
+        .get(*offset..end)
+        .ok_or_else(|| Error::CorruptState("truncated evidence record".to_owned()))?;
+    *offset = end;
+    Ok(value)
+}
+
+fn read_evidence_u64(bytes: &[u8], offset: &mut usize) -> Result<u64> {
+    Ok(u64::from_be_bytes(
+        take_evidence(bytes, offset, 8)?
+            .try_into()
+            .expect("slice length is checked"),
+    ))
+}
+
+fn validate_evidence_shape(
+    evidence: &ByzantineEvidence,
+    current_height: u64,
+    current_time_seconds: u64,
+    parameters: &StakingParameters,
+) -> Result<()> {
+    if evidence.infraction_height == 0 || evidence.infraction_height >= current_height {
+        return Err(Error::InvalidByzantineEvidence(
+            "infraction height is not a committed positive height",
+        ));
+    }
+    if evidence.infraction_time_nanos >= 1_000_000_000
+        || evidence.infraction_time_seconds > current_time_seconds
+    {
+        return Err(Error::InvalidByzantineEvidence(
+            "infraction time is invalid or in the future",
+        ));
+    }
+    if evidence.validator_power == 0
+        || evidence.total_voting_power == 0
+        || evidence.validator_power > evidence.total_voting_power
+        || evidence.total_voting_power > parameters.max_total_voting_power
+    {
+        return Err(Error::InvalidByzantineEvidence(
+            "evidence voting power is invalid",
+        ));
+    }
+    let height_expired = evidence
+        .infraction_height
+        .checked_add(parameters.evidence_max_age_blocks)
+        .is_some_and(|deadline| current_height > deadline);
+    let time_expired = evidence
+        .infraction_time_seconds
+        .checked_add(parameters.evidence_max_age_seconds)
+        .is_some_and(|deadline| current_time_seconds > deadline);
+    if height_expired && time_expired {
+        return Err(Error::InvalidByzantineEvidence("evidence has expired"));
+    }
+    Ok(())
+}
+
+fn validate_stored_evidence_record(
+    record: &EvidenceRecord,
+    evidence_hash: &Hash32,
+    chain_context: &Hash32,
+) -> Result<()> {
+    if record.evidence_hash != *evidence_hash
+        || record.evidence.canonical_hash(chain_context) != *evidence_hash
+    {
+        return Err(Error::CorruptState(
+            "stored evidence hash differs from its key or payload".to_owned(),
+        ));
+    }
+    if record.accepted_height == 0
+        || record.accepted_height <= record.evidence.infraction_height
+        || record.evidence.infraction_time_nanos >= 1_000_000_000
+    {
+        return Err(Error::CorruptState(
+            "stored evidence contains invalid heights or time".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result<StakingBook> {
@@ -2548,6 +3049,14 @@ async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result
         }
         exit_maturity_time_queue.push(record);
     }
+    let mut slash_jobs = Vec::new();
+    let mut slash_job_stream = snapshot.prefix_raw(STAKING_SLASH_JOB_PREFIX);
+    while let Some(entry) = slash_job_stream.next().await {
+        let (key, value) = entry?;
+        let job = SlashJob::decode_persistent(&value)?;
+        require_hash_key(&key, STAKING_SLASH_JOB_PREFIX, &job.validator_id)?;
+        slash_jobs.push(job);
+    }
     Ok(StakingBook::from_records(
         chain_context,
         parameters,
@@ -2561,6 +3070,7 @@ async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result
         exit_exposure_queue,
         exit_maturity_height_queue,
         exit_maturity_time_queue,
+        slash_jobs,
     )?)
 }
 
@@ -2628,6 +3138,14 @@ pub fn staking_exit_ticket_key(id: &Hash32) -> String {
 
 pub fn staking_effective_history_key(height: u64) -> String {
     format!("{STAKING_EFFECTIVE_HISTORY_PREFIX}{height:016x}")
+}
+
+pub fn staking_slash_job_key(id: &Hash32) -> String {
+    format!("{STAKING_SLASH_JOB_PREFIX}{}", hex::encode(id))
+}
+
+pub fn staking_evidence_key(id: &Hash32) -> String {
+    format!("{STAKING_EVIDENCE_PREFIX}{}", hex::encode(id))
 }
 
 fn exit_queue_key(prefix: &str, deadline: u64, id: &Hash32) -> String {
@@ -3238,6 +3756,7 @@ mod tests {
                     [],
                     [],
                     [],
+                    [],
                 )
                 .unwrap();
                 (
@@ -3690,7 +4209,8 @@ mod tests {
         let next_hash = state.expected_next_validators_hash(height).await.unwrap();
         let empty = [];
         block
-            .stage_consensus_system((height > 1).then_some(empty.as_slice()), next_hash)
+            .stage_consensus_system((height > 1).then_some(empty.as_slice()), &[], next_hash)
+            .await
             .unwrap();
     }
 
@@ -3739,6 +4259,70 @@ mod tests {
             .unwrap(),
         };
         (genesis, validator, consensus_pubkey, power)
+    }
+
+    fn two_active_validator_config(
+        retention: u64,
+        parameters: StakingParameters,
+    ) -> (GenesisConfig, [(Hash32, Hash32, u64); 2]) {
+        let mut genesis = config(retention);
+        let chain = genesis.chain_context;
+        let principal = Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
+        let mut staking = StakingBook::new(chain, parameters).unwrap();
+        let mut identities = Vec::new();
+        for seed in [0xa1, 0xb1] {
+            let operator = [seed; 32];
+            let validator = validator_id(&chain, &operator);
+            let consensus_pubkey = [seed + 1; 32];
+            let owner = [seed + 2; 32];
+            let position = position_id(&chain, &owner);
+            staking
+                .register_validator(validator, operator, consensus_pubkey, 500)
+                .unwrap();
+            staking
+                .open_pending_delegation(
+                    0,
+                    0,
+                    position,
+                    owner,
+                    validator,
+                    principal,
+                    Amount::ZERO,
+                    true,
+                    vec![seed + 3; bit_staking::RECOVERY_RECEIPT_BYTES],
+                )
+                .unwrap();
+            staking.activate_pending(&position, 1).unwrap();
+            identities.push((validator, consensus_pubkey));
+        }
+        staking.apply_validator_set().unwrap();
+        let validators = identities
+            .into_iter()
+            .map(|(validator, consensus_pubkey)| {
+                (
+                    validator,
+                    consensus_pubkey,
+                    staking.validator(&validator).unwrap().voting_power,
+                )
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let total_stake = Amount::new(principal.value() * 2).unwrap();
+        genesis.genesis_staking = staking;
+        genesis.genesis_allocation = GenesisAllocation {
+            shielded: Amount::ZERO,
+            stake: total_stake,
+            pending_delegation: Amount::ZERO,
+            exits: Amount::ZERO,
+            commission: Amount::ZERO,
+            fee_reserve: Amount::ZERO,
+            unclaimed_genesis: Amount::new(
+                genesis.monetary_policy.genesis_supply.value() - total_stake.value(),
+            )
+            .unwrap(),
+        };
+        (genesis, validators)
     }
 
     fn verified(tx: u8, anchor: Hash32, nullifier: u8, commitment: u64) -> VerifiedTransfer {
@@ -3896,7 +4480,10 @@ mod tests {
 
         let first_hash = state.expected_next_validators_hash(1).await.unwrap();
         let mut first = state.begin_block(1, [0xa1; 32], [0xa2; 32]).await.unwrap();
-        first.stage_consensus_system(None, first_hash).unwrap();
+        first
+            .stage_consensus_system(None, &[], first_hash)
+            .await
+            .unwrap();
         state.commit(first.prepare().await.unwrap()).unwrap();
 
         let second_hash = state.expected_next_validators_hash(2).await.unwrap();
@@ -3907,7 +4494,9 @@ mod tests {
             signed: false,
         };
         assert!(matches!(
-            second.stage_consensus_system(Some(&[missed]), second_hash),
+            second
+                .stage_consensus_system(Some(&[missed]), &[], second_hash)
+                .await,
             Err(Error::NoSafeValidatorSet)
         ));
         assert_eq!(
@@ -3920,7 +4509,8 @@ mod tests {
             ..missed
         };
         let outcome = second
-            .stage_consensus_system(Some(&[signed]), second_hash)
+            .stage_consensus_system(Some(&[signed]), &[], second_hash)
+            .await
             .unwrap();
         assert!(outcome.validator_updates.is_empty());
         state.commit(second.prepare().await.unwrap()).unwrap();
@@ -3997,7 +4587,8 @@ mod tests {
         let mut boundary = state.begin_block(3, [55; 32], [56; 32]).await.unwrap();
         let boundary_hash = state.expected_next_validators_hash(3).await.unwrap();
         let system = boundary
-            .stage_consensus_system(Some(&[]), boundary_hash)
+            .stage_consensus_system(Some(&[]), &[], boundary_hash)
+            .await
             .unwrap();
         let settlement = system.reward_settlement.unwrap();
         assert_eq!(settlement.distributed, Amount::ZERO);
@@ -4120,7 +4711,8 @@ mod tests {
                 .await
                 .unwrap();
             block
-                .stage_consensus_system(votes.as_deref(), next_hash)
+                .stage_consensus_system(votes.as_deref(), &[], next_hash)
+                .await
                 .unwrap();
             state.commit(block.prepare().await.unwrap()).unwrap();
         }
@@ -4158,6 +4750,394 @@ mod tests {
             second
         );
         reopened.close().await;
+    }
+
+    #[tokio::test]
+    async fn byzantine_evidence_is_verified_burned_deduplicated_and_restart_safe() {
+        let dir = TempDir::new().unwrap();
+        let parameters = StakingParameters::reference_testnet();
+        let slash_bps = parameters.byzantine_slash_bps;
+        let (genesis_config, validators) = two_active_validator_config(8, parameters);
+        let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+
+        let first_hash = state.expected_next_validators_hash(1).await.unwrap();
+        let mut first = state
+            .begin_block_at(1, 10, [0xe1; 32], [0xe2; 32])
+            .await
+            .unwrap();
+        first
+            .stage_consensus_system(None, &[], first_hash)
+            .await
+            .unwrap();
+        state.commit(first.prepare().await.unwrap()).unwrap();
+
+        let historical = state.historical_validator_set_at(1).await.unwrap();
+        let total_voting_power = historical
+            .validator_set
+            .validators()
+            .iter()
+            .map(|member| member.power)
+            .sum();
+        let (validator_id, consensus_pubkey, validator_power) = validators[0];
+        let evidence = ByzantineEvidence {
+            kind: ByzantineEvidenceKind::DuplicateVote,
+            validator_address: consensus_address(&consensus_pubkey),
+            validator_power,
+            infraction_height: 1,
+            infraction_time_seconds: 10,
+            infraction_time_nanos: 123,
+            total_voting_power,
+        };
+        let evidence_hash = evidence.canonical_hash(&genesis_config.chain_context);
+        let previous_set = state.effective_validator_set_at(1).await.unwrap();
+        let votes: Vec<_> = previous_set
+            .validators()
+            .iter()
+            .map(|member| CommitVote {
+                consensus_address: consensus_address(&member.consensus_pubkey),
+                power: member.power,
+                signed: true,
+            })
+            .collect();
+        let second_hash = state.expected_next_validators_hash(2).await.unwrap();
+        let mut second = state
+            .begin_block_at(2, 20, [0xe3; 32], [0xe4; 32])
+            .await
+            .unwrap();
+        let mut wrong_power = evidence.clone();
+        wrong_power.validator_power += 1;
+        assert!(matches!(
+            second
+                .stage_consensus_system(Some(&votes), &[wrong_power], second_hash)
+                .await,
+            Err(Error::InvalidByzantineEvidence(
+                "validator power differs from validator history"
+            ))
+        ));
+        assert_eq!(
+            second.staking.validator(&validator_id).unwrap().status,
+            ValidatorStatus::Active
+        );
+        assert_eq!(second.supply.burned, Amount::ZERO);
+
+        let system = second
+            .stage_consensus_system(Some(&votes), std::slice::from_ref(&evidence), second_hash)
+            .await
+            .unwrap();
+        let expected_slash =
+            Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC * u128::from(slash_bps) / 10_000)
+                .unwrap();
+        assert_eq!(system.evidence.len(), 1);
+        assert_eq!(system.evidence[0].evidence_hash, evidence_hash);
+        assert!(system.evidence[0].newly_tombstoned);
+        assert_eq!(system.evidence[0].slashed_active_assets, expected_slash);
+        assert!(system
+            .validator_updates
+            .iter()
+            .any(|update| update.consensus_pubkey == consensus_pubkey && update.power == 0));
+        let second_receipt = state.commit(second.prepare().await.unwrap()).unwrap();
+        assert_eq!(second_receipt.supply.burned, expected_slash);
+        assert_eq!(
+            state
+                .staking_book()
+                .unwrap()
+                .validator(&validator_id)
+                .unwrap()
+                .status,
+            ValidatorStatus::Tombstoned
+        );
+        for key in [
+            staking_evidence_key(&evidence_hash),
+            staking_slash_job_key(&validator_id),
+        ] {
+            let proof = state.query_latest_with_proof(&key).await.unwrap();
+            assert!(proof.value.is_some(), "missing slashing key {key}");
+            proof.verify().unwrap();
+        }
+        let stored = state
+            .evidence_record(&evidence_hash)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.evidence, evidence);
+        assert_eq!(stored.validator_id, validator_id);
+        assert_eq!(stored.accepted_height, 2);
+        let mut trailing = stored.encode_persistent();
+        trailing.push(0);
+        assert!(EvidenceRecord::decode_persistent(&trailing).is_err());
+
+        let previous_set = state.effective_validator_set_at(2).await.unwrap();
+        let votes: Vec<_> = previous_set
+            .validators()
+            .iter()
+            .map(|member| CommitVote {
+                consensus_address: consensus_address(&member.consensus_pubkey),
+                power: member.power,
+                signed: true,
+            })
+            .collect();
+        let third_hash = state.expected_next_validators_hash(3).await.unwrap();
+        let mut third = state
+            .begin_block_at(3, 30, [0xe5; 32], [0xe6; 32])
+            .await
+            .unwrap();
+        let duplicate = third
+            .stage_consensus_system(Some(&votes), &[evidence], third_hash)
+            .await
+            .unwrap();
+        assert!(duplicate.evidence.is_empty());
+        let third_receipt = state.commit(third.prepare().await.unwrap()).unwrap();
+        assert_eq!(third_receipt.supply.burned, expected_slash);
+        state.close().await;
+
+        let reopened = PersistentState::open(dir.path().to_path_buf(), genesis_config)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened
+                .staking_book()
+                .unwrap()
+                .slash_job(&validator_id)
+                .unwrap()
+                .evidence_hash,
+            evidence_hash
+        );
+        assert_eq!(
+            reopened.supply_audit().await.unwrap().burned,
+            expected_slash
+        );
+        assert_eq!(
+            reopened
+                .evidence_record(&evidence_hash)
+                .await
+                .unwrap()
+                .unwrap(),
+            stored
+        );
+        reopened.close().await;
+    }
+
+    #[test]
+    fn evidence_expiration_requires_both_comet_age_bounds() {
+        let mut parameters = StakingParameters::reference_testnet();
+        parameters.evidence_max_age_blocks = 5;
+        parameters.evidence_max_age_seconds = 20;
+        let evidence = ByzantineEvidence {
+            kind: ByzantineEvidenceKind::LightClientAttack,
+            validator_address: [7; COMETBFT_ADDRESS_BYTES],
+            validator_power: 10,
+            infraction_height: 10,
+            infraction_time_seconds: 100,
+            infraction_time_nanos: 0,
+            total_voting_power: 10,
+        };
+        assert!(validate_evidence_shape(&evidence, 16, 120, &parameters).is_ok());
+        assert!(validate_evidence_shape(&evidence, 15, 121, &parameters).is_ok());
+        assert!(validate_evidence_shape(&evidence, 15, 120, &parameters).is_ok());
+        assert!(matches!(
+            validate_evidence_shape(&evidence, 16, 121, &parameters),
+            Err(Error::InvalidByzantineEvidence("evidence has expired"))
+        ));
+    }
+
+    #[tokio::test]
+    async fn slash_job_resumes_one_exit_cohort_per_block_after_restart() {
+        let dir = TempDir::new().unwrap();
+        let mut genesis_config = config(16);
+        let chain = genesis_config.chain_context;
+        let mut parameters = StakingParameters::reference_testnet();
+        parameters.slash_cohorts_per_block = 1;
+        let mut staking = StakingBook::new(chain, parameters).unwrap();
+        let mut identities = Vec::new();
+        let mut first_delegation = None;
+        for seed in [0x51, 0x61] {
+            let operator = [seed; 32];
+            let validator = validator_id(&chain, &operator);
+            let consensus_pubkey = [seed + 1; 32];
+            let self_owner = [seed + 2; 32];
+            let self_position = position_id(&chain, &self_owner);
+            staking
+                .register_validator(validator, operator, consensus_pubkey, 500)
+                .unwrap();
+            staking
+                .open_pending_delegation(
+                    0,
+                    0,
+                    self_position,
+                    self_owner,
+                    validator,
+                    Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC).unwrap(),
+                    Amount::ZERO,
+                    true,
+                    vec![seed + 3; bit_staking::RECOVERY_RECEIPT_BYTES],
+                )
+                .unwrap();
+            staking.activate_pending(&self_position, 1).unwrap();
+            if first_delegation.is_none() {
+                let owner = [seed + 4; 32];
+                let position = position_id(&chain, &owner);
+                staking
+                    .open_pending_delegation(
+                        0,
+                        0,
+                        position,
+                        owner,
+                        validator,
+                        Amount::new(100 * bit_staking::ATOMIC_PER_BIT).unwrap(),
+                        Amount::ZERO,
+                        false,
+                        vec![seed + 5; bit_staking::RECOVERY_RECEIPT_BYTES],
+                    )
+                    .unwrap();
+                staking.activate_pending(&position, 1).unwrap();
+                first_delegation = Some(position);
+            }
+            identities.push((validator, consensus_pubkey));
+        }
+        staking.apply_validator_set().unwrap();
+        let target = identities[0].0;
+        let target_key = identities[0].1;
+        let delegation = first_delegation.unwrap();
+        for (sequence, exit_epoch, exposure_end_height) in [(1, 0, 10), (2, 1, 20), (3, 2, 30)] {
+            staking
+                .unbond(
+                    &delegation,
+                    sequence,
+                    Amount::new(10 * bit_staking::ATOMIC_PER_BIT).unwrap(),
+                    Amount::ZERO,
+                    Amount::ZERO,
+                    Amount::ZERO,
+                    FeeSource::Shielded,
+                    exit_epoch,
+                    exposure_end_height,
+                )
+                .unwrap();
+        }
+        staking.apply_validator_set().unwrap();
+        let totals = staking.totals().unwrap();
+        genesis_config.genesis_staking = staking;
+        genesis_config.genesis_allocation = GenesisAllocation {
+            shielded: Amount::ZERO,
+            stake: totals.pooled_assets,
+            pending_delegation: Amount::ZERO,
+            exits: totals.exit_assets,
+            commission: Amount::ZERO,
+            fee_reserve: Amount::ZERO,
+            unclaimed_genesis: Amount::new(
+                genesis_config.monetary_policy.genesis_supply.value()
+                    - totals.pooled_assets.value()
+                    - totals.exit_assets.value(),
+            )
+            .unwrap(),
+        };
+
+        let mut state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+        let first_hash = state.expected_next_validators_hash(1).await.unwrap();
+        let mut first = state
+            .begin_block_at(1, 10, [0xf1; 32], [0xf2; 32])
+            .await
+            .unwrap();
+        first
+            .stage_consensus_system(None, &[], first_hash)
+            .await
+            .unwrap();
+        state.commit(first.prepare().await.unwrap()).unwrap();
+        let history = state.historical_validator_set_at(1).await.unwrap();
+        let target_power = history
+            .validator_set
+            .validators()
+            .iter()
+            .find(|member| member.consensus_pubkey == target_key)
+            .unwrap()
+            .power;
+        let total_voting_power = history
+            .validator_set
+            .validators()
+            .iter()
+            .map(|member| member.power)
+            .sum();
+        let evidence = ByzantineEvidence {
+            kind: ByzantineEvidenceKind::LightClientAttack,
+            validator_address: consensus_address(&target_key),
+            validator_power: target_power,
+            infraction_height: 1,
+            infraction_time_seconds: 10,
+            infraction_time_nanos: 0,
+            total_voting_power,
+        };
+
+        let active_before = state.staking_book().unwrap().pool(&target).unwrap().assets;
+        let active_slash = Amount::new(active_before.value() * 500 / 10_000).unwrap();
+        let cohort_slash = Amount::new(10 * bit_staking::ATOMIC_PER_BIT * 500 / 10_000).unwrap();
+        for height in 2..=4 {
+            let previous_set = state.effective_validator_set_at(height - 1).await.unwrap();
+            let votes: Vec<_> = previous_set
+                .validators()
+                .iter()
+                .map(|member| CommitVote {
+                    consensus_address: consensus_address(&member.consensus_pubkey),
+                    power: member.power,
+                    signed: true,
+                })
+                .collect();
+            let next_hash = state.expected_next_validators_hash(height).await.unwrap();
+            let mut block = state
+                .begin_block_at(
+                    height,
+                    height * 10,
+                    [height as u8; 32],
+                    [height as u8 + 20; 32],
+                )
+                .await
+                .unwrap();
+            let supplied = (height == 2)
+                .then(|| evidence.clone())
+                .into_iter()
+                .collect::<Vec<_>>();
+            let outcome = block
+                .stage_consensus_system(Some(&votes), &supplied, next_hash)
+                .await
+                .unwrap();
+            assert_eq!(outcome.slash_advance.touched_cohorts.len(), 1);
+            let receipt = state.commit(block.prepare().await.unwrap()).unwrap();
+            assert_eq!(
+                receipt.supply.burned,
+                Amount::new(active_slash.value() + cohort_slash.value() * u128::from(height - 1))
+                    .unwrap()
+            );
+            assert_eq!(
+                state
+                    .staking_book()
+                    .unwrap()
+                    .slash_job(&target)
+                    .unwrap()
+                    .processed_cohorts,
+                height - 1
+            );
+            let proof = state
+                .query_latest_with_proof(&staking_slash_job_key(&target))
+                .await
+                .unwrap();
+            proof.verify().unwrap();
+            state.close().await;
+            state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+                .await
+                .unwrap();
+        }
+        let job = state
+            .staking_book()
+            .unwrap()
+            .slash_job(&target)
+            .unwrap()
+            .clone();
+        assert!(job.complete);
+        assert_eq!(job.processed_cohorts, 3);
+        assert_eq!(job.slashed_exit_assets.value(), cohort_slash.value() * 3);
+        state.close().await;
     }
 
     #[tokio::test]
@@ -4234,7 +5214,10 @@ mod tests {
             .begin_block_at(1, 1, [0xd7; 32], [0xd8; 32])
             .await
             .unwrap();
-        first.stage_consensus_system(None, first_hash).unwrap();
+        first
+            .stage_consensus_system(None, &[], first_hash)
+            .await
+            .unwrap();
         let mut unbond = empty_verified_staking(
             0xd9,
             first_summary.shielded_tree_root,
@@ -4295,7 +5278,8 @@ mod tests {
                 .await
                 .unwrap();
             let system = block
-                .stage_consensus_system(Some(&votes), next_hash)
+                .stage_consensus_system(Some(&votes), &[], next_hash)
+                .await
                 .unwrap();
             if height == 4 {
                 assert!(system
@@ -4356,7 +5340,8 @@ mod tests {
             .await
             .unwrap();
         let system = claim_block
-            .stage_consensus_system(Some(&votes), next_hash)
+            .stage_consensus_system(Some(&votes), &[], next_hash)
+            .await
             .unwrap();
         assert!(system.exit_advance.matured.contains(&expected_cohort));
         let claim_fee = Amount::new(1).unwrap();
@@ -4469,7 +5454,10 @@ mod tests {
             .unwrap();
         let first_next_hash = state.expected_next_validators_hash(1).await.unwrap();
         let mut first = state.begin_block(1, [1; 32], [3; 32]).await.unwrap();
-        first.stage_consensus_system(None, first_next_hash).unwrap();
+        first
+            .stage_consensus_system(None, &[], first_next_hash)
+            .await
+            .unwrap();
         state.commit(first.prepare().await.unwrap()).unwrap();
         let commit_vote = CommitVote {
             consensus_address: bit_staking::consensus_address(&consensus_pubkey),
@@ -4479,13 +5467,15 @@ mod tests {
         let second_next_hash = state.expected_next_validators_hash(2).await.unwrap();
         let mut second = state.begin_block(2, [2; 32], [4; 32]).await.unwrap();
         second
-            .stage_consensus_system(Some(&[commit_vote]), second_next_hash)
+            .stage_consensus_system(Some(&[commit_vote]), &[], second_next_hash)
+            .await
             .unwrap();
         state.commit(second.prepare().await.unwrap()).unwrap();
         let boundary_next_hash = state.expected_next_validators_hash(3).await.unwrap();
         let mut boundary = state.begin_block(3, [3; 32], [5; 32]).await.unwrap();
         let system = boundary
-            .stage_consensus_system(Some(&[commit_vote]), boundary_next_hash)
+            .stage_consensus_system(Some(&[commit_vote]), &[], boundary_next_hash)
+            .await
             .unwrap();
         let settlement = system.reward_settlement.unwrap();
         let available = initial_fees.value() + settlement.issuance_quota.value();
@@ -4521,7 +5511,8 @@ mod tests {
         let claim_next_hash = state.expected_next_validators_hash(4).await.unwrap();
         let mut claim_block = state.begin_block(4, [4; 32], [6; 32]).await.unwrap();
         claim_block
-            .stage_consensus_system(Some(&[commit_vote]), claim_next_hash)
+            .stage_consensus_system(Some(&[commit_vote]), &[], claim_next_hash)
+            .await
             .unwrap();
         claim_block
             .stage_verified_staking(&empty_verified_staking(
@@ -5111,7 +6102,8 @@ mod tests {
                 .await
                 .unwrap();
             block
-                .stage_consensus_system((height > 1).then_some(empty_commit), next_hash)
+                .stage_consensus_system((height > 1).then_some(empty_commit), &[], next_hash)
+                .await
                 .unwrap();
             state.commit(block.prepare().await.unwrap()).unwrap();
         }
@@ -5120,7 +6112,10 @@ mod tests {
             .begin_block_at(3, 3, [0xe1; 32], [0xe2; 32])
             .await
             .unwrap();
-        block.stage_consensus_system(Some(&[]), next_hash).unwrap();
+        block
+            .stage_consensus_system(Some(&[]), &[], next_hash)
+            .await
+            .unwrap();
         let applied = block
             .verify_and_stage_transaction(&envelope_bytes)
             .await

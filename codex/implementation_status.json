@@ -1,20 +1,20 @@
 {
-  "updated_at": "2026-09-09",
-  "scope": "active BIT 1.2 implementation; docs/solo status remains historical",
+  "updated_at": "2026-09-14",
+  "scope": "active BIT 1.2 implementation; docs/solo remains historical reference",
   "overall": "IN_PROGRESS",
   "completion_estimate": {
-    "full_launch_percent_range": [12, 16],
-    "chain_core_percent": 39,
-    "basis": "implemented and tested code versus D-001 through D-030, including product, operations, independent review, and mainnet external inputs",
-    "confidence": "LOW_UNTIL_D007_REWARDS_AND_D010_SYNC"
+    "full_launch_percent_range": [18, 22],
+    "chain_core_percent": 60,
+    "basis": "implemented and tested code versus D-001 through D-030, including product, operations, independent review, release evidence, and mainnet external inputs",
+    "confidence": "MEDIUM_FOR_CURRENT_CHAIN_SLICES_LOW_FOR_FULL_LAUNCH"
   },
   "validated_cross_milestone_slice": {
-    "name": "Transfer plus first D-007 action execution slice",
+    "name": "private transfer, native staking, exits, rewards, Comet validator scheduling, and Byzantine slashing lifecycle",
     "status": "TESTED_ON_WINDOWS_DESKTOP",
     "implementation": "crates/bit-types + crates/bit-shielded + crates/bit-transaction + crates/bit-emission + crates/bit-staking + crates/bit-state + crates/bit-app",
     "evidence": "reports/development-baseline.json",
     "persistent_state": true,
-    "persistent_state_layer": "REAL_TRANSFER_REGISTER_DELEGATE_CANCEL_COMMITTED_AND_REOPENED",
+    "storage_schema": 16,
     "mainnet_native_asset_id": false
   },
   "milestones": [
@@ -22,66 +22,73 @@
       "id": "S0",
       "name": "统一开发基线",
       "status": "IN_PROGRESS",
-      "implemented": ["SPEC_BASELINE.md", "contracts", "config", "tests/vectors"],
+      "implemented": ["SPEC_BASELINE.md", "contracts", "config", "tests/vectors", "D-004 through D-008 implementation notes"],
       "remaining": ["SPEC-01 through SPEC-09 decisions", "complete schemas and API contracts", "full active task DAG"]
     },
     {
       "id": "D-001",
       "name": "依赖与平台冻结",
       "status": "IN_PROGRESS",
-      "implemented": ["Cargo.lock", "rust-toolchain.toml", "crypto/manifest.json", "Windows desktop build evidence"],
+      "implemented": ["Cargo.lock", "rust-toolchain.toml", "crypto/manifest.json", "Windows desktop build evidence", "fixed CometBFT 0.38 and Penumbra 2.1.1 inputs"],
       "remaining": ["production Penumbra source layout", "Linux and Apple builds", "Android deferred by user", "full advisory and license review"]
     },
     {
       "id": "D-002",
       "name": "类型与规范编码",
       "status": "IN_PROGRESS",
-      "implemented": ["crates/bit-types", "strict CBOR", "strict envelope wire", "hash and ID domains", "authorization role plan", "Rust/Python shared vectors"],
-      "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["upstream body golden bytes", "generated Proto consumers", "TypeScript and Dart read-only vectors", "remaining state and compact codecs"]
+      "implemented": ["strict CBOR and envelope wire", "hash and ID domains", "authorization roles", "Rust/Python shared vectors", "versioned staking, exit, validator history, evidence, and SlashJob codecs"],
+      "remaining": ["generated Proto consumers", "TypeScript and Dart read-only vectors", "production compact and remaining state codecs"]
     },
     {
       "id": "D-003",
       "name": "密码学适配",
       "status": "IN_PROGRESS",
-      "implemented": ["crates/bit-shielded", "crates/bit-transaction", "checked proof parser", "canonical upstream body adapter", "Spend/Output proof verification", "Spend authorization verification", "binding signature verification", "role-domain Ed25519 verification for RegisterValidator, Delegate, and CancelPending", "consensus-key proof of possession for registration", "public lock/release binding for enabled actions", "duplicate nullifier state checks"],
+      "implemented": ["checked Spend/Output proof parser and verifier", "canonical upstream body adapter", "Spend and role authorization verification", "binding signatures", "validator consensus-key proof of possession", "public lock/release binding for enabled actions"],
       "tested_by": ["feasibility/reports/proof-result.json", "reports/development-baseline.json"],
-      "remaining": ["role signatures for remaining actions", "native asset closure across every remaining action", "final manifest fields", "logging audit"]
+      "remaining": ["final production crypto manifest", "independent circuit and setup review", "logging audit", "remaining future action adapters"]
     },
     {
       "id": "D-004",
       "name": "状态存储",
       "status": "IN_PROGRESS",
-      "implemented": ["crates/bit-state", "storage schema v7", "Cnidarium 0.83", "JMT 0.11 ICS23 proofs", "RocksDB atomic write batches", "Penumbra TCT frontier persistence", "ordered genesis shielded commitments", "persisted protocol, block limits, monetary policy, fee policy, supply containers, staking parameters, validators, pools, positions, and activation capacity", "anchor retention", "persistent nullifier and transaction indexes", "prepare/commit crash boundary", "immutable configuration validation", "schema rollback, corrupt frontier, supply tamper, fee-policy mismatch, staking-parameter mismatch, and staking-pool tamper rejection", "real Transfer/RegisterValidator/Delegate/CancelPending persistence and restart integration", "self-bond pending-to-active persistence, ICS23 proof, and restart integration"],
+      "implemented": ["schema v16 Cnidarium/JMT/RocksDB state", "Penumbra TCT frontier", "atomic prepare/commit", "supply and staking cross-checks", "exit queues", "H/H+1/H+2 schedules", "per-height validator history", "evidence and SlashJob persistence", "latest-state ICS23 membership and non-membership proofs", "restart validation and tamper rejection"],
       "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["disk-full/fsync/corruption fault injection", "snapshot export/import", "historical proofs after restart", "pruning and growth benchmarks"]
+      "remaining": ["disk-full/fsync/corruption fault injection", "snapshot export/import", "historical proofs after restart", "pruning and growth benchmarks", "schema migration tooling"]
     },
     {
       "id": "D-005",
       "name": "ABCI 生命周期",
       "status": "IN_PROGRESS",
-      "implemented": ["crates/bit-app", "shared CheckTx and proposal execution", "unified dispatch for Transfer/RegisterValidator/Delegate/CancelPending", "stable staking authorization/stale-state/action error codes", "deterministic proposal byte limits", "ProcessProposal rejects invalid transactions", "FinalizeBlock stable transaction results", "single pending Finalize/Commit boundary", "tendermint-abci 0.40.4 v0_38 adapter", "exact configured InitChain request validation", "latest-height ABCI ICS23 proof ops", "empty-only vote extension responses", "explicit snapshot unavailable responses", "local ABCI socket framing roundtrip", "shared fatal halt state across ABCI connections", "loopback-only ABCI bind guard"],
-      "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["semantic InitChain supply/distribution/crypto-manifest validation", "production execution and compact digest provider", "snapshot export/import", "historical-height ABCI queries", "real CometBFT four-node integration", "validator updates and system execution phases"]
+      "implemented": ["shared CheckTx/PrepareProposal/ProcessProposal/FinalizeBlock execution", "strict InitChain", "last-commit and next-validator-hash checks", "H+2 ValidatorUpdates", "FinalizeBlock Byzantine evidence normalization", "latest ICS23 query", "ABCI TCP roundtrip", "four-node CometBFT application probe"],
+      "tested_by": ["reports/development-baseline.json", "feasibility/reports/bit-app-network-result.json"],
+      "remaining": ["production execution and compact digest provider", "snapshot ABCI", "historical-height queries", "formal node command", "multi-node private transaction and evidence scenarios"]
     },
     {
       "id": "D-006",
       "name": "固定总量与支付会计",
       "status": "IN_PROGRESS",
-      "implemented": ["crates/bit-emission", "fixed 102.4 billion BIT cap", "checked integer container accounting", "genesis allocation conservation", "minted/forfeited/future issuance identities", "no-catchup empty-set settlement", "burn does not reopen issuance", "height-derived completed-epoch invariant", "fail-closed boundary when a system settlement is missing", "canonical-envelope byte and proof-count minimum fee calculation", "new-position and validator-registration fee classes", "pre-Groth16 underpriced transaction rejection", "atomic Transfer fee move from shielded total to fee reserve", "atomic RegisterValidator fee, Delegate Q-to-D, activation D-to-P, and CancelPending D-to-Q/F transitions", "schema v5 supply and fee-policy persistence", "latest-state ICS23 proof for supply and fee keys", "restart-time tamper and fee-policy mismatch rejection"],
+      "implemented": ["102.4 billion BIT cap", "checked Q/P/D/X/C/F/G accounting", "fixed epoch issuance and forfeiture", "fee policy", "reward and commission distribution", "Unbond/ClaimExit transitions", "Byzantine P/X Burn with no issuance reopening", "state supply audits and tamper rejection"],
       "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["validator score and reward plan execution at the enforced epoch boundary", "validator eligibility integration", "reward and commission distribution rules", "Unbond, ClaimExit, CommissionClaim, Slash, and remaining container transitions", "proof-backed fee quote API", "SPEC-04 supply audit snapshot encoding", "wallet A-to-B scan and balance loop", "multi-node accounting replay"]
+      "remaining": ["proof-backed fee quote API", "SPEC-04 supply audit snapshot encoding", "wallet scan and balance loop", "multi-node accounting replay"]
     },
     {
       "id": "D-007",
       "name": "原生质押",
       "status": "IN_PROGRESS",
-      "implemented": ["crates/bit-staking", "shared validator and position ID derivation", "reference testnet staking parameters", "validator, pool, position, and activation-capacity ledger", "versioned strict persistent codecs", "validator public metadata persistence and consensus-key uniqueness", "exact 512-byte recovery receipts", "independent JMT keys for parameters, validators, pools, positions, and activation capacity", "touched-record-only state writes", "minimum delegation and self-bond checks", "next-epoch pending activation", "1000 pending positions per activation epoch with pre-processing cancellation release", "self-bond-first and position-id-ordered batch activation", "U256 pool share minting and position valuation", "zero-share and minimum-share refund handling", "insolvent-pool refundable handling", "last-share residual drain", "active self-bond eligibility", "stake-descending and validator-id tie-break candidate selection", "fixed power unit and 2^60-1 total voting power check", "atomic mutation and aggregate ledger invariants", "Q/D/P/F supply accounting helpers", "role-authenticated RegisterValidator, Delegate, and CancelPending envelope execution", "registration consensus-key PoP", "public lock/release binding", "epoch-bound issuance-before-activation ordering", "persistent self-bond activation and validator-set selection", "ICS23 staking proofs and restart reconstruction", "cross-checks between pools/P and pending positions/D"],
+      "implemented": ["validators, pools, positions, activation capacity", "pending activation and refundable paths", "U256 share accounting", "incremental candidate index", "metadata/commission/key updates", "signing window and downtime jail", "epoch score/rewards", "H+2 effective sets", "last-validator protection", "nine enabled staking envelopes"],
       "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["UpdateValidator, Unjail, and RotateConsensusKey envelope execution", "commission delay and validator sequence transitions", "consensus-key history", "online signing window and jail/unjail rules", "incremental candidate index", "epoch score and reward integration", "CometBFT validator updates and H/H+1/H+2 verification", "last-validator protection and HALT_NO_SAFE_VALIDATOR_SET"]
+      "remaining": ["public staking query/API surface", "operator workflows", "multi-node staking transaction replay", "persistent safe-halt recovery evidence"]
+    },
+    {
+      "id": "D-008",
+      "name": "退出与处罚",
+      "status": "IN_PROGRESS",
+      "implemented": ["Unbond cohorts and non-transferable tickets", "dual height/time maturity", "ClaimExit", "three persistent exit queues", "per-height validator responsibility history", "Comet duplicate-vote and light-client evidence validation", "canonical evidence deduplication", "permanent tombstone", "active pool and exposed exit cohort Burn", "globally bounded persistent SlashJob", "freeze during settlement", "per-block restart recovery and ICS23 proofs"],
+      "tested_by": ["reports/development-baseline.json"],
+      "remaining": ["real multi-node evidence injection", "slashing disk/crash fault injection", "persisted HALT_NO_SAFE_VALIDATOR_SET evidence", "gateway/indexer/wallet penalty status"]
     }
   ],
-  "not_started_from": "D-008",
+  "not_started_from": "D-009",
   "mainnet_ready": false,
   "mobile": "SKIPPED_BY_USER"
 }

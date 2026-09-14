@@ -1,6 +1,6 @@
 # BIT D-008 退出与处罚设计
 
-状态：`IN_PROGRESS`。Unbond、ExitCohort、ExitTicket、双高度/链时间成熟和 ClaimExit 已进入正式交易、会计、状态持久化与查询证明链；证据解析/去重、永久 tombstone、按比例销毁和可恢复的有界 SlashJob 尚未实现。
+状态：`IN_PROGRESS`。Unbond、ClaimExit、CometBFT Byzantine evidence、永久 tombstone、按比例 Burn 和可恢复的有界 SlashJob 已进入正式状态与 ABCI 链路；多节点真实违规注入、停链安全边界和处罚过程故障注入仍待完成。
 
 ## 1. 退出对象与标识
 
@@ -39,15 +39,21 @@ ClaimExit 从当前状态重新计算票据 quote，并要求它精确等于信�
 - `SHIELDED`：`X -= release; Q += release; Q -= fee; F += fee`。
 - `RELEASED_VALUE`：要求 `release > fee`，执行 `X -= release; Q += release-fee; F += fee`。
 
-## 4. 持久化与验证证据
+## 4. 证据验证、处罚与持久化
 
-schema v13 新增 `staking/exits/cohorts/<cohort_id>` 和 `staking/exits/tickets/<ticket_id>`；schema v14 增加 exposure、maturity-height 和 maturity-time 三个 ExitQueueEntry 索引；schema v15 增加 `staking/effective_history/<height>`，逐高度保存真实 CometBFT 集合及链时间。创世、区块触及写入、重启读取、账本校验和 `sum(cohort.assets)=supply.exit_total` 全部已接入；退出对象、队列及历史责任集合均可生成针对最新 app hash 的 ICS23 成员或非成员证明。
+schema v13 新增退出 cohort/ticket，v14 增加三个推进队列，v15 增加逐高度真实 CometBFT 集合及链时间。schema v16 新增 `staking/evidence/<evidence_hash>` 和 `staking/slash_jobs/<validator_id>`。证据记录和任务使用严格版本化编码，启动时重新核对键、规范 hash、历史责任集合、验证人身份、tombstone 和任务关系。
 
-测试覆盖池份额退出、cohort 份额、最后领取尾差、双条件严格大于边界、未成熟与重复领取拒绝、最后验证者自质押保护、两类费用容器变化、跨七个区块推进、epoch 奖励交错、落盘、重启和 ICS23 证明。真实信封测试使用 Spend/Output Groth16 证明、PositionOwner Ed25519 授权、binding、实时 sequence/quote 和统一正式交易分发入口执行 Unbond 与 ClaimExit。
+ABCI v0.38 `FinalizeBlock.misbehavior` 只接受重复投票和轻客户端攻击。适配层严格检查类型、20 字节地址、正 height/power/total power 和合法 Timestamp；状态层再按证据高度读取历史责任集合，逐项核对地址、单个 power、集合总 power 和链时间。过期判定遵循 CometBFT 的组合规则：只有块龄和时间龄都超过上限才拒绝。证据 hash 绑定 chain context、类型、地址、power、高度、时间和总 power；相同证据再次出现不会重复处罚。
+
+第一次有效重大证据立即把验证人永久置为 Tombstoned，停止委托与待生效变更，输出当前有效共识键的 power=0，并按 500 bps 从当前活动池 P 扣除和计入 `supply/burned`。Pending 本金不扣罚；独立佣金 C 不作为委托本金扣罚。属于证据范围且尚未成熟的 cohort 按同一比例从 X 扣除并 Burn。
+
+SlashJob 在证据接受时冻结当时已有的 validator-local cohort 范围，保存结束键、当前游标、已处理数量及 P/X 累计罚没。所有未完成任务按 validator_id 和 exit_epoch/cohort_id 稳定排序，共享每块最多 `slash_cohorts_per_block` 项的全局上限。游标也跨过不在责任范围或已经成熟的记录，避免重复扫描；任务未完成时拒绝相关 Unbond 和 ClaimExit，pending 激活会转为可退款状态。任务、被修改 cohort、供应 Burn、证据记录和集合日程在同一个 JMT/RocksDB 批次提交。
+
+测试覆盖池份额退出、尾差、双成熟边界、两类费用、epoch 交错、证据字段/责任/power 校验、两个年龄维度的单独超限与同时超限、永久 tombstone、重复证据、供应守恒、全局处理上限、跨块游标、每块关闭并重启后的继续执行，以及 evidence/job/cohort 的 ICS23 证明。真实 Unbond/ClaimExit 信封继续使用 Groth16、PositionOwner Ed25519、binding 和正式交易分发入口。
 
 ## 5. 下一切片
 
-1. 使用已落盘的历史责任集合接入 CometBFT Byzantine evidence 规范校验和 evidence hash 去重。
-2. 实现永久 tombstone、活动池罚没、供应 Burn 及按 `exposure_end_height >= infraction_height` 选择未成熟 cohort。
-3. 将 cohort 扣罚拆成每块最多 128 项的持久化 SlashJob；任务存在时冻结该验证人的激活、Unbond 和 ClaimExit，崩溃重启不得重复扣罚。
-4. 把真实退出和处罚故障恢复加入多节点 CometBFT 场景。
+1. 把真实重复投票或轻客户端攻击证据注入多节点 CometBFT 场景，核对四个独立应用的 app hash、验证人移除和 Burn 一致。
+2. 对处罚事务增加 prepare/commit 中断、磁盘满和损坏记录故障注入，验证重放不会重复扣罚。
+3. 完成 `HALT_NO_SAFE_VALIDATOR_SET` 的可持久化停签证据与恢复流程；单验证人测试网不会为了继续出块而忽略有效重大证据或保留被处罚验证人。
+4. 接入公开事件、gateway/indexer 和钱包的“处罚结算中”状态。

@@ -8,7 +8,8 @@ pub mod abci;
 
 use bit_staking::{CommitVote, ConsensusPowerUpdate};
 use bit_state::{
-    CommitReceipt, GenesisConfig, PersistentState, PreparedBlock, QueryProof, StateSummary,
+    ByzantineEvidence, CommitReceipt, GenesisConfig, PersistentState, PreparedBlock, QueryProof,
+    StateSummary,
 };
 use bit_transaction::Error as TransactionError;
 use std::path::PathBuf;
@@ -106,6 +107,8 @@ pub struct BlockRequest {
     pub compact_hash: Hash32,
     /// Actual votes for height `height - 1`; absent only at height one.
     pub last_commit: Option<LastCommit>,
+    /// CometBFT-validated Byzantine evidence included in this finalized block.
+    pub byzantine_evidence: Vec<ByzantineEvidence>,
     /// CometBFT header hash of the validator set effective at `height + 1`.
     pub next_validators_hash: Hash32,
 }
@@ -232,10 +235,13 @@ impl ApplicationCore {
             .state
             .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
             .await?;
-        block.stage_consensus_system(
-            last_commit.map(|commit| commit.votes.as_slice()),
-            next_validators_hash,
-        )?;
+        block
+            .stage_consensus_system(
+                last_commit.map(|commit| commit.votes.as_slice()),
+                &[],
+                next_validators_hash,
+            )
+            .await?;
         let mut transactions = Vec::new();
         let mut rejected = Vec::new();
         let mut total_transaction_bytes = 0u64;
@@ -310,10 +316,13 @@ impl ApplicationCore {
             .state
             .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
             .await?;
-        block.stage_consensus_system(
-            last_commit.map(|commit| commit.votes.as_slice()),
-            next_validators_hash,
-        )?;
+        block
+            .stage_consensus_system(
+                last_commit.map(|commit| commit.votes.as_slice()),
+                &[],
+                next_validators_hash,
+            )
+            .await?;
         for transaction in transactions {
             if let Err(error) = block.verify_and_stage_transaction(transaction).await {
                 rejection_or_state_error(error)?;
@@ -349,13 +358,16 @@ impl ApplicationCore {
                 request.compact_hash,
             )
             .await?;
-        let system = block.stage_consensus_system(
-            request
-                .last_commit
-                .as_ref()
-                .map(|commit| commit.votes.as_slice()),
-            request.next_validators_hash,
-        )?;
+        let system = block
+            .stage_consensus_system(
+                request
+                    .last_commit
+                    .as_ref()
+                    .map(|commit| commit.votes.as_slice()),
+                &request.byzantine_evidence,
+                request.next_validators_hash,
+            )
+            .await?;
         let mut transaction_results = Vec::with_capacity(request.transactions.len());
         for transaction in &request.transactions {
             let result = match block.verify_and_stage_transaction(transaction).await {
@@ -570,6 +582,7 @@ mod tests {
                 execution_hash: [4; 32],
                 compact_hash: [5; 32],
                 last_commit: None,
+                byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await
@@ -583,6 +596,7 @@ mod tests {
                 execution_hash: [4; 32],
                 compact_hash: [5; 32],
                 last_commit: None,
+                byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await,
@@ -623,6 +637,7 @@ mod tests {
                 execution_hash: [8; 32],
                 compact_hash: [9; 32],
                 last_commit: None,
+                byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await,
@@ -649,6 +664,7 @@ mod tests {
                 execution_hash: [6; 32],
                 compact_hash: [7; 32],
                 last_commit: None,
+                byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await
@@ -686,6 +702,7 @@ mod tests {
                     execution_hash: [height as u8; 32],
                     compact_hash: [height as u8 + 10; 32],
                     last_commit: (height > 1).then(|| LastCommit { votes: vec![vote] }),
+                    byzantine_evidence: Vec::new(),
                     next_validators_hash: app.expected_next_validators_hash(height).await.unwrap(),
                 })
                 .await
@@ -702,6 +719,7 @@ mod tests {
                 execution_hash: [3; 32],
                 compact_hash: [13; 32],
                 last_commit: Some(LastCommit { votes: vec![vote] }),
+                byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(3).await.unwrap(),
             })
             .await
@@ -770,6 +788,7 @@ mod tests {
                 execution_hash: [31; 32],
                 compact_hash: [32; 32],
                 last_commit: None,
+                byzantine_evidence: Vec::new(),
                 next_validators_hash: wrong_hash,
             })
             .await,
@@ -784,6 +803,7 @@ mod tests {
             execution_hash: [31; 32],
             compact_hash: [32; 32],
             last_commit: None,
+            byzantine_evidence: Vec::new(),
             next_validators_hash: expected_h1,
         })
         .await
@@ -806,6 +826,7 @@ mod tests {
                 last_commit: Some(LastCommit {
                     votes: vec![wrong_vote],
                 }),
+                byzantine_evidence: Vec::new(),
                 next_validators_hash: expected_h2,
             })
             .await,

@@ -22,6 +22,8 @@
 
 PrepareProposal、ProcessProposal 和 FinalizeBlock 都要求合法的 ABCI Timestamp 和恰好 32 字节的 `next_validators_hash`，并把 Unix 秒传给同一块执行器。请求哈希必须等于持久化 H+1 集合的 CometBFT 原生哈希。高度 1 不接受历史投票；之后每块必须提供 last commit，并逐项匹配 H-1 实际集合的规范顺序、地址和 power。地址严格为 CometBFT Ed25519 地址的 20 字节，power 必须为正，未知 flag、未知共识地址、重复地址和总 power 越界均拒绝。只有 `BLOCK_ID_FLAG_COMMIT` 增加 score，Nil/Absent 只记录未签机会。Finalize 与高度、摘要、供应、在线窗口、质押变更和三高度集合日程一起持久化；时间倒退或集合不一致时停止执行。
 
+FinalizeBlock 同时严格归一化 `misbehavior`。仅接受 `DUPLICATE_VOTE` 和 `LIGHT_CLIENT_ATTACK`，要求 validator、20 字节地址、正 height/power/total power 及合法 Timestamp；状态层随后用逐高度历史集合复核责任、权重、时间和年龄，并把证据、处罚任务、Burn 与 validator updates 纳入同一候选区块。PrepareProposal/ProcessProposal 没有该字段，CometBFT 的证据模块负责在 FinalizeBlock 提供已验证证据，应用仍执行自己的历史责任和会计核验。
+
 FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`。如果底层存储或已提交状态损坏，错误不会伪装成普通交易拒绝；网络适配必须让节点停止参与，而不能返回伪造的成功 app hash。
 
 ## 3. ABCI v0.38 适配
@@ -48,8 +50,8 @@ ABCI 适配通过 `FinalizeDigestProvider` 强制注入两个摘要来源；没�
 
 ## 6. 当前验证与下一切片
 
-当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励，检查返回的 Ed25519 key/power 更新只在 H+2 集合生效且重启后保持一致；错误请求哈希、commit power、缺失 commit、错误地址、非正 power 和未知 block-id flag 均被拒绝。
+当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励，检查返回的 Ed25519 key/power 更新只在 H+2 集合生效且重启后保持一致；错误请求哈希、commit power、缺失 commit、错误地址、非正 power、未知 block-id flag，以及证据的未知类型、缺失字段、非法地址/power/height/time 均被拒绝。
 
 `comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。实测高度 6 返回的更新在高度 6、7 保持 power 10，高度 8 变为 3476；一个应用从 durable JMT 状态重启并追块，四节点在同一固定高度的 app hash 相同，最新状态返回 ICS23 proof。停止两个验证者后链停止，恢复第三个验证者后继续出块。每次运行的精确高度写入 `feasibility/reports/bit-app-network-result.json`。
 
-下一步实现版本化 execution/compact 编码器及创世语义校验，形成正式节点命令，再把真实 Transfer 放进四节点重放与崩溃恢复实验。D-004 同步补快照导入导出和历史高度证明。
+下一步实现版本化 execution/compact 编码器及创世语义校验，形成正式节点命令，再把真实 Transfer、退出和 Byzantine evidence 放进四节点重放与崩溃恢复实验。D-004 同步补快照导入导出和历史高度证明。

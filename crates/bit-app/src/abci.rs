@@ -10,7 +10,7 @@ use crate::{
     TxResult,
 };
 use bit_staking::{CommitVote, ValidatorStatus, COMETBFT_ADDRESS_BYTES};
-use bit_state::GenesisConfig;
+use bit_state::{ByzantineEvidence, ByzantineEvidenceKind, GenesisConfig};
 use ics23::commitment_proof::Proof;
 use prost::Message;
 use std::{
@@ -28,15 +28,15 @@ use tendermint_abci::{Application, Server, ServerBuilder};
 use tendermint_proto::v0_38::{
     abci::{
         response_apply_snapshot_chunk, response_offer_snapshot, response_process_proposal,
-        response_verify_vote_extension, CommitInfo, ExecTxResult, ExtendedCommitInfo,
-        RequestApplySnapshotChunk, RequestCheckTx, RequestExtendVote, RequestFinalizeBlock,
-        RequestInfo, RequestInitChain, RequestLoadSnapshotChunk, RequestOfferSnapshot,
-        RequestPrepareProposal, RequestProcessProposal, RequestQuery, RequestVerifyVoteExtension,
-        ResponseApplySnapshotChunk, ResponseCheckTx, ResponseCommit, ResponseExtendVote,
-        ResponseFinalizeBlock, ResponseInfo, ResponseInitChain, ResponseListSnapshots,
-        ResponseLoadSnapshotChunk, ResponseOfferSnapshot, ResponsePrepareProposal,
-        ResponseProcessProposal, ResponseQuery, ResponseVerifyVoteExtension,
-        ValidatorUpdate as ProtoValidatorUpdate,
+        response_verify_vote_extension, CommitInfo, ExecTxResult, ExtendedCommitInfo, Misbehavior,
+        MisbehaviorType, RequestApplySnapshotChunk, RequestCheckTx, RequestExtendVote,
+        RequestFinalizeBlock, RequestInfo, RequestInitChain, RequestLoadSnapshotChunk,
+        RequestOfferSnapshot, RequestPrepareProposal, RequestProcessProposal, RequestQuery,
+        RequestVerifyVoteExtension, ResponseApplySnapshotChunk, ResponseCheckTx, ResponseCommit,
+        ResponseExtendVote, ResponseFinalizeBlock, ResponseInfo, ResponseInitChain,
+        ResponseListSnapshots, ResponseLoadSnapshotChunk, ResponseOfferSnapshot,
+        ResponsePrepareProposal, ResponseProcessProposal, ResponseQuery,
+        ResponseVerifyVoteExtension, ValidatorUpdate as ProtoValidatorUpdate,
     },
     crypto::{public_key, ProofOp, ProofOps},
     types::BlockIdFlag,
@@ -724,6 +724,8 @@ impl Application for AbciApplication {
             .unwrap_or_else(|error| self.halt(error));
         let next_validators_hash = next_validators_hash(&request.next_validators_hash)
             .unwrap_or_else(|error| self.halt(error));
+        let byzantine_evidence = normalize_byzantine_evidence(&request.misbehavior)
+            .unwrap_or_else(|error| self.halt(error));
         let _guard = self.execution_guard();
         let digests = self
             .inner
@@ -737,6 +739,7 @@ impl Application for AbciApplication {
             execution_hash: digests.execution_hash,
             compact_hash: digests.compact_hash,
             last_commit,
+            byzantine_evidence,
             next_validators_hash,
         };
         match self
@@ -802,6 +805,67 @@ fn block_time_seconds(
         return Err("block time is invalid".to_owned());
     }
     u64::try_from(timestamp.seconds).map_err(|_| "block time does not fit u64".to_owned())
+}
+
+fn normalize_byzantine_evidence(
+    misbehavior: &[Misbehavior],
+) -> std::result::Result<Vec<ByzantineEvidence>, String> {
+    misbehavior
+        .iter()
+        .map(|item| {
+            let kind = match MisbehaviorType::try_from(item.r#type) {
+                Ok(MisbehaviorType::DuplicateVote) => ByzantineEvidenceKind::DuplicateVote,
+                Ok(MisbehaviorType::LightClientAttack) => ByzantineEvidenceKind::LightClientAttack,
+                Ok(MisbehaviorType::Unknown) | Err(_) => {
+                    return Err("FinalizeBlock contains an unknown misbehavior type".to_owned());
+                }
+            };
+            let validator = item
+                .validator
+                .as_ref()
+                .ok_or_else(|| "FinalizeBlock misbehavior is missing its validator".to_owned())?;
+            let validator_address = validator.address.as_ref().try_into().map_err(|_| {
+                "FinalizeBlock misbehavior validator address must contain 20 bytes".to_owned()
+            })?;
+            let validator_power = u64::try_from(validator.power)
+                .map_err(|_| "FinalizeBlock misbehavior validator power is negative".to_owned())?;
+            if validator_power == 0 {
+                return Err("FinalizeBlock misbehavior validator power must be positive".to_owned());
+            }
+            let infraction_height = u64::try_from(item.height)
+                .map_err(|_| "FinalizeBlock misbehavior height is negative".to_owned())?;
+            if infraction_height == 0 {
+                return Err("FinalizeBlock misbehavior height must be positive".to_owned());
+            }
+            let time = item.time.as_ref().ok_or_else(|| {
+                "FinalizeBlock misbehavior is missing its infraction time".to_owned()
+            })?;
+            if time.seconds < 0 || !(0..1_000_000_000).contains(&time.nanos) {
+                return Err("FinalizeBlock misbehavior time is invalid".to_owned());
+            }
+            let infraction_time_seconds = u64::try_from(time.seconds)
+                .map_err(|_| "FinalizeBlock misbehavior time does not fit u64".to_owned())?;
+            let infraction_time_nanos = u32::try_from(time.nanos)
+                .map_err(|_| "FinalizeBlock misbehavior nanos do not fit u32".to_owned())?;
+            let total_voting_power = u64::try_from(item.total_voting_power).map_err(|_| {
+                "FinalizeBlock misbehavior total voting power is negative".to_owned()
+            })?;
+            if total_voting_power == 0 {
+                return Err(
+                    "FinalizeBlock misbehavior total voting power must be positive".to_owned(),
+                );
+            }
+            Ok(ByzantineEvidence {
+                kind,
+                validator_address,
+                validator_power,
+                infraction_height,
+                infraction_time_seconds,
+                infraction_time_nanos,
+                total_voting_power,
+            })
+        })
+        .collect()
 }
 
 fn next_validators_hash(bytes: &[u8]) -> std::result::Result<Hash32, String> {
@@ -1298,6 +1362,56 @@ mod tests {
             })),
             Ok(42)
         );
+    }
+
+    #[test]
+    fn byzantine_evidence_normalization_is_strict() {
+        let valid = Misbehavior {
+            r#type: MisbehaviorType::DuplicateVote as i32,
+            validator: Some(Validator {
+                address: vec![7; COMETBFT_ADDRESS_BYTES].into(),
+                power: 11,
+            }),
+            height: 9,
+            time: Some(Timestamp {
+                seconds: 42,
+                nanos: 123,
+            }),
+            total_voting_power: 31,
+        };
+        let normalized = normalize_byzantine_evidence(std::slice::from_ref(&valid)).unwrap();
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(
+            normalized[0],
+            ByzantineEvidence {
+                kind: ByzantineEvidenceKind::DuplicateVote,
+                validator_address: [7; COMETBFT_ADDRESS_BYTES],
+                validator_power: 11,
+                infraction_height: 9,
+                infraction_time_seconds: 42,
+                infraction_time_nanos: 123,
+                total_voting_power: 31,
+            }
+        );
+
+        let mut malformed = valid.clone();
+        malformed.r#type = MisbehaviorType::Unknown as i32;
+        assert!(normalize_byzantine_evidence(&[malformed]).is_err());
+        malformed = valid.clone();
+        malformed.validator.as_mut().unwrap().address = vec![7; 19].into();
+        assert!(normalize_byzantine_evidence(&[malformed]).is_err());
+        malformed = valid.clone();
+        malformed.validator.as_mut().unwrap().power = 0;
+        assert!(normalize_byzantine_evidence(&[malformed]).is_err());
+        malformed = valid.clone();
+        malformed.height = 0;
+        assert!(normalize_byzantine_evidence(&[malformed]).is_err());
+        malformed = valid.clone();
+        malformed.time.as_mut().unwrap().nanos = 1_000_000_000;
+        assert!(normalize_byzantine_evidence(&[malformed]).is_err());
+        malformed = valid;
+        malformed.total_voting_power = -1;
+        assert!(normalize_byzantine_evidence(&[malformed]).is_err());
     }
 
     #[test]

@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, VecDeque},
+    ops::Bound::{Excluded, Included},
 };
 use thiserror::Error;
 
@@ -133,6 +134,8 @@ pub enum Error {
     ExitCohortClosed,
     #[error("exit cohort is insolvent")]
     InsolventExitCohort,
+    #[error("validator slash settlement is still in progress")]
+    SlashInProgress,
     #[error("voting power exceeds the configured safe bound")]
     VotingPowerExceeded,
     #[error("staking invariant failed: {0}")]
@@ -1294,6 +1297,86 @@ impl ExitQueueEntry {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlashJob {
+    pub validator_id: Hash32,
+    pub evidence_hash: Hash32,
+    pub infraction_height: u64,
+    pub slash_bps: u16,
+    pub end_cursor: Option<Hash32>,
+    pub cursor: Option<Hash32>,
+    pub processed_cohorts: u64,
+    pub slashed_active_assets: Amount,
+    pub slashed_exit_assets: Amount,
+    pub complete: bool,
+}
+
+impl SlashJob {
+    pub fn encode_persistent(&self) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.u8(1);
+        writer.hash32(&self.validator_id);
+        writer.hash32(&self.evidence_hash);
+        writer.u64(self.infraction_height);
+        writer.u16(self.slash_bps);
+        writer.boolean(self.end_cursor.is_some());
+        if let Some(end_cursor) = self.end_cursor {
+            writer.hash32(&end_cursor);
+        }
+        writer.boolean(self.cursor.is_some());
+        if let Some(cursor) = self.cursor {
+            writer.hash32(&cursor);
+        }
+        writer.u64(self.processed_cohorts);
+        writer.amount(self.slashed_active_assets);
+        writer.amount(self.slashed_exit_assets);
+        writer.boolean(self.complete);
+        writer.finish()
+    }
+
+    pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(bytes);
+        reader.version(1)?;
+        let validator_id = reader.hash32()?;
+        let evidence_hash = reader.hash32()?;
+        let infraction_height = reader.u64()?;
+        let slash_bps = reader.u16()?;
+        let end_cursor = reader.boolean()?.then(|| reader.hash32()).transpose()?;
+        let cursor = reader.boolean()?.then(|| reader.hash32()).transpose()?;
+        let job = Self {
+            validator_id,
+            evidence_hash,
+            infraction_height,
+            slash_bps,
+            end_cursor,
+            cursor,
+            processed_cohorts: reader.u64()?,
+            slashed_active_assets: reader.amount()?,
+            slashed_exit_assets: reader.amount()?,
+            complete: reader.boolean()?,
+        };
+        reader.finish()?;
+        Ok(job)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ByzantineSlashOutcome {
+    pub validator_id: Hash32,
+    pub consensus_pubkey: PubKey32,
+    pub newly_tombstoned: bool,
+    pub slashed_active_assets: Amount,
+    pub job_complete: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SlashAdvanceOutcome {
+    pub touched_jobs: BTreeSet<Hash32>,
+    pub touched_cohorts: BTreeSet<Hash32>,
+    pub completed_jobs: BTreeSet<Hash32>,
+    pub slashed_exit_assets: Amount,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UnbondOutcome {
     pub ticket_id: Hash32,
@@ -1329,10 +1412,12 @@ pub struct StakingBook {
     candidate_index: BTreeSet<CandidateIndexEntry>,
     candidate_lookup: BTreeMap<Hash32, CandidateIndexEntry>,
     exit_cohorts: BTreeMap<Hash32, ExitCohort>,
+    exit_cohorts_by_validator: BTreeSet<(Hash32, u64, Hash32)>,
     exit_tickets: BTreeMap<Hash32, ExitTicket>,
     exit_exposure_queue: BTreeSet<ExitQueueEntry>,
     exit_maturity_height_queue: BTreeSet<ExitQueueEntry>,
     exit_maturity_time_queue: BTreeSet<ExitQueueEntry>,
+    slash_jobs: BTreeMap<Hash32, SlashJob>,
 }
 
 impl StakingBook {
@@ -1361,10 +1446,12 @@ impl StakingBook {
             candidate_index: BTreeSet::new(),
             candidate_lookup: BTreeMap::new(),
             exit_cohorts: BTreeMap::new(),
+            exit_cohorts_by_validator: BTreeSet::new(),
             exit_tickets: BTreeMap::new(),
             exit_exposure_queue: BTreeSet::new(),
             exit_maturity_height_queue: BTreeSet::new(),
             exit_maturity_time_queue: BTreeSet::new(),
+            slash_jobs: BTreeMap::new(),
         })
     }
 
@@ -1390,6 +1477,7 @@ impl StakingBook {
         exit_exposure_queue: impl IntoIterator<Item = ExitQueueEntry>,
         exit_maturity_height_queue: impl IntoIterator<Item = ExitQueueEntry>,
         exit_maturity_time_queue: impl IntoIterator<Item = ExitQueueEntry>,
+        slash_jobs: impl IntoIterator<Item = SlashJob>,
     ) -> Result<Self> {
         parameters.validate()?;
         let mut book = Self {
@@ -1402,10 +1490,12 @@ impl StakingBook {
             candidate_index: BTreeSet::new(),
             candidate_lookup: BTreeMap::new(),
             exit_cohorts: BTreeMap::new(),
+            exit_cohorts_by_validator: BTreeSet::new(),
             exit_tickets: BTreeMap::new(),
             exit_exposure_queue: BTreeSet::new(),
             exit_maturity_height_queue: BTreeSet::new(),
             exit_maturity_time_queue: BTreeSet::new(),
+            slash_jobs: BTreeMap::new(),
         };
         for validator in validators {
             let id = validator.validator_id;
@@ -1454,7 +1544,13 @@ impl StakingBook {
         }
         for cohort in exit_cohorts {
             let id = cohort.cohort_id;
-            if book.exit_cohorts.insert(id, cohort).is_some() {
+            let validator_id = cohort.validator_id;
+            let exit_epoch = cohort.exit_epoch;
+            if book.exit_cohorts.insert(id, cohort).is_some()
+                || !book
+                    .exit_cohorts_by_validator
+                    .insert((validator_id, exit_epoch, id))
+            {
                 return Err(Error::InvalidEncoding("duplicate exit cohort record"));
             }
         }
@@ -1483,6 +1579,12 @@ impl StakingBook {
                 return Err(Error::InvalidEncoding(
                     "duplicate exit maturity-time queue record",
                 ));
+            }
+        }
+        for job in slash_jobs {
+            let id = job.validator_id;
+            if book.slash_jobs.insert(id, job).is_some() {
+                return Err(Error::InvalidEncoding("duplicate slash job record"));
             }
         }
         book.validate()?;
@@ -1527,12 +1629,26 @@ impl StakingBook {
         self.exit_tickets.values()
     }
 
+    pub fn slash_jobs(&self) -> impl Iterator<Item = &SlashJob> {
+        self.slash_jobs.values()
+    }
+
     pub fn exit_cohort(&self, id: &Hash32) -> Option<&ExitCohort> {
         self.exit_cohorts.get(id)
     }
 
     pub fn exit_ticket(&self, id: &Hash32) -> Option<&ExitTicket> {
         self.exit_tickets.get(id)
+    }
+
+    pub fn slash_job(&self, validator_id: &Hash32) -> Option<&SlashJob> {
+        self.slash_jobs.get(validator_id)
+    }
+
+    pub fn slash_in_progress(&self, validator_id: &Hash32) -> bool {
+        self.slash_jobs
+            .get(validator_id)
+            .is_some_and(|job| !job.complete)
     }
 
     pub fn exit_exposure_queue(&self) -> impl Iterator<Item = ExitQueueEntry> + '_ {
@@ -2537,6 +2653,9 @@ impl StakingBook {
                 .get(id)
                 .ok_or(Error::PositionNotFound)?
                 .clone();
+            if next.slash_in_progress(&position.validator_id) {
+                return Err(Error::SlashInProgress);
+            }
             if position.status != PositionStatus::Active {
                 return Err(Error::PositionNotActive);
             }
@@ -2625,6 +2744,11 @@ impl StakingBook {
                     maturity_time_seconds: None,
                     status: ExitCohortStatus::PendingExposure,
                 });
+            next.exit_cohorts_by_validator.insert((
+                position.validator_id,
+                exit_epoch,
+                derived_cohort_id,
+            ));
             cohort.assets = checked_add(cohort.assets, exit_assets)?;
             cohort.total_units = checked_add(cohort.total_units, units)?;
             next.exit_exposure_queue.insert(ExitQueueEntry {
@@ -2812,6 +2936,9 @@ impl StakingBook {
                 .exit_cohorts
                 .get(&ticket.cohort_id)
                 .ok_or(Error::ExitCohortNotFound)?;
+            if next.slash_in_progress(&cohort.validator_id) {
+                return Err(Error::SlashInProgress);
+            }
             let maturity_time = cohort.maturity_time_seconds.ok_or(Error::ExitNotMature)?;
             if cohort.status != ExitCohortStatus::Mature
                 || current_height <= cohort.maturity_height
@@ -2834,6 +2961,206 @@ impl StakingBook {
             ticket.claimed = true;
             ticket.sequence = ticket.sequence.checked_add(1).ok_or(Error::Overflow)?;
             Ok(released)
+        })
+    }
+
+    /// Resolve a consensus address across the immutable key history. Consensus
+    /// keys are never reusable, so one address identifies one validator for all
+    /// historical evidence heights.
+    pub fn validator_id_for_consensus_address(&self, address: &ConsensusAddress) -> Result<Hash32> {
+        let mut matched = None;
+        for validator in self.validators.values() {
+            if validator
+                .consensus_key_history
+                .iter()
+                .any(|record| consensus_address(&record.consensus_pubkey) == *address)
+                && matched.replace(validator.validator_id).is_some()
+            {
+                return Err(Error::Invariant("consensus address collision"));
+            }
+        }
+        matched.ok_or(Error::UnknownCommitValidator)
+    }
+
+    /// Apply the one-time immediate part of a Byzantine penalty. The shared
+    /// active pool is reduced now; exit cohorts are settled by the bounded job.
+    pub fn begin_byzantine_slash(
+        &mut self,
+        validator_id: &Hash32,
+        evidence_hash: Hash32,
+        infraction_height: u64,
+    ) -> Result<ByzantineSlashOutcome> {
+        self.transact(|next| {
+            if let Some(job) = next.slash_jobs.get(validator_id) {
+                let validator = next
+                    .validators
+                    .get(validator_id)
+                    .ok_or(Error::ValidatorNotFound)?;
+                if validator.status != ValidatorStatus::Tombstoned {
+                    return Err(Error::Invariant("slash job validator is not tombstoned"));
+                }
+                return Ok(ByzantineSlashOutcome {
+                    validator_id: *validator_id,
+                    consensus_pubkey: validator.consensus_pubkey,
+                    newly_tombstoned: false,
+                    slashed_active_assets: Amount::ZERO,
+                    job_complete: job.complete,
+                });
+            }
+
+            let slash_bps = next.parameters.byzantine_slash_bps;
+            let pool = next
+                .pools
+                .get_mut(validator_id)
+                .ok_or(Error::ValidatorNotFound)?;
+            let slashed_active_assets =
+                floor_mul_div(pool.assets.value(), u128::from(slash_bps), 10_000)?;
+            pool.assets = checked_sub(pool.assets, slashed_active_assets, "active pool slash")?;
+
+            let validator = next
+                .validators
+                .get_mut(validator_id)
+                .ok_or(Error::ValidatorNotFound)?;
+            let consensus_pubkey = validator.consensus_pubkey;
+            validator.status = ValidatorStatus::Tombstoned;
+            validator.accepts_delegation = false;
+            validator.voting_power = 0;
+            validator.pending_commission = None;
+            validator.pending_consensus_key = None;
+            validator.jailed_at_height = None;
+            validator.jailed_at_time_seconds = None;
+            next.refresh_candidate_index(validator_id)?;
+
+            let end_cursor = next
+                .exit_cohorts_by_validator
+                .range((*validator_id, 0, [0; 32])..=(*validator_id, u64::MAX, [u8::MAX; 32]))
+                .next_back()
+                .map(|(_, _, cohort_id)| *cohort_id);
+            next.slash_jobs.insert(
+                *validator_id,
+                SlashJob {
+                    validator_id: *validator_id,
+                    evidence_hash,
+                    infraction_height,
+                    slash_bps,
+                    end_cursor,
+                    cursor: None,
+                    processed_cohorts: 0,
+                    slashed_active_assets,
+                    slashed_exit_assets: Amount::ZERO,
+                    complete: end_cursor.is_none(),
+                },
+            );
+            Ok(ByzantineSlashOutcome {
+                validator_id: *validator_id,
+                consensus_pubkey,
+                newly_tombstoned: true,
+                slashed_active_assets,
+                job_complete: end_cursor.is_none(),
+            })
+        })
+    }
+
+    /// Advance unfinished slash jobs by at most the configured global number
+    /// of cohort records per block. Jobs and validator-local cohorts use stable
+    /// order, and the cursor moves across skipped records too.
+    pub fn advance_slash_jobs(&mut self) -> Result<SlashAdvanceOutcome> {
+        self.transact(|next| {
+            let limit = usize::from(next.parameters.slash_cohorts_per_block);
+            let mut remaining = limit;
+            let job_ids: Vec<_> = next
+                .slash_jobs
+                .values()
+                .filter(|job| !job.complete)
+                .map(|job| job.validator_id)
+                .collect();
+            let mut outcome = SlashAdvanceOutcome::default();
+            for validator_id in job_ids {
+                if remaining == 0 {
+                    break;
+                }
+                let job = next
+                    .slash_jobs
+                    .get(&validator_id)
+                    .ok_or(Error::Invariant("active slash job is missing"))?
+                    .clone();
+                let end_cursor = job
+                    .end_cursor
+                    .ok_or(Error::Invariant("active slash job has no end cursor"))?;
+                let end_epoch = next
+                    .exit_cohorts
+                    .get(&end_cursor)
+                    .ok_or(Error::Invariant("slash job end cohort is missing"))?
+                    .exit_epoch;
+                let upper = (validator_id, end_epoch, end_cursor);
+                let candidates: Vec<Hash32> = if let Some(cursor) = job.cursor {
+                    let cursor_epoch = next
+                        .exit_cohorts
+                        .get(&cursor)
+                        .ok_or(Error::Invariant("slash job cursor cohort is missing"))?
+                        .exit_epoch;
+                    next.exit_cohorts_by_validator
+                        .range((
+                            Excluded((validator_id, cursor_epoch, cursor)),
+                            Included(upper),
+                        ))
+                        .take(remaining + 1)
+                        .map(|(_, _, cohort_id)| *cohort_id)
+                        .collect()
+                } else {
+                    next.exit_cohorts_by_validator
+                        .range((validator_id, 0, [0; 32])..=upper)
+                        .take(remaining + 1)
+                        .map(|(_, _, cohort_id)| *cohort_id)
+                        .collect()
+                };
+                let has_more = candidates.len() > remaining;
+                let mut cursor = job.cursor;
+                let mut processed = 0u64;
+                let mut job_slashed = Amount::ZERO;
+                for cohort_id in candidates.into_iter().take(remaining) {
+                    cursor = Some(cohort_id);
+                    processed = processed.checked_add(1).ok_or(Error::Overflow)?;
+                    let cohort = next
+                        .exit_cohorts
+                        .get_mut(&cohort_id)
+                        .ok_or(Error::ExitCohortNotFound)?;
+                    if cohort.exposure_end_height >= job.infraction_height
+                        && cohort.status != ExitCohortStatus::Mature
+                    {
+                        let slashed = floor_mul_div(
+                            cohort.assets.value(),
+                            u128::from(job.slash_bps),
+                            10_000,
+                        )?;
+                        cohort.assets = checked_sub(cohort.assets, slashed, "exit cohort slash")?;
+                        job_slashed = checked_add(job_slashed, slashed)?;
+                        outcome.touched_cohorts.insert(cohort_id);
+                    }
+                }
+                remaining = remaining
+                    .checked_sub(usize::try_from(processed).map_err(|_| Error::Overflow)?)
+                    .ok_or(Error::Overflow)?;
+                let current = next
+                    .slash_jobs
+                    .get_mut(&validator_id)
+                    .ok_or(Error::Invariant("active slash job is missing"))?;
+                current.cursor = cursor;
+                current.processed_cohorts = current
+                    .processed_cohorts
+                    .checked_add(processed)
+                    .ok_or(Error::Overflow)?;
+                current.slashed_exit_assets =
+                    checked_add(current.slashed_exit_assets, job_slashed)?;
+                current.complete = !has_more;
+                outcome.touched_jobs.insert(validator_id);
+                if current.complete {
+                    outcome.completed_jobs.insert(validator_id);
+                }
+                outcome.slashed_exit_assets =
+                    checked_add(outcome.slashed_exit_assets, job_slashed)?;
+            }
+            Ok(outcome)
         })
     }
 
@@ -3053,6 +3380,16 @@ impl StakingBook {
                 (_, None, None) => {}
                 _ => return Err(Error::Invariant("non-jailed validator has jail markers")),
             }
+            if validator.status == ValidatorStatus::Tombstoned
+                && (validator.accepts_delegation
+                    || validator.pending_commission.is_some()
+                    || validator.pending_consensus_key.is_some()
+                    || !self.slash_jobs.contains_key(id))
+            {
+                return Err(Error::Invariant(
+                    "tombstoned validator slash state is inconsistent",
+                ));
+            }
             let pool = self
                 .pools
                 .get(id)
@@ -3217,6 +3554,7 @@ impl StakingBook {
                 )?;
             }
         }
+        let mut expected_exit_cohort_index = BTreeSet::new();
         for (id, cohort) in &self.exit_cohorts {
             if cohort.cohort_id != *id
                 || cohort_id(&self.chain_context, &cohort.validator_id, cohort.exit_epoch) != *id
@@ -3226,6 +3564,7 @@ impl StakingBook {
             if !self.validators.contains_key(&cohort.validator_id) {
                 return Err(Error::Invariant("exit cohort validator missing"));
             }
+            expected_exit_cohort_index.insert((cohort.validator_id, cohort.exit_epoch, *id));
             if cohort.maturity_height
                 != cohort
                     .exposure_end_height
@@ -3255,7 +3594,7 @@ impl StakingBook {
                     "exit ticket units do not equal cohort units",
                 ));
             }
-            if (cohort.assets == Amount::ZERO) != (cohort.total_units == Amount::ZERO) {
+            if cohort.assets != Amount::ZERO && cohort.total_units == Amount::ZERO {
                 return Err(Error::Invariant(
                     "exit cohort assets and units are inconsistent",
                 ));
@@ -3287,6 +3626,11 @@ impl StakingBook {
                     if !in_exposure_queue && !in_height_queue && !in_time_queue => {}
                 _ => return Err(Error::Invariant("exit cohort queue state is inconsistent")),
             }
+        }
+        if self.exit_cohorts_by_validator != expected_exit_cohort_index {
+            return Err(Error::Invariant(
+                "exit cohort validator index is inconsistent",
+            ));
         }
         for entry in &self.exit_exposure_queue {
             let cohort = self
@@ -3327,6 +3671,56 @@ impl StakingBook {
                 return Err(Error::Invariant(
                     "exit maturity-time queue has a stale entry",
                 ));
+            }
+        }
+        for (id, job) in &self.slash_jobs {
+            if job.validator_id != *id
+                || job.infraction_height == 0
+                || job.slash_bps == 0
+                || job.slash_bps > 10_000
+                || job.slash_bps != self.parameters.byzantine_slash_bps
+            {
+                return Err(Error::Invariant("slash job identity or policy is invalid"));
+            }
+            let validator = self
+                .validators
+                .get(id)
+                .ok_or(Error::Invariant("slash job validator is missing"))?;
+            if validator.status != ValidatorStatus::Tombstoned {
+                return Err(Error::Invariant("slash job validator is not tombstoned"));
+            }
+            let cohort_ids: Vec<_> = match job.end_cursor {
+                Some(end_cursor) => {
+                    let end_epoch = self
+                        .exit_cohorts
+                        .get(&end_cursor)
+                        .ok_or(Error::Invariant("slash job end cohort is missing"))?
+                        .exit_epoch;
+                    self.exit_cohorts_by_validator
+                        .range((*id, 0, [0; 32])..=(*id, end_epoch, end_cursor))
+                        .map(|(_, _, cohort_id)| *cohort_id)
+                        .collect()
+                }
+                None => Vec::new(),
+            };
+            if job.end_cursor.is_some() != !cohort_ids.is_empty()
+                || job.end_cursor != cohort_ids.last().copied()
+            {
+                return Err(Error::Invariant("slash job end cursor is inconsistent"));
+            }
+            let processed = match job.cursor {
+                Some(cursor) => cohort_ids
+                    .iter()
+                    .position(|cohort_id| *cohort_id == cursor)
+                    .and_then(|index| u64::try_from(index + 1).ok())
+                    .ok_or(Error::Invariant("slash job cursor is not indexed"))?,
+                None => 0,
+            };
+            if processed != job.processed_cohorts
+                || (job.complete && processed != cohort_ids.len() as u64)
+                || (!job.complete && processed >= cohort_ids.len() as u64)
+            {
+                return Err(Error::Invariant("slash job cursor state is inconsistent"));
             }
         }
         let mut expected_index = BTreeSet::new();
@@ -4194,6 +4588,180 @@ mod tests {
     }
 
     #[test]
+    fn byzantine_slash_is_one_time_bounded_and_freezes_exit_actions() {
+        let chain = key(1);
+        let operator = key(2);
+        let validator = validator_id(&chain, &operator);
+        let mut parameters = StakingParameters::reference_testnet();
+        parameters.slash_cohorts_per_block = 1;
+        let mut book = StakingBook::new(chain, parameters).unwrap();
+        book.register_validator(validator, operator, key(3), 500)
+            .unwrap();
+        let self_bond = open(
+            &mut book,
+            validator,
+            key(4),
+            TESTNET_MIN_SELF_BOND_ATOMIC,
+            0,
+            true,
+        );
+        let delegator = open(&mut book, validator, key(5), 300 * ATOMIC_PER_BIT, 0, false);
+        book.activate_pending(&self_bond, 1).unwrap();
+        book.activate_pending(&delegator, 1).unwrap();
+        book.apply_validator_set().unwrap();
+
+        let exit_value = 10 * ATOMIC_PER_BIT;
+        for (sequence, exit_epoch, exposure_end_height) in [(1, 0, 10), (2, 1, 20), (3, 2, 30)] {
+            book.unbond(
+                &delegator,
+                sequence,
+                amount(exit_value),
+                amount(exit_value),
+                Amount::ZERO,
+                Amount::ZERO,
+                FeeSource::Shielded,
+                exit_epoch,
+                exposure_end_height,
+            )
+            .unwrap();
+        }
+
+        let active_before = book.pool(&validator).unwrap().assets;
+        let slash = book
+            .begin_byzantine_slash(&validator, key(0xa1), 20)
+            .unwrap();
+        let expected_active_slash = amount(active_before.value() * 500 / 10_000);
+        assert!(slash.newly_tombstoned);
+        assert_eq!(slash.slashed_active_assets, expected_active_slash);
+        assert!(!slash.job_complete);
+        assert_eq!(
+            book.validator(&validator).unwrap().status,
+            ValidatorStatus::Tombstoned
+        );
+        assert_eq!(
+            book.unbond(
+                &delegator,
+                4,
+                amount(ATOMIC_PER_BIT),
+                Amount::ZERO,
+                Amount::ZERO,
+                Amount::ZERO,
+                FeeSource::Shielded,
+                3,
+                40,
+            ),
+            Err(Error::SlashInProgress)
+        );
+        let ticket = book.exit_tickets().next().unwrap().ticket_id;
+        assert_eq!(
+            book.claim_exit(&ticket, 0, u64::MAX, u64::MAX),
+            Err(Error::SlashInProgress)
+        );
+
+        let mut exit_slashed = Amount::ZERO;
+        for expected_processed in 1..=3 {
+            let advanced = book.advance_slash_jobs().unwrap();
+            assert!(advanced.touched_jobs.contains(&validator));
+            exit_slashed = checked_add(exit_slashed, advanced.slashed_exit_assets).unwrap();
+            let job = book.slash_job(&validator).unwrap();
+            assert_eq!(job.processed_cohorts, expected_processed);
+            assert_eq!(job.complete, expected_processed == 3);
+        }
+        assert_eq!(exit_slashed, amount(ATOMIC_PER_BIT));
+        assert_eq!(
+            book.slash_job(&validator).unwrap().slashed_exit_assets,
+            exit_slashed
+        );
+        assert!(!book.slash_in_progress(&validator));
+
+        book.unbond(
+            &delegator,
+            4,
+            amount(ATOMIC_PER_BIT),
+            Amount::ZERO,
+            Amount::ZERO,
+            Amount::ZERO,
+            FeeSource::Shielded,
+            3,
+            40,
+        )
+        .unwrap();
+        let repeated = book
+            .begin_byzantine_slash(&validator, key(0xa2), 25)
+            .unwrap();
+        assert!(!repeated.newly_tombstoned);
+        assert_eq!(repeated.slashed_active_assets, Amount::ZERO);
+        assert!(repeated.job_complete);
+        assert!(book.validate().is_ok());
+    }
+
+    #[test]
+    fn slash_cohort_limit_is_global_across_jobs() {
+        let chain = key(0xc0);
+        let mut parameters = StakingParameters::reference_testnet();
+        parameters.slash_cohorts_per_block = 1;
+        let mut book = StakingBook::new(chain, parameters).unwrap();
+        let mut validators = Vec::new();
+        for seed in [0xc1, 0xd1] {
+            let validator = validator_id(&chain, &key(seed));
+            book.register_validator(validator, key(seed), key(seed + 1), 500)
+                .unwrap();
+            let self_bond = open(
+                &mut book,
+                validator,
+                key(seed + 2),
+                TESTNET_MIN_SELF_BOND_ATOMIC,
+                0,
+                true,
+            );
+            let delegation = open(
+                &mut book,
+                validator,
+                key(seed + 3),
+                20 * ATOMIC_PER_BIT,
+                0,
+                false,
+            );
+            book.activate_pending(&self_bond, 1).unwrap();
+            book.activate_pending(&delegation, 1).unwrap();
+            book.unbond(
+                &delegation,
+                1,
+                amount(ATOMIC_PER_BIT),
+                Amount::ZERO,
+                Amount::ZERO,
+                Amount::ZERO,
+                FeeSource::Shielded,
+                0,
+                20,
+            )
+            .unwrap();
+            validators.push(validator);
+        }
+        book.apply_validator_set().unwrap();
+        for (index, validator) in validators.iter().enumerate() {
+            book.begin_byzantine_slash(validator, key(0xe0 + index as u8), 10)
+                .unwrap();
+        }
+
+        let first = book.advance_slash_jobs().unwrap();
+        assert_eq!(first.touched_jobs.len(), 1);
+        assert_eq!(
+            validators
+                .iter()
+                .filter(|validator| book.slash_in_progress(validator))
+                .count(),
+            1
+        );
+        let second = book.advance_slash_jobs().unwrap();
+        assert_eq!(second.touched_jobs.len(), 1);
+        assert!(validators
+            .iter()
+            .all(|validator| !book.slash_in_progress(validator)));
+        assert!(book.validate().is_ok());
+    }
+
+    #[test]
     fn unbond_uses_cohort_units_and_claim_requires_both_maturity_bounds() {
         let (mut book, validator) = book_with_validator();
         let self_bond = open(
@@ -4357,6 +4925,8 @@ mod tests {
             100,
         )
         .unwrap();
+        book.begin_byzantine_slash(&validator_id, key(0xb1), 1)
+            .unwrap();
 
         let parameters =
             StakingParameters::decode_persistent(&book.parameters().encode_persistent()).unwrap();
@@ -4408,6 +4978,10 @@ mod tests {
             .exit_maturity_time_queue()
             .map(|value| ExitQueueEntry::decode_persistent(&value.encode_persistent()).unwrap())
             .collect();
+        let slash_jobs: Vec<_> = book
+            .slash_jobs()
+            .map(|value| SlashJob::decode_persistent(&value.encode_persistent()).unwrap())
+            .collect();
         let rebuilt = StakingBook::from_records(
             book.chain_context(),
             parameters,
@@ -4421,6 +4995,7 @@ mod tests {
             exposure_queue,
             maturity_height_queue,
             maturity_time_queue,
+            slash_jobs,
         )
         .unwrap();
         assert_eq!(rebuilt, book);
