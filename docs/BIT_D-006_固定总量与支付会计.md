@@ -1,6 +1,6 @@
 # BIT D-006 固定总量与支付会计
 
-状态：`IN_PROGRESS`。固定总量、供应恒等式、创世分配、最低手续费、Transfer 费用入池、逐 epoch 发行算法、高度/结算计数、由 last commit 驱动的池奖励/佣金分配、佣金领取和可证明审计快照已经实现并持久化；H+2 实际集合已核验，钱包收发闭环仍待完成。
+状态：`IN_PROGRESS`。固定总量、供应恒等式、创世分配与领取、最低手续费、Transfer 费用入池、逐 epoch 发行算法、高度/结算计数、由 last commit 驱动的池奖励/佣金分配、佣金领取和可证明审计快照已经实现并持久化；H+2 实际集合已核验，钱包收发闭环仍待完成。
 
 ## 1. 会计边界
 
@@ -31,7 +31,7 @@ M = I + K + Future(e)
 |---|---|---|
 | 创世初始化 | 分配容器之和必须等于 `G0` | 已接入状态高度 0 |
 | Transfer fee | `Q -= fee; F += fee` | 已接入真实 Transfer 执行与原子提交 |
-| 创世领取 | `G -= released; Q += released - fee; F += fee` | 会计函数已实现，动作执行器未接入 |
+| 创世领取 | `G -= released; Q += released - fee; F += fee` | ClaimGenesis 已接入真实证明交易、一次性状态和原子提交 |
 | 合格 epoch | `Mint += quota; F += quota` | 新 epoch 首块根据已累计实际签名 score 自动执行 |
 | 空合格集合 epoch | `K += quota` | score 总和为零时自动放弃且不追补 |
 | 费用/发行分配 | `F -= reward + commission; ΣP += reward; ΣC += commission` | 已按 score 和 validator commission 接入旧池，余数留 F |
@@ -55,7 +55,7 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 ## 4. 持久化与证明
 
-货币政策、政策哈希、六项费率、供应累计量、七类资产容器、完成 epoch 数和已放弃额度都纳入当前 schema v18 的 JMT（这些字段最初在 v5 引入）。它们与高度、TCT、交易索引、execution 摘要、compact 摘要、质押/退出记录、供应审计快照、三高度实际验证者集合及九个子存储版本标记在同一个 RocksDB WriteBatch 中提交。每个 validator v5 记录其 `commission_accrued`、签名窗口和 epoch score，重启时要求佣金总和精确等于供应容器 `ΣC`；全部 exit cohort 资产之和必须精确等于供应容器 `ΣX`。
+货币政策、政策哈希、六项费率、供应累计量、七类资产容器、完成 epoch 数和已放弃额度都纳入当前 schema v19 的 JMT（这些字段最初在 v5 引入）。它们与高度、TCT、交易索引、execution 摘要、compact 摘要、创世领取、质押/退出记录、供应审计快照、三高度实际验证者集合及九个子存储版本标记在同一个 RocksDB WriteBatch 中提交。每个 validator v5 记录其 `commission_accrued`、签名窗口和 epoch score，重启时要求佣金总和精确等于供应容器 `ΣC`；全部 exit cohort 资产之和必须精确等于供应容器 `ΣX`；未领取的创世项加未映射余额必须精确等于供应容器 `G`。
 
 `supply/audit_snapshot` 已冻结版本 1 规范值。它是 19 项 CBOR 数组：版本号、按本节恒定顺序排列的 16 个 Amount、`completed_epochs` 和 `monetary_policy_hash`。每个 Amount 必须编码为精确 16 字节大端 byte string，政策哈希必须为 32 字节，整数必须使用最短 CBOR 表示。顺序依次为 `M, G0, Mint, Burn, I, T, U(e), K, Future(e), Q, ΣP, D, ΣX, ΣC, F, G`。解码器要求无尾随字节、重新编码逐字节相等，并重新验证全部供应恒等式。
 
@@ -77,12 +77,13 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 - 连续两个 epoch 分别覆盖正常新增发行和空集合放弃，`Mint + K = U(e)`。
 - 两个验证人按 1:3 score 分配 101 原子单位时得到 25/75 gross，1 原子余数留 F；佣金分别按 5% 和 10% 向下取整为 1/7，P/C 与账本逐项交叉一致。
 - 单验证人状态集成测试覆盖 `quota + 既有 F → P/C`、旧池结算 epoch、ClaimCommission 的 `C→Q/F`、sequence、Commit 和重启恢复。
+- ClaimGenesis 真实 envelope 覆盖领取公钥签名、精确金额、Groth16、binding、`G→Q/F`、领取高度、ICS23 证明和重启恢复；已领取状态及错误金额在写状态前拒绝。
 - 销毁后未来发行预算不增加；人为篡改持久化费用池后，重启校验拒绝数据库。
 
 ## 6. 完成 D-006 还需要
 
 1. 四节点实验已验证 H/H+1/H+2 实际集合、last commit power、请求哈希、奖励后投票权，以及真实 Transfer 的费用、交易/nullifier 证明、TCT 根和 execution/compact 摘要一致；下一步补区块产物分发及多节点真实退出。
 2. 为钱包和网关提供带证明的费率、在线率、奖励和佣金报价接口。
-3. 接入 GenesisClaim 和 Slash 等剩余容器转换；Delegate、Unbond、ClaimExit 和 ClaimCommission 已接入。
+3. ClaimGenesis 与 Byzantine Slash 已接入；后续补主网创世 manifest/签名 CLI、多节点领取与处罚/领取交错压力测试。
 4. 为已冻结的 `supply/audit_snapshot` 增加面向 SDK 的跨语言验证映射；共识值、REST DTO、最新/历史高度查询、共享测试向量和严格 Rust 解码器已经完成。
 5. 完成真实钱包 A 到 B 的构造、扫描、余额变化和重启恢复闭环，并在多节点 CometBFT 环境验证供应状态一致。

@@ -14,7 +14,7 @@
 
 | 键 | 值 | 约束 |
 |---|---|---|
-| `meta/version` | 4 字节大端 schema 版本 | 当前为 18，未知版本拒绝启动 |
+| `meta/version` | 4 字节大端 schema 版本 | 当前为 19，未知版本拒绝启动 |
 | `meta/height` | 8 字节大端状态高度 | 必须等于 Cnidarium 最新版本 |
 | `meta/block_time_seconds` | 8 字节大端 Unix 秒 | ABCI 区块时间，不允许相对 durable 状态倒退 |
 | `meta/chain_context` | 32 字节 | 创世后不可变 |
@@ -25,6 +25,7 @@
 | `meta/max_envelope_bytes` | 8 字节 | 创世后不可变 |
 | `meta/anchor_retention_blocks` | 8 字节 | 创世后不可变 |
 | `meta/genesis_commitments_hash` | 32 字节 | 按清单顺序绑定创世隐私承诺，创世后不可变 |
+| `meta/genesis_claims_hash` | 32 字节 | 绑定按 claim ID 排序的公开领取权集合，创世后不可变 |
 | `meta/monetary_policy_hash` | 32 字节 | 绑定规范货币政策编码，创世后不可变 |
 | `<substore>/_meta/version` | 8 字节大端状态高度 | 九个子存储每个版本都写入，必须等于主树版本与 `meta/height` |
 | `emission/policy` | 规范货币政策字节 | 重启时逐字节核对 |
@@ -47,6 +48,7 @@
 | `fees/new_position_surcharge_atomic` | 16 字节大端 Amount | 创建持仓附加费 |
 | `fees/validator_registration_surcharge_atomic` | 16 字节大端 Amount | 注册验证者附加费 |
 | `genesis/unclaimed_total` | 16 字节大端 Amount | 未领取创世分配 G |
+| `genesis/claims/<claim_id>` | v1 GenesisClaimStatus | 领取公钥、金额和可选领取高度；键、清单和 G 容器在重启时交叉核对 |
 | `staking/parameters` | v4 严格持久化记录 | 创世后不可变，另含退出双窗口、Byzantine 罚没率和每块 cohort 处理上限 |
 | `staking/validators/<validator_id>` | v5 Validator 记录 | 键必须匹配 operator 与 chain context 派生 ID；含 sequence、累计佣金、签名窗口/epoch score、待生效变更、jail 标记和共识键历史 |
 | `staking/pools/<validator_id>` | v1 StakePool 记录 | pool 资产和 pending 分别交叉核对 P、D |
@@ -71,15 +73,15 @@
 | `execution/block/<height>` | 32 字节执行摘要 | 与状态高度同批提交 |
 | `compact/hash/<height>` | 32 字节 compact 摘要 | 与状态高度同批提交 |
 
-初始化时按签名创世清单的顺序校验并插入隐私承诺，然后关闭高度零 TCT block；非法字段元素或重复承诺会在写盘前拒绝。清单摘要使用 `BIT-GENESIS-COMMITMENTS-V1 || count_be_u64 || commitments` 的 SHA-256，重启配置必须给出同一有序清单。主网清单仍属于未批准外部输入。
+初始化时按签名创世清单的顺序校验并插入隐私承诺，然后关闭高度零 TCT block；非法字段元素或重复承诺会在写盘前拒绝。承诺摘要使用 `BIT-GENESIS-COMMITMENTS-V1 || count_be_u64 || commitments` 的 SHA-256，重启配置必须给出同一有序清单。公开领取项校验派生 ID、Ed25519 公钥、正数金额、ID/公钥唯一性和 G 容器上界，再按 claim ID 排序计算 `BIT-GENESIS-CLAIMS-V1` 摘要。主网身份清单、签名和真实分配仍属于未批准外部输入，依赖顺序见 D-025。
 
-TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11；逐验证人的持久化候选排序记录进入 schema v12；退出参数、cohort 和 ticket 进入 schema v13；退出暴露/成熟队列进入 schema v14；逐高度真实验证者责任集合进入 schema v15；Byzantine evidence 和 SlashJob 进入 schema v16；规范供应审计快照进入 schema v17；九个子存储的逐高度版本标记和可重建历史证明进入 schema v18。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
+TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11；逐验证人的持久化候选排序记录进入 schema v12；退出参数、cohort 和 ticket 进入 schema v13；退出暴露/成熟队列进入 schema v14；逐高度真实验证者责任集合进入 schema v15；Byzantine evidence 和 SlashJob 进入 schema v16；规范供应审计快照进入 schema v17；九个子存储的逐高度版本标记和可重建历史证明进入 schema v18；创世领取清单、逐项状态和 G 容器交叉核对进入 schema v19。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
 
 ## 3. 块生命周期
 
 1. `begin_block_at(h,time)` 从最新不可变快照读取高度、链时间、TCT 和实际验证者集合日程，要求 `h = durable_height + 1`、`time >= durable_time`，并核对 frontier、树根、日程高度和质押逻辑集合。
-2. 每笔 Transfer 先检查 chain context、动作类型、anchor 和 tx_id，再执行证明与签名校验；得到 nullifier 后，在当前 `StateDelta` 中检查同块及历史冲突。
-3. 所有 nullifier、output commitment 和费用会计都通过后才写入 delta。TCT 与供应状态均在副本上完成变更，任何失败都不会留下部分更新。
+2. 每笔 Transfer 或已启用原生动作先检查 chain context、动作、anchor 和 tx_id，再执行证明与签名校验；ClaimGenesis 还从当前 `StateDelta` 读取领取公钥、金额和状态，因此同块第二次领取也会被拒绝。
+3. 所有 nullifier、output commitment、业务状态和费用会计都通过后才写入 delta。TCT、供应、质押和领取记录均在候选状态上完成变更，任何失败都不会留下部分更新。
 4. 每块系统阶段先要求请求中的 `next_validators_hash` 等于持久化 H+1 集合哈希；H>1 时 last commit 必须逐项匹配 H-1 集合。随后验证和去重 Byzantine evidence、墓碑化及创建 SlashJob；epoch 首块再结算发行、激活 pending 和选择集合，然后在全局 cohort 上限内推进处罚与退出队列，并把更新应用为 H+2 集合。
 5. `prepare()` 重新验证供应、质押恒等式及质押逻辑集合与 H+2 实际集合一致，关闭当前 TCT block，把新根、frontier、anchor、供应字段、触及的质押记录、三高度集合日程、执行摘要、compact 摘要和高度写入同一个 delta，并调用 Cnidarium `prepare_commit` 计算下一 JMT 根。
 6. `commit()` 调用固定 Cnidarium 0.83.0 的 BIT 补丁：先解析并验证完整 RocksDB WriteBatch 的头部、记录数量、列族 put/delete 标签、varint 和每个 key/value 边界，再以 WAL 开启且 `WriteOptions.sync=true` 的单次写入落盘全部 JMT、索引和值。写入或 fsync 错误通过 `Result` 返回停机路径；返回的 app hash 必须等于 prepare 阶段的根，成功后才替换进程内质押镜像。
@@ -90,7 +92,7 @@ Prepare 结果被丢弃或批次在写前失败时，数据库版本不变。重
 
 `query_latest_with_proof` 和 `query_at_height_with_proof` 返回原始值、状态版本、app hash 和 Cnidarium 生成的 ICS23 proof。主 JMT 键使用一层证明；九个子存储区使用“子树值到子树根、子树根到全局根”的两层证明。`QueryProof::verify` 同时处理存在和不存在证明。
 
-schema v18 在创世及每个区块给九个子存储分别写入 `<prefix>/_meta/version`，要求标记、子树 JMT 版本、主树版本和 `meta/height` 全部等于提交高度。节点启动会校验最新标记；精确历史查询还会在指定版本逐项校验全部标记。Cnidarium 的固定补丁可在进程缓存缺失时，以同一旧版本重建主树和全部子树的只读快照，因此重启后仍可生成该高度的证明；未来高度返回明确的不可用错误。
+schema v19 延续 v18 的统一版本证明规则：创世及每个区块给九个子存储分别写入 `<prefix>/_meta/version`，要求标记、子树 JMT 版本、主树版本和 `meta/height` 全部等于提交高度。节点启动会校验最新标记；精确历史查询还会在指定版本逐项校验全部标记。Cnidarium 的固定补丁可在进程缓存缺失时，以同一旧版本重建主树和全部子树的只读快照，因此重启后仍可生成该高度的证明；未来高度返回明确的不可用错误。创世领取记录属于 `genesis` 子树，可返回成员或非成员证明。
 
 ## 5. 状态快照
 
@@ -119,6 +121,7 @@ ABCI State Sync 使用固定 format 1。chunk 0 携带规范 manifest，后续 c
 - ABCI State Sync 拒绝错误 format、错误轻客户端 app hash、不同 chain/schema 和超量 chunk；乱序数据可先落盘，manifest 到达后会定位坏块并要求重取。完整恢复保持同一高度、app hash 和 ICS23 proof，活动状态标记支持临时文件崩溃恢复并对损坏保持关闭。
 - 真实 2 Spend/2 Output Transfer 使用四份 Groth16 证明、两份 Spend 授权和 binding 签名完成验证、Prepare、RocksDB Commit、重启恢复及重启后的 ICS23 查询；同一 envelope 在下一高度被 tx_id 重放检查拒绝。
 - 创世资产容器必须精确合计为创世供应量；Transfer fee 原子执行 `Q -= fee; F += fee`，总供应量不变，余额不足时交易和供应状态均不变。
+- 创世领取清单哈希与启动配置不可变；领取记录的键、派生 ID、公钥、金额、高度和未领取合计会与供应容器 G 交叉核对。ClaimGenesis 原子执行 `G -= amount; Q += amount-fee; F += fee`，成功后记录领取高度。
 - `T = Q + ΣP + D + ΣX + ΣC + F + G = G0 + Mint - Burn`，且 `Mint + K` 必须等于按 epoch 已调度额度；任一持久化字段被独立篡改时节点拒绝打开。
 - 最低费使用完整规范 envelope 字节数向上取整到 KiB，并叠加 Spend/Output proof 数量和动作附加费；低费交易在 Groth16 前拒绝，费率配置变化时旧数据库拒绝打开。
 - `completed_epochs` 必须等于提交高度推导出的 `max(0,(h-1)/epoch_blocks)`；缺少边界系统结算时 Prepare 失败且 durable 高度不推进。

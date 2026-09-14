@@ -345,6 +345,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
         },
         genesis_staking: staking,
         genesis_commitments,
+        genesis_claims: Vec::new(),
         genesis_execution_hash: domain_hash(
             b"BIT-COMET-NETWORK-PROBE-GENESIS-EXECUTION-V1",
             &app_state_bytes,

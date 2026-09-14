@@ -19,13 +19,14 @@ use bit_staking::{
 };
 use bit_transaction::{
     verify_staking_stateless, verify_transfer_stateless, ActionAuthorizationView,
-    ExitTicketAuthorization, PendingPositionAuthorization, PositionAuthorization,
-    StatelessVerificationContext, VerifiedStakingAction, VerifiedStakingTransaction,
-    VerifiedTransfer,
+    ExitTicketAuthorization, GenesisClaimAuthorization, PendingPositionAuthorization,
+    PositionAuthorization, StatelessVerificationContext, VerifiedStakingAction,
+    VerifiedStakingTransaction, VerifiedTransfer,
 };
-use bit_types::{Action, Amount, Envelope, MonetaryPolicy, SupplyAuditSnapshot};
+use bit_types::{genesis_claim_id, Action, Amount, Envelope, MonetaryPolicy, SupplyAuditSnapshot};
 use cnidarium::{Snapshot, StagedWriteBatch, StateDelta, StateRead, StateWrite, Storage};
 use decaf377::Fq;
+use ed25519_consensus::VerificationKey as Ed25519VerificationKey;
 use futures::StreamExt;
 use ibc_types::core::commitment::{MerklePath, MerkleProof, MerkleRoot};
 use penumbra_sdk_tct::{StateCommitment, Tree, Witness};
@@ -43,7 +44,7 @@ pub use state_snapshot::{StateSnapshotManifest, STATE_SNAPSHOT_CHUNK_BYTES};
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 18;
+const STORAGE_SCHEMA_VERSION: u32 = 19;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -56,6 +57,7 @@ const META_MAX_TX_LIFETIME: &str = "meta/max_tx_lifetime_blocks";
 const META_MAX_ENVELOPE_BYTES: &str = "meta/max_envelope_bytes";
 const META_ANCHOR_RETENTION: &str = "meta/anchor_retention_blocks";
 const META_GENESIS_COMMITMENTS_HASH: &str = "meta/genesis_commitments_hash";
+const META_GENESIS_CLAIMS_HASH: &str = "meta/genesis_claims_hash";
 const META_MONETARY_POLICY_HASH: &str = "meta/monetary_policy_hash";
 const TREE_ROOT: &str = "shielded/tree_root";
 const TREE_FRONTIER: &str = "shielded/tree_frontier";
@@ -80,6 +82,7 @@ const FEES_PER_OUTPUT_PROOF: &str = "fees/per_output_proof_atomic";
 const FEES_NEW_POSITION_SURCHARGE: &str = "fees/new_position_surcharge_atomic";
 const FEES_VALIDATOR_REGISTRATION_SURCHARGE: &str = "fees/validator_registration_surcharge_atomic";
 const GENESIS_UNCLAIMED: &str = "genesis/unclaimed_total";
+const GENESIS_CLAIM_PREFIX: &str = "genesis/claims/";
 const STAKING_PARAMETERS: &str = "staking/parameters";
 const STAKING_VALIDATOR_PREFIX: &str = "staking/validators/";
 const STAKING_POOL_PREFIX: &str = "staking/pools/";
@@ -109,6 +112,124 @@ const SUBSTORES: &[&str] = &[
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GenesisClaim {
+    pub claim_id: Hash32,
+    pub claim_pubkey: Hash32,
+    pub amount: Amount,
+}
+
+impl GenesisClaim {
+    pub fn new(chain_context: &Hash32, claim_pubkey: Hash32, amount: Amount) -> Result<Self> {
+        if amount == Amount::ZERO {
+            return Err(Error::InvalidConfig(
+                "genesis claim amount must be positive",
+            ));
+        }
+        Ok(Self {
+            claim_id: genesis_claim_id(chain_context, &claim_pubkey, amount),
+            claim_pubkey,
+            amount,
+        })
+    }
+
+    fn validate(&self, chain_context: &Hash32) -> Result<()> {
+        if self.amount == Amount::ZERO {
+            return Err(Error::InvalidConfig(
+                "genesis claim amount must be positive",
+            ));
+        }
+        if self.claim_id != genesis_claim_id(chain_context, &self.claim_pubkey, self.amount) {
+            return Err(Error::InvalidConfig(
+                "genesis claim identifier does not match key and amount",
+            ));
+        }
+        Ed25519VerificationKey::try_from(self.claim_pubkey)
+            .map_err(|_| Error::InvalidConfig("invalid genesis claim public key"))?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GenesisClaimStatus {
+    pub claim: GenesisClaim,
+    pub claimed_at_height: Option<u64>,
+}
+
+impl GenesisClaimStatus {
+    fn unclaimed(claim: GenesisClaim) -> Self {
+        Self {
+            claim,
+            claimed_at_height: None,
+        }
+    }
+
+    pub fn encode_persistent(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(58);
+        bytes.push(1);
+        bytes.extend_from_slice(&self.claim.claim_pubkey);
+        bytes.extend_from_slice(&self.claim.amount.to_be_bytes());
+        match self.claimed_at_height {
+            Some(height) => {
+                bytes.push(1);
+                bytes.extend_from_slice(&height.to_be_bytes());
+            }
+            None => {
+                bytes.push(0);
+                bytes.extend_from_slice(&0u64.to_be_bytes());
+            }
+        }
+        bytes
+    }
+
+    pub fn decode_persistent(
+        chain_context: &Hash32,
+        claim_id: Hash32,
+        bytes: &[u8],
+    ) -> Result<Self> {
+        if bytes.len() != 58 || bytes[0] != 1 {
+            return Err(Error::CorruptState(
+                "invalid genesis claim record length or version".to_owned(),
+            ));
+        }
+        let claim_pubkey: Hash32 = bytes[1..33]
+            .try_into()
+            .expect("genesis claim key length is fixed");
+        let amount = Amount::from_be_bytes(
+            bytes[33..49]
+                .try_into()
+                .expect("genesis claim amount length is fixed"),
+        )
+        .map_err(|_| Error::CorruptState("invalid genesis claim amount".to_owned()))?;
+        let height = u64::from_be_bytes(
+            bytes[50..58]
+                .try_into()
+                .expect("genesis claim height length is fixed"),
+        );
+        let claimed_at_height = match bytes[49] {
+            0 if height == 0 => None,
+            1 if height > 0 => Some(height),
+            _ => {
+                return Err(Error::CorruptState(
+                    "invalid genesis claim status".to_owned(),
+                ))
+            }
+        };
+        let claim = GenesisClaim {
+            claim_id,
+            claim_pubkey,
+            amount,
+        };
+        claim.validate(chain_context).map_err(|error| {
+            Error::CorruptState(format!("invalid genesis claim record: {error}"))
+        })?;
+        Ok(Self {
+            claim,
+            claimed_at_height,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GenesisConfig {
     pub chain_context: Hash32,
     pub native_asset_id: Hash32,
@@ -124,6 +245,8 @@ pub struct GenesisConfig {
     pub genesis_staking: StakingBook,
     /// Ordered shielded commitments assigned by the signed genesis manifest.
     pub genesis_commitments: Vec<Hash32>,
+    /// Public one-time allocations controlled by independent claim keys.
+    pub genesis_claims: Vec<GenesisClaim>,
     pub genesis_execution_hash: Hash32,
     pub genesis_compact_hash: Hash32,
 }
@@ -195,6 +318,26 @@ impl GenesisConfig {
             if !unique.insert(*bytes) {
                 return Err(Error::InvalidConfig("duplicate genesis commitment"));
             }
+        }
+        let mut claim_ids = BTreeSet::new();
+        let mut claim_pubkeys = BTreeSet::new();
+        let mut claimed_allocation = 0u128;
+        for claim in &self.genesis_claims {
+            claim.validate(&self.chain_context)?;
+            if !claim_ids.insert(claim.claim_id) {
+                return Err(Error::InvalidConfig("duplicate genesis claim identifier"));
+            }
+            if !claim_pubkeys.insert(claim.claim_pubkey) {
+                return Err(Error::InvalidConfig("duplicate genesis claim public key"));
+            }
+            claimed_allocation = claimed_allocation
+                .checked_add(claim.amount.value())
+                .ok_or(Error::InvalidConfig("genesis claim allocation overflow"))?;
+        }
+        if claimed_allocation > self.genesis_allocation.unclaimed_genesis.value() {
+            return Err(Error::InvalidConfig(
+                "genesis claims exceed the unclaimed genesis allocation",
+            ));
         }
         Ok(())
     }
@@ -1001,23 +1144,26 @@ struct StakingTouches {
     slash_jobs: BTreeSet<Hash32>,
 }
 
-struct StakingAuthorizationSnapshot<'a>(&'a StakingBook);
+struct StakingAuthorizationSnapshot<'a> {
+    staking: &'a StakingBook,
+    genesis_claim: Option<(Hash32, GenesisClaimAuthorization)>,
+}
 
 impl ActionAuthorizationView for StakingAuthorizationSnapshot<'_> {
     fn validator_operator(&self, validator_id: &Hash32) -> Option<Hash32> {
-        self.0
+        self.staking
             .validator(validator_id)
             .map(|validator| validator.operator_pubkey)
     }
 
     fn validator_sequence(&self, validator_id: &Hash32) -> Option<u64> {
-        self.0
+        self.staking
             .validator(validator_id)
             .map(|validator| validator.sequence)
     }
 
     fn pending_position(&self, position_id: &Hash32) -> Option<PendingPositionAuthorization> {
-        self.0.position(position_id).and_then(|position| {
+        self.staking.position(position_id).and_then(|position| {
             (position.status == PositionStatus::Pending).then_some(PendingPositionAuthorization {
                 owner: position.owner_pubkey,
                 sequence: position.sequence,
@@ -1027,7 +1173,7 @@ impl ActionAuthorizationView for StakingAuthorizationSnapshot<'_> {
     }
 
     fn active_position(&self, position_id: &Hash32) -> Option<PositionAuthorization> {
-        self.0.position(position_id).and_then(|position| {
+        self.staking.position(position_id).and_then(|position| {
             (position.status == PositionStatus::Active).then_some(PositionAuthorization {
                 owner: position.owner_pubkey,
                 sequence: position.sequence,
@@ -1036,13 +1182,19 @@ impl ActionAuthorizationView for StakingAuthorizationSnapshot<'_> {
     }
 
     fn exit_ticket(&self, ticket_id: &Hash32) -> Option<ExitTicketAuthorization> {
-        let ticket = self.0.exit_ticket(ticket_id)?;
-        let release = self.0.exit_quote(ticket_id).ok()?;
+        let ticket = self.staking.exit_ticket(ticket_id)?;
+        let release = self.staking.exit_quote(ticket_id).ok()?;
         Some(ExitTicketAuthorization {
             owner: ticket.owner_pubkey,
             sequence: ticket.sequence,
             release,
         })
+    }
+
+    fn genesis_claim(&self, claim_id: &Hash32) -> Option<GenesisClaimAuthorization> {
+        self.genesis_claim
+            .filter(|(stored_id, _)| stored_id == claim_id)
+            .map(|(_, claim)| claim)
     }
 }
 
@@ -1087,12 +1239,12 @@ impl BlockSession<'_> {
             | Action::UpdateValidator { .. }
             | Action::UnjailValidator { .. }
             | Action::RotateConsensusKey { .. }
-            | Action::ClaimCommission { .. } => Ok(self
+            | Action::ClaimCommission { .. }
+            | Action::ClaimGenesis { .. } => Ok(self
                 .verify_and_stage_staking_action(envelope_bytes)
                 .await?
                 .shielded
                 .tx_id),
-            _ => Err(bit_transaction::Error::UnsupportedAction.into()),
         }
     }
 
@@ -1859,6 +2011,7 @@ impl BlockSession<'_> {
                 | Action::UnjailValidator { .. }
                 | Action::RotateConsensusKey { .. }
                 | Action::ClaimCommission { .. }
+                | Action::ClaimGenesis { .. }
         ) {
             return Err(bit_transaction::Error::UnsupportedAction.into());
         }
@@ -1882,6 +2035,35 @@ impl BlockSession<'_> {
             return Err(bit_transaction::Error::TransactionAlreadyApplied.into());
         }
 
+        let genesis_claim = if let Action::ClaimGenesis { claim_id, .. } = &body.action {
+            self.delta
+                .get_raw(&genesis_claim_key(claim_id))
+                .await?
+                .map(|bytes| {
+                    GenesisClaimStatus::decode_persistent(
+                        &self.owner.config.chain_context,
+                        *claim_id,
+                        &bytes,
+                    )
+                })
+                .transpose()?
+                .map(|status| {
+                    (
+                        *claim_id,
+                        GenesisClaimAuthorization {
+                            claim_pubkey: status.claim.claim_pubkey,
+                            amount: status.claim.amount,
+                            claimed: status.claimed_at_height.is_some(),
+                        },
+                    )
+                })
+        } else {
+            None
+        };
+        let authorization_snapshot = StakingAuthorizationSnapshot {
+            staking: &self.staking,
+            genesis_claim,
+        };
         let verified = verify_staking_stateless(
             envelope_bytes,
             &StatelessVerificationContext {
@@ -1892,7 +2074,7 @@ impl BlockSession<'_> {
                 native_asset_id: self.owner.config.native_asset_id,
                 fee_policy: self.owner.config.fee_policy,
             },
-            &StakingAuthorizationSnapshot(&self.staking),
+            &authorization_snapshot,
         )?;
         self.stage_verified_staking(&verified).await?;
         Ok(verified)
@@ -1915,6 +2097,7 @@ impl BlockSession<'_> {
         let mut candidate_staking = self.staking.clone();
         let mut candidate_supply = self.supply.clone();
         let mut touches = StakingTouches::default();
+        let mut genesis_claim_update = None;
         match &verified.action {
             VerifiedStakingAction::RegisterValidator {
                 validator_id,
@@ -2164,10 +2347,45 @@ impl BlockSession<'_> {
                 )?;
                 touches.validators.insert(*validator_id);
             }
+            VerifiedStakingAction::ClaimGenesis {
+                claim_id,
+                expected_amount,
+                ..
+            } => {
+                let key = genesis_claim_key(claim_id);
+                let bytes = self.delta.get_raw(&key).await?.ok_or_else(|| {
+                    Error::CorruptState("verified genesis claim is absent from storage".to_owned())
+                })?;
+                let mut status = GenesisClaimStatus::decode_persistent(
+                    &self.owner.config.chain_context,
+                    *claim_id,
+                    &bytes,
+                )?;
+                if status.claimed_at_height.is_some() {
+                    return Err(
+                        bit_transaction::Error::StaleStateQuote("genesis claim status").into(),
+                    );
+                }
+                if status.claim.amount != *expected_amount {
+                    return Err(
+                        bit_transaction::Error::StaleStateQuote("genesis claim amount").into(),
+                    );
+                }
+                candidate_supply.claim_genesis(
+                    &self.owner.config.monetary_policy,
+                    *expected_amount,
+                    verified.shielded.fee,
+                )?;
+                status.claimed_at_height = Some(self.height);
+                genesis_claim_update = Some((key, status.encode_persistent()));
+            }
         }
         validate_staking_supply(&candidate_staking, &candidate_supply)?;
 
         self.record_verified(&verified.shielded, candidate_tree);
+        if let Some((key, value)) = genesis_claim_update {
+            self.delta.put_raw(key, value);
+        }
         self.staking = candidate_staking;
         self.supply = candidate_supply;
         self.staking_touches.validators.extend(touches.validators);
@@ -2444,6 +2662,10 @@ async fn initialize_genesis(storage: &Storage, config: &GenesisConfig) -> Result
         genesis_commitments_hash(&config.genesis_commitments).to_vec(),
     );
     delta.put_raw(
+        META_GENESIS_CLAIMS_HASH.to_owned(),
+        genesis_claims_hash(&config.genesis_claims).to_vec(),
+    );
+    delta.put_raw(
         META_MONETARY_POLICY_HASH.to_owned(),
         supply.monetary_policy_hash.to_vec(),
     );
@@ -2466,6 +2688,12 @@ async fn initialize_genesis(storage: &Storage, config: &GenesisConfig) -> Result
         })?,
     );
     write_staking_genesis(&mut delta, &config.genesis_staking)?;
+    for claim in &config.genesis_claims {
+        delta.put_raw(
+            genesis_claim_key(&claim.claim_id),
+            GenesisClaimStatus::unclaimed(claim.clone()).encode_persistent(),
+        );
+    }
     let genesis_set = config.genesis_staking.effective_validator_set()?;
     delta.put_raw(
         STAKING_EFFECTIVE_SCHEDULE.to_owned(),
@@ -2541,6 +2769,12 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
         &genesis_commitments_hash(&config.genesis_commitments),
     )
     .await?;
+    require_equal_hash(
+        &snapshot,
+        META_GENESIS_CLAIMS_HASH,
+        &genesis_claims_hash(&config.genesis_claims),
+    )
+    .await?;
     let policy_hash = config
         .monetary_policy
         .hash()
@@ -2564,6 +2798,7 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
     }
     let supply = read_supply(&snapshot).await?;
     supply.validate_at_height(&config.monetary_policy, height)?;
+    validate_genesis_claims(&snapshot, config, &supply, height).await?;
     let expected_audit = supply.audit_at_height(&config.monetary_policy, height)?;
     let stored_audit = SupplyAuditSnapshot::decode_canonical(
         &required(&snapshot, SUPPLY_AUDIT).await?,
@@ -3224,10 +3459,14 @@ fn validate_staking_supply(staking: &StakingBook, supply: &SupplyState) -> Resul
 fn require_hash_key(key: &str, prefix: &str, id: &Hash32) -> Result<()> {
     if key != format!("{prefix}{}", hex::encode(id)) {
         return Err(Error::CorruptState(format!(
-            "staking record key does not match encoded identifier: {key}"
+            "state record key does not match encoded identifier: {key}"
         )));
     }
     Ok(())
+}
+
+pub fn genesis_claim_key(id: &Hash32) -> String {
+    format!("{GENESIS_CLAIM_PREFIX}{}", hex::encode(id))
 }
 
 pub fn staking_validator_key(id: &Hash32) -> String {
@@ -3320,6 +3559,99 @@ async fn read_supply(snapshot: &Snapshot) -> Result<SupplyState> {
     })
 }
 
+async fn read_genesis_claims(
+    snapshot: &Snapshot,
+    chain_context: &Hash32,
+) -> Result<BTreeMap<Hash32, GenesisClaimStatus>> {
+    let mut claims = BTreeMap::new();
+    let mut stream = snapshot.prefix_raw(GENESIS_CLAIM_PREFIX);
+    while let Some(entry) = stream.next().await {
+        let (key, value) = entry?;
+        let suffix = key
+            .strip_prefix(GENESIS_CLAIM_PREFIX)
+            .ok_or_else(|| Error::CorruptState(format!("invalid genesis claim key: {key}")))?;
+        let mut claim_id = [0u8; 32];
+        if suffix.len() != 64 || hex::decode_to_slice(suffix, &mut claim_id).is_err() {
+            return Err(Error::CorruptState(format!(
+                "invalid genesis claim identifier in key: {key}"
+            )));
+        }
+        require_hash_key(&key, GENESIS_CLAIM_PREFIX, &claim_id)?;
+        let status = GenesisClaimStatus::decode_persistent(chain_context, claim_id, &value)?;
+        if claims.insert(claim_id, status).is_some() {
+            return Err(Error::CorruptState(
+                "duplicate persisted genesis claim identifier".to_owned(),
+            ));
+        }
+    }
+    Ok(claims)
+}
+
+async fn validate_genesis_claims(
+    snapshot: &Snapshot,
+    config: &GenesisConfig,
+    supply: &SupplyState,
+    state_height: u64,
+) -> Result<()> {
+    let stored = read_genesis_claims(snapshot, &config.chain_context).await?;
+    if stored.len() != config.genesis_claims.len() {
+        return Err(Error::CorruptState(
+            "persisted genesis claim count differs from immutable configuration".to_owned(),
+        ));
+    }
+
+    let configured_total = config
+        .genesis_claims
+        .iter()
+        .try_fold(0u128, |total, claim| {
+            total.checked_add(claim.amount.value()).ok_or_else(|| {
+                Error::CorruptState("configured genesis claim allocation overflow".to_owned())
+            })
+        })?;
+    let untracked = config
+        .genesis_allocation
+        .unclaimed_genesis
+        .value()
+        .checked_sub(configured_total)
+        .ok_or_else(|| {
+            Error::CorruptState(
+                "configured claims exceed the unclaimed genesis allocation".to_owned(),
+            )
+        })?;
+    let mut expected_unclaimed = untracked;
+    for configured in &config.genesis_claims {
+        let status = stored.get(&configured.claim_id).ok_or_else(|| {
+            Error::CorruptState("configured genesis claim is absent from storage".to_owned())
+        })?;
+        if status.claim != *configured {
+            return Err(Error::CorruptState(
+                "persisted genesis claim differs from immutable configuration".to_owned(),
+            ));
+        }
+        match status.claimed_at_height {
+            Some(claimed_at) if claimed_at == 0 || claimed_at > state_height => {
+                return Err(Error::CorruptState(
+                    "persisted genesis claim has an invalid claim height".to_owned(),
+                ));
+            }
+            Some(_) => {}
+            None => {
+                expected_unclaimed = expected_unclaimed
+                    .checked_add(configured.amount.value())
+                    .ok_or_else(|| {
+                        Error::CorruptState("unclaimed genesis allocation overflow".to_owned())
+                    })?;
+            }
+        }
+    }
+    if supply.unclaimed_genesis_total.value() != expected_unclaimed {
+        return Err(Error::CorruptState(
+            "genesis claim records do not equal the unclaimed supply container".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 async fn read_amount(snapshot: &Snapshot, key: &str) -> Result<Amount> {
     let bytes = required(snapshot, key).await?;
     let bytes: [u8; 16] = bytes
@@ -3403,6 +3735,20 @@ fn genesis_commitments_hash(commitments: &[Hash32]) -> Hash32 {
     hash.update((commitments.len() as u64).to_be_bytes());
     for commitment in commitments {
         hash.update(commitment);
+    }
+    hash.finalize().into()
+}
+
+fn genesis_claims_hash(claims: &[GenesisClaim]) -> Hash32 {
+    let mut claims = claims.to_vec();
+    claims.sort_by_key(|claim| claim.claim_id);
+    let mut hash = Sha256::new();
+    hash.update(b"BIT-GENESIS-CLAIMS-V1");
+    hash.update((claims.len() as u64).to_be_bytes());
+    for claim in claims {
+        hash.update(claim.claim_id);
+        hash.update(claim.claim_pubkey);
+        hash.update(claim.amount.to_be_bytes());
     }
     hash.finalize().into()
 }
@@ -3553,6 +3899,7 @@ mod tests {
         UnjailValidator,
         RotateConsensusKey,
         ClaimCommission,
+        ClaimGenesis,
     }
 
     fn real_action_fixture(kind: RealActionKind) -> (GenesisConfig, Vec<u8>) {
@@ -3896,7 +4243,41 @@ mod tests {
                     accrued,
                 )
             }
+            RealActionKind::ClaimGenesis => {
+                let claim_key = Ed25519SigningKey::from([0x8c; 32]);
+                let claim_pubkey = claim_key.verification_key().to_bytes();
+                let amount = Amount::new(100_000_000).unwrap();
+                (
+                    Action::ClaimGenesis {
+                        claim_id: genesis_claim_id(&chain, &claim_pubkey, amount),
+                        expected_amount: amount,
+                        fee_source: FeeSource::ReleasedValue,
+                    },
+                    1_000_000,
+                    0,
+                    amount.value(),
+                    vec![(Role::GenesisClaim, claim_key)],
+                    0,
+                    0,
+                )
+            }
         };
+
+        let genesis_claims = if matches!(kind, RealActionKind::ClaimGenesis) {
+            let claim_key = Ed25519SigningKey::from([0x8c; 32]);
+            vec![GenesisClaim::new(
+                &chain,
+                claim_key.verification_key().to_bytes(),
+                Amount::new(100_000_000).unwrap(),
+            )
+            .unwrap()]
+        } else {
+            Vec::new()
+        };
+        let genesis_claim_total = genesis_claims
+            .iter()
+            .map(|claim| claim.amount.value())
+            .sum::<u128>();
 
         let sender = spend_key();
         let receiver = spend_key();
@@ -4082,7 +4463,11 @@ mod tests {
         let native_asset_id = asset::Id(Fq::from(1u64)).to_bytes();
         let monetary_policy = MonetaryPolicy {
             genesis_supply: Amount::new(
-                15_000_000_000 + genesis_stake + genesis_exits + genesis_commission,
+                15_000_000_000
+                    + genesis_stake
+                    + genesis_exits
+                    + genesis_commission
+                    + genesis_claim_total,
             )
             .unwrap(),
             epoch_blocks: 720,
@@ -4104,12 +4489,13 @@ mod tests {
                     exits: Amount::new(genesis_exits).unwrap(),
                     commission: Amount::new(genesis_commission).unwrap(),
                     fee_reserve: Amount::ZERO,
-                    unclaimed_genesis: Amount::ZERO,
+                    unclaimed_genesis: Amount::new(genesis_claim_total).unwrap(),
                 },
                 fee_policy: FeePolicy::reference_testnet(),
                 monetary_policy,
                 genesis_staking,
                 genesis_commitments,
+                genesis_claims,
                 genesis_execution_hash: [0x11; 32],
                 genesis_compact_hash: [0x12; 32],
             },
@@ -4291,6 +4677,7 @@ mod tests {
                 },
                 genesis_staking,
                 genesis_commitments: vec![genesis_commitment.into()],
+                genesis_claims: Vec::new(),
                 genesis_execution_hash: [0xa1; 32],
                 genesis_compact_hash: [0xa2; 32],
             },
@@ -4318,6 +4705,7 @@ mod tests {
             genesis_staking: StakingBook::new([1; 32], StakingParameters::reference_testnet())
                 .unwrap(),
             genesis_commitments: Vec::new(),
+            genesis_claims: Vec::new(),
             genesis_execution_hash: [2; 32],
             genesis_compact_hash: [3; 32],
         }
@@ -6210,6 +6598,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn genesis_claim_manifest_is_canonical_provable_and_immutable() {
+        let dir = TempDir::new().unwrap();
+        let mut original = config(8);
+        let first_key = Ed25519SigningKey::from([0xc1; 32])
+            .verification_key()
+            .to_bytes();
+        let second_key = Ed25519SigningKey::from([0xc2; 32])
+            .verification_key()
+            .to_bytes();
+        let first = GenesisClaim::new(
+            &original.chain_context,
+            first_key,
+            Amount::new(20_000_000).unwrap(),
+        )
+        .unwrap();
+        let second = GenesisClaim::new(
+            &original.chain_context,
+            second_key,
+            Amount::new(30_000_000).unwrap(),
+        )
+        .unwrap();
+        original.genesis_claims = vec![second.clone(), first.clone()];
+        assert_eq!(
+            genesis_claims_hash(&original.genesis_claims),
+            genesis_claims_hash(&[first.clone(), second.clone()])
+        );
+
+        let state = PersistentState::open(dir.path().to_path_buf(), original.clone())
+            .await
+            .unwrap();
+        let proof = state
+            .query_latest_with_proof(&genesis_claim_key(&first.claim_id))
+            .await
+            .unwrap();
+        proof.verify().unwrap();
+        let status = GenesisClaimStatus::decode_persistent(
+            &original.chain_context,
+            first.claim_id,
+            proof.value.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(status, GenesisClaimStatus::unclaimed(first.clone()));
+        state.close().await;
+
+        let replacement = GenesisClaim::new(
+            &original.chain_context,
+            Ed25519SigningKey::from([0xc3; 32])
+                .verification_key()
+                .to_bytes(),
+            second.amount,
+        )
+        .unwrap();
+        let mut changed = original.clone();
+        changed.genesis_claims = vec![first, replacement];
+        let error = PersistentState::open(dir.path().to_path_buf(), changed)
+            .await
+            .err()
+            .expect("changed genesis claims must be rejected");
+        assert!(error
+            .to_string()
+            .contains("immutable configuration mismatch"));
+
+        let mut duplicate_key = original;
+        duplicate_key.genesis_claims[1] = GenesisClaim::new(
+            &duplicate_key.chain_context,
+            second_key,
+            Amount::new(31_000_000).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            duplicate_key.validate(),
+            Err(Error::InvalidConfig("duplicate genesis claim public key"))
+        ));
+    }
+
+    #[tokio::test]
     async fn rolled_back_schema_and_corrupt_frontier_stop_open() {
         let schema_dir = TempDir::new().unwrap();
         let genesis_config = config(8);
@@ -6299,6 +6763,7 @@ mod tests {
             RealActionKind::UnjailValidator,
             RealActionKind::RotateConsensusKey,
             RealActionKind::ClaimCommission,
+            RealActionKind::ClaimGenesis,
         ] {
             let (genesis_config, envelope_bytes) = real_action_fixture(kind);
             let decoded = Envelope::decode_canonical(&envelope_bytes, 65_536, 1, 100).unwrap();
@@ -6322,7 +6787,8 @@ mod tests {
                 | Action::Unbond { .. }
                 | Action::UnjailValidator { .. }
                 | Action::RotateConsensusKey { .. }
-                | Action::ClaimCommission { .. } => FeeClass::Standard,
+                | Action::ClaimCommission { .. }
+                | Action::ClaimGenesis { .. } => FeeClass::Standard,
                 _ => unreachable!(),
             };
             assert!(
@@ -6539,6 +7005,31 @@ mod tests {
                         .unwrap()
                         .verify()
                         .unwrap();
+                }
+                Action::ClaimGenesis {
+                    claim_id,
+                    expected_amount,
+                    ..
+                } => {
+                    assert_eq!(receipt.supply.unclaimed_genesis_total, Amount::ZERO);
+                    assert_eq!(receipt.supply.fee_reserve, body.fee);
+                    assert_eq!(
+                        receipt.supply.shielded_total.value(),
+                        genesis.supply.shielded_total.value() + expected_amount.value()
+                            - body.fee.value()
+                    );
+                    let proof = state
+                        .query_latest_with_proof(&genesis_claim_key(&claim_id))
+                        .await
+                        .unwrap();
+                    proof.verify().unwrap();
+                    let status = GenesisClaimStatus::decode_persistent(
+                        &genesis_config.chain_context,
+                        claim_id,
+                        proof.value.as_deref().unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(status.claimed_at_height, Some(1));
                 }
                 _ => unreachable!(),
             }

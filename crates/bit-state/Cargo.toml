@@ -15,6 +15,7 @@ bit-emission = { path = "../bit-emission" }
 bit-staking = { path = "../bit-staking" }
 cnidarium = { version = "=0.83.0", default-features = false }
 decaf377 = "0.10.1"
+ed25519-consensus = "2.1.0"
 hex = "0.4.3"
 futures = "0.3.34"
 ibc-types = { version = "=0.15.1", default-features = false, features = ["std"] }
@@ -27,7 +28,6 @@ tokio = { version = "1.38.0", features = ["rt"] }
 [dev-dependencies]
 cnidarium = { version = "=0.83.0", default-features = false, features = ["bit-fault-injection"] }
 decaf377-rdsa = "0.11.0"
-ed25519-consensus = "2.1.0"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 penumbra-sdk-asset = { path = "../../feasibility/upstream/penumbra/crates/core/asset", default-features = false }
 penumbra-sdk-keys = { path = "../../feasibility/upstream/penumbra/crates/core/keys", default-features = false }

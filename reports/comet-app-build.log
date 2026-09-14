@@ -106,4 +106,4 @@ o apply 1 suggestion)
    Compiling bit-staking v0.1.0 (D:\others\BIT\crates\bit-staking)
    Compiling bit-state v0.1.0 (D:\others\BIT\crates\bit-state)
    Compiling bit-app v0.1.0 (D:\others\BIT\crates\bit-app)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.69s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 28.03s

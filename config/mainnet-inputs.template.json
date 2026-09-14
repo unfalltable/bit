@@ -11,6 +11,8 @@
   "address_encoding_version": null,
   "economic_policy_approved": false,
   "allocations": [],
+  "genesis_claims": [],
+  "genesis_commitments": [],
   "initial_validators": [],
   "checkpoint_publishers": [],
   "independent_endpoints": [],

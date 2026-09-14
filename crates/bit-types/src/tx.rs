@@ -182,6 +182,11 @@ impl Action {
             } if *expected_release == Amount::ZERO => {
                 Err(Error::InvalidTransaction("exit claim is zero"))
             }
+            Self::ClaimGenesis {
+                expected_amount, ..
+            } if *expected_amount == Amount::ZERO => {
+                Err(Error::InvalidTransaction("genesis claim is zero"))
+            }
             _ => Ok(()),
         }
     }
@@ -595,6 +600,14 @@ pub fn position_id(chain: &Hash32, owner: &PubKey32) -> Hash32 {
 pub fn validator_id(chain: &Hash32, operator: &PubKey32) -> Hash32 {
     hash32(&[b"bit/validator/v1", chain, operator])
 }
+pub fn genesis_claim_id(chain: &Hash32, claim_key: &PubKey32, amount: Amount) -> Hash32 {
+    hash32(&[
+        b"bit/genesis-claim-id/v1",
+        chain,
+        claim_key,
+        &amount.to_be_bytes(),
+    ])
+}
 pub fn cohort_id(chain: &Hash32, validator: &Hash32, exit_epoch: u64) -> Hash32 {
     hash32(&[
         b"bit/cohort/v1",
@@ -806,6 +819,16 @@ mod tests {
             tx.validate_at_height(1, 120),
             Err(Error::InvalidTransaction("commission claim is zero"))
         );
+
+        tx.action = Action::ClaimGenesis {
+            claim_id: [4; 32],
+            expected_amount: Amount::ZERO,
+            fee_source: FeeSource::ReleasedValue,
+        };
+        assert_eq!(
+            tx.validate_at_height(1, 120),
+            Err(Error::InvalidTransaction("genesis claim is zero"))
+        );
     }
 
     #[test]
@@ -815,6 +838,14 @@ mod tests {
         let position = position_id(&chain, &key);
         let validator = validator_id(&chain, &key);
         assert_ne!(position, validator);
+        assert_ne!(
+            genesis_claim_id(&chain, &key, Amount::new(1).unwrap()),
+            genesis_claim_id(&chain, &key, Amount::new(2).unwrap())
+        );
+        assert_ne!(
+            genesis_claim_id(&chain, &key, Amount::new(1).unwrap()),
+            position
+        );
         assert_ne!(
             cohort_id(&chain, &validator, 1),
             ticket_id(&chain, &position, 1)

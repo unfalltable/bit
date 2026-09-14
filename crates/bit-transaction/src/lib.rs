@@ -93,6 +93,11 @@ pub enum VerifiedStakingAction {
         requested_amount: Amount,
         fee_source: FeeSource,
     },
+    ClaimGenesis {
+        claim_id: Hash32,
+        expected_amount: Amount,
+        fee_source: FeeSource,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -122,6 +127,10 @@ pub trait ActionAuthorizationView {
     fn exit_ticket(&self, _ticket_id: &Hash32) -> Option<ExitTicketAuthorization> {
         None
     }
+
+    fn genesis_claim(&self, _claim_id: &Hash32) -> Option<GenesisClaimAuthorization> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -142,6 +151,13 @@ pub struct ExitTicketAuthorization {
     pub owner: Hash32,
     pub sequence: u64,
     pub release: Amount,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GenesisClaimAuthorization {
+    pub claim_pubkey: Hash32,
+    pub amount: Amount,
+    pub claimed: bool,
 }
 
 pub trait StateView {
@@ -625,6 +641,35 @@ pub fn verify_staking_stateless<S: ActionAuthorizationView + ?Sized>(
                 requested_amount.value(),
             )
         }
+        Action::ClaimGenesis {
+            claim_id,
+            expected_amount,
+            fee_source,
+        } => {
+            match fee_source {
+                FeeSource::Shielded if body.spends.is_empty() => {
+                    return Err(Error::InvalidFeeSource(
+                        "SHIELDED requires at least one private Spend",
+                    ));
+                }
+                FeeSource::ReleasedValue if *expected_amount <= body.fee => {
+                    return Err(Error::InvalidFeeSource(
+                        "RELEASED_VALUE requires release greater than fee",
+                    ));
+                }
+                _ => {}
+            }
+            (
+                VerifiedStakingAction::ClaimGenesis {
+                    claim_id: *claim_id,
+                    expected_amount: *expected_amount,
+                    fee_source: *fee_source,
+                },
+                FeeClass::Standard,
+                0,
+                expected_amount.value(),
+            )
+        }
         _ => return Err(Error::UnsupportedAction),
     };
 
@@ -709,7 +754,8 @@ pub fn verify_staking_authorizations<S: ActionAuthorizationView + ?Sized>(
             Action::CancelPending { .. } | Action::Unbond { .. } | Action::ClaimExit { .. } => 1,
             Action::UpdateValidator { .. }
             | Action::UnjailValidator { .. }
-            | Action::ClaimCommission { .. } => 1,
+            | Action::ClaimCommission { .. }
+            | Action::ClaimGenesis { .. } => 1,
             Action::RotateConsensusKey { .. } => 2,
             _ => return Err(Error::UnsupportedAction),
         })
@@ -880,6 +926,30 @@ pub fn verify_staking_authorizations<S: ActionAuthorizationView + ?Sized>(
                 &envelope.authorizations[first + 1],
                 Role::ConsensusPop,
                 new_consensus,
+                effect_hash,
+            )?;
+        }
+        Action::ClaimGenesis {
+            claim_id,
+            expected_amount,
+            ..
+        } => {
+            let claim = authorization_view.genesis_claim(claim_id).ok_or(
+                Error::AuthorizationKeyNotFound {
+                    role: Role::GenesisClaim,
+                    id: *claim_id,
+                },
+            )?;
+            if claim.claimed {
+                return Err(Error::StaleStateQuote("genesis claim status"));
+            }
+            if claim.amount != *expected_amount {
+                return Err(Error::StaleStateQuote("genesis claim amount"));
+            }
+            verify_ed25519(
+                &envelope.authorizations[first],
+                Role::GenesisClaim,
+                &claim.claim_pubkey,
                 effect_hash,
             )?;
         }
@@ -1143,6 +1213,21 @@ mod tests {
         position: PositionAuthorization,
         ticket_id: Hash32,
         ticket: ExitTicketAuthorization,
+    }
+
+    struct ClaimView {
+        claim_id: Hash32,
+        claim: GenesisClaimAuthorization,
+    }
+
+    impl ActionAuthorizationView for ClaimView {
+        fn validator_operator(&self, _validator_id: &Hash32) -> Option<Hash32> {
+            None
+        }
+
+        fn genesis_claim(&self, claim_id: &Hash32) -> Option<GenesisClaimAuthorization> {
+            (*claim_id == self.claim_id).then_some(self.claim)
+        }
     }
 
     impl ActionAuthorizationView for ExitView {
@@ -1661,6 +1746,73 @@ mod tests {
                 role: Role::ConsensusPop,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn genesis_claim_binds_live_claim_key_amount_and_status() {
+        let claim_key = Ed25519SigningKey::from([8; 32]);
+        let claim_pubkey = claim_key.verification_key().to_bytes();
+        let claim_id = [0xa8; 32];
+        let amount = Amount::new(25_000_000).unwrap();
+        let action = Action::ClaimGenesis {
+            claim_id,
+            expected_amount: amount,
+            fee_source: FeeSource::ReleasedValue,
+        };
+        let (_, unsigned_body) = staking_envelope(action.clone(), vec![]);
+        let effect = unsigned_body.effect_hash().unwrap();
+        let (envelope, body) = staking_envelope(
+            action.clone(),
+            vec![ed25519_authorization(
+                Role::GenesisClaim,
+                &claim_key,
+                &effect,
+            )],
+        );
+        let view = ClaimView {
+            claim_id,
+            claim: GenesisClaimAuthorization {
+                claim_pubkey,
+                amount,
+                claimed: false,
+            },
+        };
+        verify_staking_authorizations(&envelope, &action, &body.chain_context, &effect, &view)
+            .unwrap();
+
+        let stale_amount = Action::ClaimGenesis {
+            claim_id,
+            expected_amount: Amount::new(amount.value() - 1).unwrap(),
+            fee_source: FeeSource::ReleasedValue,
+        };
+        assert!(matches!(
+            verify_staking_authorizations(
+                &envelope,
+                &stale_amount,
+                &body.chain_context,
+                &effect,
+                &view
+            ),
+            Err(Error::StaleStateQuote("genesis claim amount"))
+        ));
+
+        let claimed = ClaimView {
+            claim_id,
+            claim: GenesisClaimAuthorization {
+                claimed: true,
+                ..view.claim
+            },
+        };
+        assert!(matches!(
+            verify_staking_authorizations(
+                &envelope,
+                &action,
+                &body.chain_context,
+                &effect,
+                &claimed
+            ),
+            Err(Error::StaleStateQuote("genesis claim status"))
         ));
     }
 }

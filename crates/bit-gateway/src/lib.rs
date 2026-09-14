@@ -157,6 +157,8 @@ async fn network(
         query_same_state(&state.core, "meta/anchor_retention_blocks", &supply_proof).await?;
     let genesis_commitments_hash =
         query_same_state(&state.core, "meta/genesis_commitments_hash", &supply_proof).await?;
+    let genesis_claims_hash =
+        query_same_state(&state.core, "meta/genesis_claims_hash", &supply_proof).await?;
 
     let protocol_version_value = decode_u64(&protocol_version)?;
     let info = state.core.info().await.map_err(ApiError::internal)?;
@@ -179,6 +181,7 @@ async fn network(
             chain_context: decode_hash32_hex(&chain_context)?,
             native_asset_id: decode_hash32_hex(&native_asset_id)?,
             genesis_commitments_hash: decode_hash32_hex(&genesis_commitments_hash)?,
+            genesis_claims_hash: decode_hash32_hex(&genesis_claims_hash)?,
             protocol_version: protocol_version_value,
             max_supply: MAX_SUPPLY_ATOMIC.to_string(),
             monetary_policy_hash: hex::encode(snapshot.monetary_policy_hash),
@@ -204,6 +207,7 @@ async fn network(
             max_envelope_bytes: proof_dto(max_envelope_bytes)?,
             anchor_retention_blocks: proof_dto(anchor_retention_blocks)?,
             genesis_commitments_hash: proof_dto(genesis_commitments_hash)?,
+            genesis_claims_hash: proof_dto(genesis_claims_hash)?,
         },
     };
     Ok(Json(response))
@@ -486,6 +490,7 @@ fn validate_public_key(key: &str) -> Result<(), ApiError> {
         "meta/max_envelope_bytes",
         "meta/anchor_retention_blocks",
         "meta/genesis_commitments_hash",
+        "meta/genesis_claims_hash",
         "meta/monetary_policy_hash",
         "shielded/tree_root",
         "emission/policy",
@@ -502,6 +507,7 @@ fn validate_public_key(key: &str) -> Result<(), ApiError> {
         "shielded/nullifier/",
         "execution/block/",
         "compact/hash/",
+        "genesis/claims/",
         "staking/validators/",
         "staking/pools/",
         "staking/positions/",
@@ -564,6 +570,7 @@ pub struct NetworkDto {
     pub chain_context: String,
     pub native_asset_id: String,
     pub genesis_commitments_hash: String,
+    pub genesis_claims_hash: String,
     pub protocol_version: u64,
     pub max_supply: String,
     pub monetary_policy_hash: String,
@@ -591,6 +598,7 @@ pub struct NetworkProofsDto {
     pub max_envelope_bytes: ProofDto,
     pub anchor_retention_blocks: ProofDto,
     pub genesis_commitments_hash: ProofDto,
+    pub genesis_claims_hash: ProofDto,
 }
 
 #[derive(Serialize)]
@@ -782,6 +790,7 @@ mod tests {
             genesis_staking: StakingBook::new([1; 32], StakingParameters::reference_testnet())
                 .unwrap(),
             genesis_commitments: Vec::new(),
+            genesis_claims: Vec::new(),
             genesis_execution_hash: [3; 32],
             genesis_compact_hash: [4; 32],
         }
@@ -847,6 +856,10 @@ mod tests {
         assert_eq!(network["network"]["max_block_bytes"], "1000000");
         assert_eq!(network["proofs"]["monetary_policy"]["state_height"], "0");
         assert_eq!(
+            network["proofs"]["genesis_claims_hash"]["key"],
+            "meta/genesis_claims_hash"
+        );
+        assert_eq!(
             network["proofs"]["chain_context"]["app_hash"],
             network["proofs"]["supply"]["app_hash"]
         );
@@ -857,6 +870,24 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (status, claim) = json(
+            router.clone(),
+            &format!(
+                "/v1/state/proof?key=genesis%2Fclaims%2F{}",
+                hex::encode([0x44; 32])
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(claim["result"]["exists"], false);
+        assert_eq!(
+            claim["result"]["proof_ops_base64"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
 
         let finalized = core
             .finalize_block(BlockRequest {

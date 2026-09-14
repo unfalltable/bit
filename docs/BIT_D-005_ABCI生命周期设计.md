@@ -54,4 +54,4 @@ ABCI `bit.block.v1` 事件公开高度、两个摘要和 compact 字节数，状
 
 `comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。测试从两个创世承诺广播一笔冻结的 2 Spend/2 Output Groth16 Transfer，在链继续推进后按 Transfer 的精确高度核对交易/nullifier、TCT 根、供应审计和 execution/compact 状态证明、ABCI 事件及四节点 app hash；应用重启后再次查询同一旧高度证明。测试还确认奖励更新在 H+2 生效、应用从 durable JMT 状态重启并追块。集成注入器使用隔离网络的临时验证人密钥构造 CometBFT 可验证的冲突 prevote，通过标准 RPC 广播后，四个应用一致执行证据持久化、Burn 和 H+2 验证人移除。处罚后停止一个仍有投票权的验证者，剩余 power 恰为三分之二时链停止，恢复该验证者后继续出块。每次运行的精确高度和哈希写入 `feasibility/reports/bit-app-network-result.json`。
 
-下一步实现创世语义校验和正式节点命令，再把真实退出放进四节点重放与崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人；D-022 继续完成头同步、广播与公网入口。
+ClaimGenesis 已进入同一动作调度入口，执行创世领取公钥授权、精确金额、真实证明、供应转换和一次性状态提交。下一步继续实现完整签名创世 manifest、CLI preflight 和正式节点命令，再把真实退出与创世领取放进四节点重放及崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人；D-022 继续完成头同步、广播与公网入口。

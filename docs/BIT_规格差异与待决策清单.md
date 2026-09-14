@@ -73,7 +73,7 @@ P0 表示进入依赖该内容的开发前应解决；P1 表示应在对应模�
 
 | ID | 待定内容 | 为什么需要 | 建议产物与责任阶段 |
 |---|---|---|---|
-| SPEC-01 | genesis manifest 的规范编码、hash 输入、签名覆盖范围和生成次序 | chain_context 来自 genesis_manifest_hash，而初始 position/state 又使用 chain_context；如把派生后的状态根无条件放回被哈希主体，可能形成循环依赖 | 画清哈希依赖图，区分身份输入与派生输出；S0/S1 固定，D-025 实现 |
+| SPEC-01 | genesis manifest 的规范编码、hash 输入、签名覆盖范围和生成次序 | D-025 已固定身份输入先产生 chain_context、claim/validator/position ID 与状态根后派生的无环顺序，并实现 claim ID/清单摘要；完整 manifest 字段编码、签名阈值和黄金向量仍待落地 | 依赖图与 ClaimGenesis 子集见 D-025；继续实现机器合同、签名 CLI 和跨语言向量 |
 | SPEC-02 | native_asset_id、地址 HRP、恢复词到 root、支付/operator 等完整派生规则 | 文档列出若干域及 manifest 必填项，尚缺完整可交叉复现的 manifest/向量 | 上游兼容说明、完整 key/address vectors、所有平台一致性 |
 | SPEC-03 | compact canonical_records、树增量、memo、恢复收据正文、公开事件的精确编码 | 执行摘要、紧凑交易、TCT 结果根和当前系统公共事件已冻结 v1 字节合同与黄金向量；完整归档、恢复收据正文和客户端分发仍未完成 | 已落地 [D-002 区块产物规范编码](D:/others/BIT/docs/BIT_D-002_区块产物规范编码.md)；D-003/010/012 继续完成服务与客户端边界 |
 | SPEC-04 | supply/audit_snapshot 的规范值编码与 REST 映射 | v1 共识值、JMT 原子写入、最新/精确历史高度 ICS23 证明、共享向量、字段篡改负例和 REST DTO 已完成；SDK 验证映射仍待接入 | 已落地 [D-006 固定总量与支付会计](D:/others/BIT/docs/BIT_D-006_固定总量与支付会计.md)；D-022 继续完成客户端边界 |
@@ -84,7 +84,7 @@ P0 表示进入依赖该内容的开发前应解决；P1 表示应在对应模�
 | SPEC-09 | 选择性付款凭证的字段、可验证能力与泄露范围 | W17 提到导出凭证，但不能默认导出完整查看密钥或全部流水 | 钱包/SDK 的本地导出合同和对外核验说明；明确对方能验证什么 |
 | SPEC-10 | 正式验收负载与资源参数的对应关系 | 20 TPS、1 年恢复、24 小时补扫及手机证明目标没有完整共同负载定义 | 固定设备、交易形状、compact 大小、网络条件、样本量和失败阈值 |
 
-SPEC-01 的关键是先明确哈希主体。本文未替协议决定新的 chain_context 公式，也未把循环依赖的可能性当作已确认故障。
+SPEC-01 的第一层已明确：产生 `genesis_manifest_hash` 的身份主体不包含依赖 chain context 的派生 ID 或状态根，派生结果另行复核。完整身份主体的规范字段和签名合同仍未冻结，不能把当前子集视为主网 manifest 已完成。
 
 ## 4. 待用户或真实参与者决定的事项
 

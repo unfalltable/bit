@@ -699,6 +699,7 @@ mod tests {
             genesis_staking: StakingBook::new([1; 32], StakingParameters::reference_testnet())
                 .unwrap(),
             genesis_commitments: Vec::new(),
+            genesis_claims: Vec::new(),
             genesis_execution_hash: [2; 32],
             genesis_compact_hash: [3; 32],
         }

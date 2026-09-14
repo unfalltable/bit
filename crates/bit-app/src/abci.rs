@@ -1320,6 +1320,7 @@ mod tests {
             monetary_policy,
             genesis_staking,
             genesis_commitments: Vec::new(),
+            genesis_claims: Vec::new(),
             genesis_execution_hash: [2; 32],
             genesis_compact_hash: [3; 32],
         }
