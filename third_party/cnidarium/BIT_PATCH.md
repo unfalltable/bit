@@ -18,6 +18,9 @@ a state transition after the complete RocksDB WriteBatch is durable:
   the next database open;
 - expose RocksDB's consistent physical checkpoint operation through the
   asynchronous storage API so BIT can validate and package state snapshots;
+- expose construction of a historical snapshot for applications, such as BIT,
+  that deliberately write every configured substore at every main-store
+  version; this makes old ICS23 proofs recoverable after process restart;
 - expose one-shot pre-write, corrupted-batch, and post-write/cache-publication
   fault points behind the disabled-by-default `bit-fault-injection` feature
   for deterministic crash-boundary tests.

@@ -179,15 +179,22 @@ def validator_powers(height_value):
     }
 
 
-def state_query(index, key):
+def state_query(index, key, height_value=None):
     query_path = urllib.parse.quote('"/bit/state/key"')
     query_data = "0x" + key.encode("utf-8").hex()
+    height_parameter = "" if height_value is None else f"&height={height_value}"
     response = rpc(
         index,
-        f"abci_query?path={query_path}&data={query_data}&prove=true",
+        f"abci_query?path={query_path}&data={query_data}&prove=true{height_parameter}",
     )["response"]
     if int(response["code"]) != 0 or not response.get("proofOps", {}).get("ops"):
-        raise AssertionError(f"proved state query failed for {key} on node {index}")
+        raise AssertionError(
+            f"proved state query failed for {key} on node {index}: {response}"
+        )
+    if height_value is not None and int(response["height"]) != height_value:
+        raise AssertionError(
+            f"proved state query returned height {response['height']}, expected {height_value}"
+        )
     value = response.get("value", "")
     return base64.b64decode(value) if value else b""
 
@@ -454,14 +461,14 @@ def main():
     wait_height(transfer_height + 2)
     artifact_event = block_artifact_event(transfer_results, transfer_height)
     transaction_records = [
-        state_query(index, f"transactions/applied/{fixture['tx_id']}")
+        state_query(index, f"transactions/applied/{fixture['tx_id']}", transfer_height)
         for index in range(4)
     ]
     if not transaction_records[0] or len(set(transaction_records)) != 1:
         raise AssertionError("proved transaction records differ across applications")
     nullifier_records = {
         nullifier: [
-            state_query(index, f"shielded/nullifier/{nullifier}")
+            state_query(index, f"shielded/nullifier/{nullifier}", transfer_height)
             for index in range(4)
         ]
         for nullifier in fixture["nullifiers"]
@@ -472,11 +479,11 @@ def main():
     ):
         raise AssertionError("proved nullifier records differ across applications")
     execution_hashes = [
-        state_query(index, f"execution/block/{transfer_height:020}").hex()
+        state_query(index, f"execution/block/{transfer_height:020}", transfer_height).hex()
         for index in range(4)
     ]
     compact_hashes = [
-        state_query(index, f"compact/hash/{transfer_height:020}").hex()
+        state_query(index, f"compact/hash/{transfer_height:020}", transfer_height).hex()
         for index in range(4)
     ]
     if len(set(execution_hashes)) != 1 or execution_hashes[0] != artifact_event["execution_hash"]:
@@ -497,10 +504,16 @@ def main():
         b"bit/compact-block/v1", compact_archives[0]
     ) != compact_hashes[0]:
         raise AssertionError("archived compact artifact differs across nodes or from state")
-    tree_roots = [state_query(index, "shielded/tree_root").hex() for index in range(4)]
+    tree_roots = [
+        state_query(index, "shielded/tree_root", transfer_height).hex()
+        for index in range(4)
+    ]
     if len(set(tree_roots)) != 1 or tree_roots[0] == fixture["anchor"]:
         raise AssertionError("output commitments did not advance a common shielded tree root")
-    supply_audits = [state_query(index, "supply/audit_snapshot") for index in range(4)]
+    supply_audits = [
+        state_query(index, "supply/audit_snapshot", transfer_height)
+        for index in range(4)
+    ]
     if not supply_audits[0] or len(set(supply_audits)) != 1:
         raise AssertionError("proved supply audit snapshots differ across applications")
     transfer_app_hashes = {
@@ -531,6 +544,10 @@ def main():
         raise AssertionError("archived execution artifact changed after application restart")
     if archived_artifact(0, transfer_height, "compact") != compact_archives[0]:
         raise AssertionError("archived compact artifact changed after application restart")
+    if state_query(
+        0, f"compact/hash/{transfer_height:020}", transfer_height
+    ).hex() != compact_hashes[0]:
+        raise AssertionError("historical compact proof changed after application restart")
 
     common_height = min(resumed) - 1
     headers = [rpc(i, f"block?height={common_height}")["block"]["header"] for i in range(4)]
@@ -646,6 +663,8 @@ def main():
                 "state_proofs_and_abci_event_match_on_nodes": 4,
                 "immutable_archives_match_on_nodes": 4,
                 "archive_restart_readback": True,
+                "historical_state_proofs_at_exact_height": 4,
+                "historical_proof_after_restart": True,
             },
             "canonical_supply_audit": {
                 "canonical_bytes": len(supply_audits[0]),
@@ -658,7 +677,7 @@ def main():
             "resumed_heights": resumed,
             "same_app_hash_height": common_height,
             "same_app_hash": app_hashes.pop(),
-            "latest_ics23_proof": True,
+            "latest_and_historical_ics23_proofs": True,
             "real_duplicate_vote_evidence": {
                 **evidence,
                 "inclusion_height": evidence_inclusion_height,

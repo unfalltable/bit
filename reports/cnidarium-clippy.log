@@ -1,6 +1,8 @@
-cargo.exe :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.38s
+cargo.exe :     Checking cnidarium v0.83.0 (D:\others\BIT\third_party\cnidarium)
 At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
 +     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
 +     ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (    Finished `d...get(s) in 1.38s:String) [], RemoteException
+    + CategoryInfo          : NotSpecified: (    Checking cn...arty\cnidarium):String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.01s

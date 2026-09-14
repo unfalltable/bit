@@ -676,23 +676,39 @@ impl Application for AbciApplication {
                 return Self::query_rejection(QueryCode::InvalidKey, "query key is not UTF-8");
             }
         };
+        let requested_height = match u64::try_from(request.height) {
+            Ok(height) => height,
+            Err(_) => {
+                return Self::query_rejection(
+                    QueryCode::UnsupportedHeight,
+                    "requested state height is unavailable",
+                );
+            }
+        };
         let _guard = self.execution_guard();
-        let proof = match self
-            .inner
-            .runtime
-            .block_on(self.inner.core.query_latest_with_proof(key))
-        {
+        let proof_result = if requested_height == 0 {
+            self.inner
+                .runtime
+                .block_on(self.inner.core.query_latest_with_proof(key))
+        } else {
+            self.inner.runtime.block_on(
+                self.inner
+                    .core
+                    .query_at_height_with_proof(key, requested_height),
+            )
+        };
+        let proof = match proof_result {
             Ok(proof) => proof,
+            Err(CoreError::State(bit_state::Error::StateHeightUnavailable { .. })) => {
+                return Self::query_rejection(
+                    QueryCode::UnsupportedHeight,
+                    "requested state height is unavailable",
+                );
+            }
             Err(error) => self.halt(format!("Query failed: {error}")),
         };
         let height = i64::try_from(proof.storage_version)
             .unwrap_or_else(|_| self.halt("query height exceeds i64"));
-        if request.height < 0 || (request.height != 0 && request.height != height) {
-            return Self::query_rejection(
-                QueryCode::UnsupportedHeight,
-                "only the latest committed height is available",
-            );
-        }
         let value = proof.value.clone().unwrap_or_default();
         let proof_ops = request.prove.then(|| self.proof_ops(proof));
         ResponseQuery {
@@ -1580,6 +1596,17 @@ mod tests {
             assert_eq!(hex::encode(query.value), expected);
             assert!(query.proof_ops.is_some());
         }
+        let future = Application::query(
+            &app,
+            RequestQuery {
+                data: b"meta/height".to_vec().into(),
+                path: STATE_QUERY_PATH.to_owned(),
+                height: 2,
+                prove: true,
+            },
+        );
+        assert_eq!(future.code, QueryCode::UnsupportedHeight as u32);
+        assert_eq!(future.log, "requested state height is unavailable");
 
         assert!(Application::extend_vote(&app, RequestExtendVote::default())
             .vote_extension

@@ -71,9 +71,9 @@ SHA256("bit/compact-block/v1" || len_u64_be(cbor) || cbor)
 
 `FinalizeBlock` 在同一候选状态中完成系统阶段和交易执行，预览最终 TCT 根，构造两种产物，再把两个哈希写入 `execution/block/<height:020>` 与 `compact/hash/<height:020>`。候选状态随后重新核对树根，避免摘要与提交状态分离。调用方不能注入或替换摘要。
 
-ABCI 返回一个 `bit.block.v1` 事件，包含 height、execution_hash、compact_hash 和 compact_bytes；哈希可通过最新高度 ICS23 查询证明核对。共享空块向量由 Rust 与独立 Python oracle 交叉验证。四节点 CometBFT 探针还执行一笔真实 2 Spend/2 Output Groth16 Transfer，核对交易、nullifier、TCT 根、两个产物哈希、ABCI 事件及四份 JMT app hash 一致。
+ABCI 返回一个 `bit.block.v1` 事件，包含 height、execution_hash、compact_hash 和 compact_bytes；哈希可通过产物对应高度的 ICS23 查询证明核对。共享空块向量由 Rust 与独立 Python oracle 交叉验证。四节点 CometBFT 探针还执行一笔真实 2 Spend/2 Output Groth16 Transfer，在链继续推进后按 Transfer 的精确高度核对交易、nullifier、TCT 根、两个产物哈希、供应审计、ABCI 事件及四份 JMT app hash 一致。
 
-当前 ABCI 事件只公开摘要与紧凑区块长度。完整产物已经进入本地不可变归档，但服务接口、历史证明与客户端扫描属于下一阶段，不能仅凭本实现宣称恢复服务已经完成。
+当前 ABCI 事件只公开摘要与紧凑区块长度。完整产物已经进入本地不可变归档，摘要支持重启后的精确历史高度证明；下载服务接口、保留策略与客户端扫描属于下一阶段，不能仅凭本实现宣称恢复服务已经完成。
 
 ## 6. 本地不可变归档
 

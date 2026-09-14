@@ -48,7 +48,7 @@ function Invoke-BitCheck {
 Push-Location $bitRoot
 try {
     Invoke-BitCheck 'fmt-check' 'cargo' @('fmt', '--all', '--', '--check')
-    Invoke-BitCheck 'cnidarium-fmt' 'rustfmt' @('--edition', '2021', '--check', 'third_party/cnidarium/src/lib.rs', 'third_party/cnidarium/src/storage.rs')
+    Invoke-BitCheck 'cnidarium-fmt' 'rustfmt' @('--edition', '2021', '--check', 'third_party/cnidarium/src/lib.rs', 'third_party/cnidarium/src/storage.rs', 'third_party/cnidarium/src/tests.rs')
     Invoke-BitCheck 'cnidarium-clippy' 'cargo' @(
         'clippy', '--manifest-path', 'third_party/cnidarium/Cargo.toml',
         '--lib', '--no-default-features', '--features', 'bit-fault-injection', '--locked',
@@ -144,6 +144,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'third_party/cnidarium/UPSTREAM_SHA256SUMS'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\UPSTREAM_SHA256SUMS') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'third_party/cnidarium/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'third_party/cnidarium/src/storage.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\src\storage.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'third_party/cnidarium/src/tests.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'third_party\cnidarium\src\tests.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/run_bit_app_network.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\run_bit_app_network.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/rust_env.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\rust_env.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/bootstrap_tools.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\bootstrap_tools.py') -Algorithm SHA256).Hash.ToLowerInvariant() },

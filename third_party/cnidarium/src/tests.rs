@@ -44,6 +44,48 @@ async fn db_lock_is_released() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn uniform_historical_snapshot_survives_restart() -> anyhow::Result<()> {
+    let tmpdir = tempfile::tempdir()?;
+    let storage = Storage::load(
+        tmpdir.path().to_owned(),
+        vec!["a".to_owned(), "b".to_owned()],
+    )
+    .await?;
+
+    let mut first = StateDelta::new(storage.latest_snapshot());
+    first.put_raw("a/value".to_owned(), b"old".to_vec());
+    first.put_raw("a/_version".to_owned(), 0u64.to_be_bytes().to_vec());
+    first.put_raw("b/_version".to_owned(), 0u64.to_be_bytes().to_vec());
+    storage.commit(first).await?;
+
+    let mut second = StateDelta::new(storage.latest_snapshot());
+    second.put_raw("a/value".to_owned(), b"new".to_vec());
+    second.put_raw("a/_version".to_owned(), 1u64.to_be_bytes().to_vec());
+    second.put_raw("b/_version".to_owned(), 1u64.to_be_bytes().to_vec());
+    storage.commit(second).await?;
+    storage.release().await;
+
+    let storage = Storage::load(
+        tmpdir.path().to_owned(),
+        vec!["a".to_owned(), "b".to_owned()],
+    )
+    .await?;
+    assert_eq!(
+        storage.latest_snapshot().get_raw("a/value").await?,
+        Some(b"new".to_vec())
+    );
+    let historical = storage.snapshot_at_uniform_version(0).unwrap();
+    assert_eq!(historical.version(), 0);
+    assert_eq!(historical.get_raw("a/value").await?, Some(b"old".to_vec()));
+    let (value, proof) = historical.get_with_proof(b"a/value".to_vec()).await?;
+    assert_eq!(value, Some(b"old".to_vec()));
+    assert_eq!(proof.proofs.len(), 2);
+    assert!(storage.snapshot_at_uniform_version(2).is_none());
+    storage.release().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn simple_flow() -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let tmpdir = tempfile::tempdir()?;

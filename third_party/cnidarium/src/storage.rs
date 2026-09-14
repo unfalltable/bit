@@ -386,6 +386,31 @@ impl Storage {
         self.0.snapshots.read().get(version)
     }
 
+    /// Construct a historical snapshot when the application guarantees that
+    /// the main store and every configured substore committed at `version`.
+    ///
+    /// Cnidarium normally tracks different latest versions for independently
+    /// updated substores. Applications using this method must persist a write
+    /// in every substore at every main-store version. The returned snapshot is
+    /// backed by a current RocksDB snapshot but reads immutable JMT nodes at the
+    /// requested version.
+    pub fn snapshot_at_uniform_version(&self, version: jmt::Version) -> Option<Snapshot> {
+        let latest = self.latest_version();
+        if latest == u64::MAX || version > latest {
+            return None;
+        }
+        if let Some(snapshot) = self.snapshot(version) {
+            return Some(snapshot);
+        }
+        let mut versions =
+            multistore::MultistoreCache::from_config(self.0.multistore_config.clone());
+        versions.set_version(versions.config.main_store.clone(), version);
+        for config in versions.config.substores.clone() {
+            versions.set_version(config, version);
+        }
+        Some(Snapshot::new(self.0.db.clone(), version, versions))
+    }
+
     /// Prepares a commit for the provided [`StateDelta`], returning a [`StagedWriteBatch`].
     /// The batch can be committed to the database using the [`Storage::commit_batch`] method.
     pub async fn prepare_commit(&self, delta: StateDelta<Snapshot>) -> Result<StagedWriteBatch> {

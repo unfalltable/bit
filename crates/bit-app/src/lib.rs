@@ -494,6 +494,15 @@ impl ApplicationCore {
         Ok(self.state.read().await.query_latest_with_proof(key).await?)
     }
 
+    pub async fn query_at_height_with_proof(&self, key: &str, height: u64) -> Result<QueryProof> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .query_at_height_with_proof(key, height)
+            .await?)
+    }
+
     /// Load and validate a durably published block artifact pair.
     pub fn block_artifacts(&self, height: u64) -> Result<Option<BlockArtifacts>> {
         self.artifact_archive.load(height)

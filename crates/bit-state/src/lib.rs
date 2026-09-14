@@ -43,7 +43,7 @@ pub use state_snapshot::{StateSnapshotManifest, STATE_SNAPSHOT_CHUNK_BYTES};
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 17;
+const STORAGE_SCHEMA_VERSION: u32 = 18;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -218,6 +218,8 @@ pub enum Error {
     Snapshot(String),
     #[error("expected next state height {expected}, got {actual}")]
     HeightMismatch { expected: u64, actual: u64 },
+    #[error("state height {requested} is unavailable; latest is {latest}")]
+    StateHeightUnavailable { requested: u64, latest: u64 },
     #[error("block time regressed from {previous} to {actual}")]
     BlockTimeRegression { previous: u64, actual: u64 },
     #[error("transaction anchor is not retained")]
@@ -799,6 +801,48 @@ impl PersistentState {
             proof,
             app_hash,
             storage_version,
+        })
+    }
+
+    /// Query an exact committed height and return an ICS23 proof rooted in that
+    /// height's application hash. Every BIT substore advances at every block,
+    /// so its JMT version is identical to the main-store version after restart.
+    pub async fn query_at_height_with_proof(&self, key: &str, height: u64) -> Result<QueryProof> {
+        if key.is_empty() {
+            return Err(Error::InvalidConfig("query key must not be empty"));
+        }
+        let latest_snapshot = self.storage.latest_snapshot();
+        let latest = read_u64(&latest_snapshot, META_HEIGHT).await?;
+        if height > latest {
+            return Err(Error::StateHeightUnavailable {
+                requested: height,
+                latest,
+            });
+        }
+        let snapshot = self
+            .storage
+            .snapshot(height)
+            .or_else(|| self.storage.snapshot_at_uniform_version(height))
+            .ok_or(Error::StateHeightUnavailable {
+                requested: height,
+                latest,
+            })?;
+        let stored_height = read_u64(&snapshot, META_HEIGHT).await?;
+        if stored_height != height || snapshot.version() != height {
+            return Err(Error::CorruptState(format!(
+                "historical snapshot version {} contains state height {stored_height}, expected {height}",
+                snapshot.version()
+            )));
+        }
+        validate_substore_versions(&snapshot, height).await?;
+        let app_hash = snapshot.root_hash().await?.0;
+        let (value, proof) = snapshot.get_with_proof(key.as_bytes().to_vec()).await?;
+        Ok(QueryProof {
+            key: key.to_owned(),
+            value,
+            proof,
+            app_hash,
+            storage_version: height,
         })
     }
 
@@ -2286,6 +2330,7 @@ impl BlockSession<'_> {
                 record.encode_persistent(),
             );
         }
+        write_substore_versions(&mut self.delta, self.height);
 
         if self.height >= self.owner.config.anchor_retention_blocks {
             let prune_height = self.height - self.owner.config.anchor_retention_blocks;
@@ -2441,6 +2486,7 @@ async fn initialize_genesis(storage: &Storage, config: &GenesisConfig) -> Result
     delta.put_raw(anchor_lookup_key(&tree_root), u64_bytes(0));
     delta.put_raw(execution_key(0), config.genesis_execution_hash.to_vec());
     delta.put_raw(compact_key(0), config.genesis_compact_hash.to_vec());
+    write_substore_versions(&mut delta, 0);
     let root = storage.commit(delta).await?;
     if storage.latest_version() != 0 || root.0 == [0; 32] {
         return Err(Error::CorruptState(
@@ -2466,6 +2512,7 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
             snapshot.version()
         )));
     }
+    validate_substore_versions(&snapshot, height).await?;
     require_equal_hash(&snapshot, META_CHAIN_CONTEXT, &config.chain_context).await?;
     require_equal_hash(&snapshot, META_NATIVE_ASSET_ID, &config.native_asset_id).await?;
     require_equal_u64(&snapshot, META_PROTOCOL_VERSION, config.protocol_version).await?;
@@ -2620,6 +2667,29 @@ fn write_supply(delta: &mut StateDelta<Snapshot>, supply: &SupplyState) {
         EMISSION_COMPLETED_EPOCHS.to_owned(),
         u64_bytes(supply.completed_epochs),
     );
+}
+
+fn substore_version_key(prefix: &str) -> String {
+    format!("{prefix}/_meta/version")
+}
+
+fn write_substore_versions(delta: &mut StateDelta<Snapshot>, height: u64) {
+    for prefix in SUBSTORES {
+        delta.put_raw(substore_version_key(prefix), u64_bytes(height));
+    }
+}
+
+async fn validate_substore_versions(snapshot: &Snapshot, height: u64) -> Result<()> {
+    for prefix in SUBSTORES {
+        let key = substore_version_key(prefix);
+        let stored = read_u64(snapshot, &key).await?;
+        if stored != height {
+            return Err(Error::CorruptState(format!(
+                "substore {prefix} version marker {stored} differs from state height {height}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn write_fee_policy(delta: &mut StateDelta<Snapshot>, policy: FeePolicy) {
@@ -4518,6 +4588,34 @@ mod tests {
             .nullifier_is_spent(&transfer.nullifiers[0])
             .await
             .unwrap());
+
+        let historical_audit = state
+            .query_at_height_with_proof(SUPPLY_AUDIT, 0)
+            .await
+            .unwrap();
+        assert_eq!(historical_audit.storage_version, 0);
+        assert_eq!(historical_audit.app_hash, genesis.app_hash);
+        assert_eq!(historical_audit.value, Some(expected_genesis_audit));
+        historical_audit.verify().unwrap();
+        let historical_absence = state
+            .query_at_height_with_proof(&execution_key(1), 0)
+            .await
+            .unwrap();
+        assert!(historical_absence.value.is_none());
+        historical_absence.verify().unwrap();
+        let committed_height = state
+            .query_at_height_with_proof(META_HEIGHT, 1)
+            .await
+            .unwrap();
+        assert_eq!(committed_height.value, Some(u64_bytes(1)));
+        committed_height.verify().unwrap();
+        assert!(matches!(
+            state.query_at_height_with_proof(META_HEIGHT, 2).await,
+            Err(Error::StateHeightUnavailable {
+                requested: 2,
+                latest: 1
+            })
+        ));
         state.close().await;
     }
 
@@ -4972,6 +5070,7 @@ mod tests {
             tampered_pool.encode_persistent(),
         );
         delta.put_raw(META_HEIGHT.to_owned(), u64_bytes(4));
+        write_substore_versions(&mut delta, 4);
         delta.put_raw(anchor_height_key(4), summary.shielded_tree_root.to_vec());
         delta.put_raw(anchor_lookup_key(&summary.shielded_tree_root), u64_bytes(4));
         delta.put_raw(execution_key(4), [61; 32].to_vec());
@@ -6128,6 +6227,7 @@ mod tests {
         let mut delta = StateDelta::new(storage.latest_snapshot());
         delta.put_raw(META_VERSION.to_owned(), 1u32.to_be_bytes().to_vec());
         delta.put_raw(META_HEIGHT.to_owned(), u64_bytes(1));
+        write_substore_versions(&mut delta, 1);
         storage.commit(delta).await.unwrap();
         storage.release().await;
         let error = PersistentState::open(schema_dir.path().to_path_buf(), genesis_config.clone())
@@ -6155,6 +6255,7 @@ mod tests {
         schedule.advance(1, unchanged).unwrap();
         let mut delta = StateDelta::new(snapshot);
         delta.put_raw(META_HEIGHT.to_owned(), u64_bytes(1));
+        write_substore_versions(&mut delta, 1);
         delta.put_raw(
             STAKING_EFFECTIVE_SCHEDULE.to_owned(),
             schedule.encode_persistent().unwrap(),
@@ -6768,6 +6869,7 @@ mod tests {
             Amount::new(1).unwrap().to_be_bytes().to_vec(),
         );
         delta.put_raw(META_HEIGHT.to_owned(), u64_bytes(2));
+        write_substore_versions(&mut delta, 2);
         storage.commit(delta).await.unwrap();
         storage.release().await;
 
