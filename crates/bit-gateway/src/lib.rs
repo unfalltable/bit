@@ -10,7 +10,9 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bit_app::{ApplicationCore, Error as CoreError};
 use bit_state::QueryProof;
-use bit_types::SupplyAuditSnapshot;
+use bit_types::{
+    MonetaryPolicy, SupplyAuditSnapshot, EMPTY_SET_POLICY, MAX_SUPPLY_ATOMIC, POLICY_ID,
+};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -61,6 +63,7 @@ impl PublicApi {
         let router = Router::new()
             .route("/health/live", get(live))
             .route("/health/ready", get(ready))
+            .route("/v1/network", get(network))
             .route("/v1/state/proof", get(state_proof))
             .route("/v1/supply", get(supply))
             .route("/v1/compact-blocks", get(compact_blocks))
@@ -123,6 +126,91 @@ async fn ready(State(state): State<GatewayState>) -> Result<Json<Health>, ApiErr
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NetworkQuery {
+    #[serde(default)]
+    height: u64,
+}
+
+async fn network(
+    State(state): State<GatewayState>,
+    query: Result<Query<NetworkQuery>, QueryRejection>,
+) -> Result<Json<NetworkResponse>, ApiError> {
+    let Query(query) = query.map_err(ApiError::bad_query)?;
+    let supply_proof = query_at(&state.core, "supply/audit_snapshot", query.height).await?;
+    let height = supply_proof.storage_version;
+    let snapshot = decode_supply_snapshot(&supply_proof)?;
+    let policy_proof = query_same_state(&state.core, "emission/policy", &supply_proof).await?;
+    let policy = decode_monetary_policy(&policy_proof, &snapshot)?;
+    let chain_context = query_same_state(&state.core, "meta/chain_context", &supply_proof).await?;
+    let native_asset_id =
+        query_same_state(&state.core, "meta/native_asset_id", &supply_proof).await?;
+    let protocol_version =
+        query_same_state(&state.core, "meta/protocol_version", &supply_proof).await?;
+    let max_block_bytes =
+        query_same_state(&state.core, "meta/max_block_bytes", &supply_proof).await?;
+    let max_tx_lifetime_blocks =
+        query_same_state(&state.core, "meta/max_tx_lifetime_blocks", &supply_proof).await?;
+    let max_envelope_bytes =
+        query_same_state(&state.core, "meta/max_envelope_bytes", &supply_proof).await?;
+    let anchor_retention_blocks =
+        query_same_state(&state.core, "meta/anchor_retention_blocks", &supply_proof).await?;
+    let genesis_commitments_hash =
+        query_same_state(&state.core, "meta/genesis_commitments_hash", &supply_proof).await?;
+
+    let protocol_version_value = decode_u64(&protocol_version)?;
+    let info = state.core.info().await.map_err(ApiError::internal)?;
+    if protocol_version_value != info.protocol_version {
+        return Err(ApiError::internal_message(
+            "protocol version differs from application configuration",
+        ));
+    }
+
+    let response = NetworkResponse {
+        meta: ApiMeta {
+            protocol_version: protocol_version_value,
+            state_height: height.to_string(),
+            verified_header_height: state
+                .verified_header_height
+                .load(Ordering::Acquire)
+                .to_string(),
+        },
+        network: NetworkDto {
+            chain_context: decode_hash32_hex(&chain_context)?,
+            native_asset_id: decode_hash32_hex(&native_asset_id)?,
+            genesis_commitments_hash: decode_hash32_hex(&genesis_commitments_hash)?,
+            protocol_version: protocol_version_value,
+            max_supply: MAX_SUPPLY_ATOMIC.to_string(),
+            monetary_policy_hash: hex::encode(snapshot.monetary_policy_hash),
+            emission_policy_id: POLICY_ID,
+            empty_eligible_set_policy: EMPTY_SET_POLICY,
+            burn_reopens_issuance: false,
+            tail_emission_enabled: false,
+            epoch_blocks: policy.epoch_blocks.to_string(),
+            halving_interval_epochs: policy.halving_interval_epochs.to_string(),
+            max_block_bytes: decode_u64(&max_block_bytes)?.to_string(),
+            max_tx_lifetime_blocks: decode_u64(&max_tx_lifetime_blocks)?.to_string(),
+            max_envelope_bytes: decode_u64(&max_envelope_bytes)?.to_string(),
+            anchor_retention_blocks: decode_u64(&anchor_retention_blocks)?.to_string(),
+        },
+        proofs: NetworkProofsDto {
+            supply: proof_dto(supply_proof)?,
+            monetary_policy: proof_dto(policy_proof)?,
+            chain_context: proof_dto(chain_context)?,
+            native_asset_id: proof_dto(native_asset_id)?,
+            protocol_version: proof_dto(protocol_version)?,
+            max_block_bytes: proof_dto(max_block_bytes)?,
+            max_tx_lifetime_blocks: proof_dto(max_tx_lifetime_blocks)?,
+            max_envelope_bytes: proof_dto(max_envelope_bytes)?,
+            anchor_retention_blocks: proof_dto(anchor_retention_blocks)?,
+            genesis_commitments_hash: proof_dto(genesis_commitments_hash)?,
+        },
+    };
+    Ok(Json(response))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StateProofQuery {
     key: String,
     #[serde(default)]
@@ -144,6 +232,7 @@ async fn state_proof(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SupplyQuery {
     #[serde(default)]
     height: u64,
@@ -155,21 +244,20 @@ async fn supply(
 ) -> Result<Json<SupplyResponse>, ApiError> {
     let Query(query) = query.map_err(ApiError::bad_query)?;
     let proof = query_at(&state.core, "supply/audit_snapshot", query.height).await?;
-    let bytes = proof
-        .value
-        .as_deref()
-        .ok_or_else(|| ApiError::internal_message("supply audit snapshot is missing"))?;
-    let snapshot = SupplyAuditSnapshot::decode_canonical(bytes)
-        .map_err(|_| ApiError::internal_message("supply audit snapshot is invalid"))?;
+    let snapshot = decode_supply_snapshot(&proof)?;
+    let policy_proof = query_same_state(&state.core, "emission/policy", &proof).await?;
+    let policy = decode_monetary_policy(&policy_proof, &snapshot)?;
     let meta = meta_for_proof(&state, &proof).await?;
     Ok(Json(SupplyResponse {
         meta,
-        supply: SupplyDto::from(snapshot),
+        supply: SupplyDto::from_snapshot(snapshot, &policy)?,
         proof: proof_dto(proof)?,
+        policy_proof: proof_dto(policy_proof)?,
     }))
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CompactQuery {
     from_height: u64,
     limit: Option<u32>,
@@ -285,6 +373,69 @@ async fn query_at(core: &ApplicationCore, key: &str, height: u64) -> Result<Quer
     }
 }
 
+async fn query_same_state(
+    core: &ApplicationCore,
+    key: &str,
+    anchor: &QueryProof,
+) -> Result<QueryProof, ApiError> {
+    let proof = query_at(core, key, anchor.storage_version).await?;
+    if proof.storage_version != anchor.storage_version || proof.app_hash != anchor.app_hash {
+        return Err(ApiError::internal_message(
+            "state changed while assembling a proof bundle",
+        ));
+    }
+    Ok(proof)
+}
+
+fn required_value<'a>(proof: &'a QueryProof, name: &'static str) -> Result<&'a [u8], ApiError> {
+    proof
+        .value
+        .as_deref()
+        .ok_or_else(|| ApiError::internal_message(name))
+}
+
+fn decode_hash32_hex(proof: &QueryProof) -> Result<String, ApiError> {
+    let value = required_value(proof, "required network hash is missing")?;
+    if value.len() != 32 {
+        return Err(ApiError::internal_message(
+            "required network hash has an invalid length",
+        ));
+    }
+    Ok(hex::encode(value))
+}
+
+fn decode_u64(proof: &QueryProof) -> Result<u64, ApiError> {
+    let value = required_value(proof, "required network integer is missing")?;
+    let bytes: [u8; 8] = value
+        .try_into()
+        .map_err(|_| ApiError::internal_message("required network integer is invalid"))?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
+fn decode_supply_snapshot(proof: &QueryProof) -> Result<SupplyAuditSnapshot, ApiError> {
+    let bytes = required_value(proof, "supply audit snapshot is missing")?;
+    SupplyAuditSnapshot::decode_canonical(bytes)
+        .map_err(|_| ApiError::internal_message("supply audit snapshot is invalid"))
+}
+
+fn decode_monetary_policy(
+    proof: &QueryProof,
+    snapshot: &SupplyAuditSnapshot,
+) -> Result<MonetaryPolicy, ApiError> {
+    let bytes = required_value(proof, "monetary policy is missing")?;
+    let policy = MonetaryPolicy::decode_canonical(bytes)
+        .map_err(|_| ApiError::internal_message("monetary policy is invalid"))?;
+    let hash = policy
+        .hash()
+        .map_err(|_| ApiError::internal_message("monetary policy hash failed"))?;
+    if hash != snapshot.monetary_policy_hash {
+        return Err(ApiError::internal_message(
+            "monetary policy differs from supply audit snapshot",
+        ));
+    }
+    Ok(policy)
+}
+
 async fn meta_for_proof(state: &GatewayState, proof: &QueryProof) -> Result<ApiMeta, ApiError> {
     let info = state.core.info().await.map_err(ApiError::internal)?;
     Ok(ApiMeta {
@@ -330,8 +481,14 @@ fn validate_public_key(key: &str) -> Result<(), ApiError> {
         "meta/chain_context",
         "meta/native_asset_id",
         "meta/protocol_version",
+        "meta/max_block_bytes",
+        "meta/max_tx_lifetime_blocks",
+        "meta/max_envelope_bytes",
+        "meta/anchor_retention_blocks",
+        "meta/genesis_commitments_hash",
         "meta/monetary_policy_hash",
         "shielded/tree_root",
+        "emission/policy",
         "supply/audit_snapshot",
         "fees/base_atomic",
         "fees/per_kib_atomic",
@@ -396,56 +553,141 @@ pub struct StateProofResponse {
 }
 
 #[derive(Serialize)]
+pub struct NetworkResponse {
+    pub meta: ApiMeta,
+    pub network: NetworkDto,
+    pub proofs: NetworkProofsDto,
+}
+
+#[derive(Serialize)]
+pub struct NetworkDto {
+    pub chain_context: String,
+    pub native_asset_id: String,
+    pub genesis_commitments_hash: String,
+    pub protocol_version: u64,
+    pub max_supply: String,
+    pub monetary_policy_hash: String,
+    pub emission_policy_id: &'static str,
+    pub empty_eligible_set_policy: &'static str,
+    pub burn_reopens_issuance: bool,
+    pub tail_emission_enabled: bool,
+    pub epoch_blocks: String,
+    pub halving_interval_epochs: String,
+    pub max_block_bytes: String,
+    pub max_tx_lifetime_blocks: String,
+    pub max_envelope_bytes: String,
+    pub anchor_retention_blocks: String,
+}
+
+#[derive(Serialize)]
+pub struct NetworkProofsDto {
+    pub supply: ProofDto,
+    pub monetary_policy: ProofDto,
+    pub chain_context: ProofDto,
+    pub native_asset_id: ProofDto,
+    pub protocol_version: ProofDto,
+    pub max_block_bytes: ProofDto,
+    pub max_tx_lifetime_blocks: ProofDto,
+    pub max_envelope_bytes: ProofDto,
+    pub anchor_retention_blocks: ProofDto,
+    pub genesis_commitments_hash: ProofDto,
+}
+
+#[derive(Serialize)]
 pub struct SupplyResponse {
     pub meta: ApiMeta,
     pub supply: SupplyDto,
     pub proof: ProofDto,
+    pub policy_proof: ProofDto,
 }
 
 #[derive(Serialize)]
 pub struct SupplyDto {
     pub max_supply: String,
-    pub genesis_supply: String,
-    pub cumulative_minted: String,
+    pub genesis: String,
+    pub minted: String,
     pub burned: String,
     pub issued_total: String,
     pub total: String,
     pub scheduled_to_date: String,
     pub forfeited_unissued: String,
     pub future_issuance_budget: String,
-    pub shielded_total: String,
-    pub stake_total: String,
-    pub pending_delegation_total: String,
-    pub exit_total: String,
-    pub commission_total: String,
-    pub fee_reserve: String,
-    pub unclaimed_genesis_total: String,
+    pub shielded: String,
+    pub stake: String,
+    pub pending: String,
+    pub exits: String,
+    pub commission: String,
+    pub fees: String,
+    pub genesis_unclaimed: String,
     pub completed_epochs: String,
+    pub halving_index: String,
+    pub halving_interval_epochs: String,
+    pub epoch_blocks: String,
+    pub next_halving_height: Option<String>,
+    pub current_era_budget: String,
+    pub next_epoch_quota: String,
+    pub emission_finished: bool,
     pub monetary_policy_hash: String,
 }
 
-impl From<SupplyAuditSnapshot> for SupplyDto {
-    fn from(value: SupplyAuditSnapshot) -> Self {
-        Self {
+impl SupplyDto {
+    fn from_snapshot(
+        value: SupplyAuditSnapshot,
+        policy: &MonetaryPolicy,
+    ) -> Result<Self, ApiError> {
+        let halving_index = value.completed_epochs / policy.halving_interval_epochs;
+        let remaining_at_era_start = if halving_index >= 128 {
+            0
+        } else {
+            policy.future_budget() >> halving_index
+        };
+        let current_era_budget = remaining_at_era_start - remaining_at_era_start / 2;
+        let next_epoch_quota = policy
+            .quota(value.completed_epochs)
+            .map_err(|_| ApiError::internal_message("next issuance quota overflow"))?;
+        let emission_finished = value.future_issuance_budget.value() == 0;
+        let next_halving_height = if emission_finished {
+            None
+        } else {
+            let next_era = halving_index
+                .checked_add(1)
+                .ok_or_else(|| ApiError::internal_message("halving index overflow"))?;
+            let next_era_epoch = next_era
+                .checked_mul(policy.halving_interval_epochs)
+                .ok_or_else(|| ApiError::internal_message("halving epoch overflow"))?;
+            let height = next_era_epoch
+                .checked_mul(policy.epoch_blocks)
+                .and_then(|value| value.checked_add(1))
+                .ok_or_else(|| ApiError::internal_message("halving height overflow"))?;
+            Some(height.to_string())
+        };
+        Ok(Self {
             max_supply: value.max_supply.value().to_string(),
-            genesis_supply: value.genesis_supply.value().to_string(),
-            cumulative_minted: value.cumulative_minted.value().to_string(),
+            genesis: value.genesis_supply.value().to_string(),
+            minted: value.cumulative_minted.value().to_string(),
             burned: value.burned.value().to_string(),
             issued_total: value.issued_total.value().to_string(),
             total: value.current_supply.value().to_string(),
             scheduled_to_date: value.scheduled_to_date.value().to_string(),
             forfeited_unissued: value.forfeited_unissued.value().to_string(),
             future_issuance_budget: value.future_issuance_budget.value().to_string(),
-            shielded_total: value.shielded_total.value().to_string(),
-            stake_total: value.stake_total.value().to_string(),
-            pending_delegation_total: value.pending_delegation_total.value().to_string(),
-            exit_total: value.exit_total.value().to_string(),
-            commission_total: value.commission_total.value().to_string(),
-            fee_reserve: value.fee_reserve.value().to_string(),
-            unclaimed_genesis_total: value.unclaimed_genesis_total.value().to_string(),
+            shielded: value.shielded_total.value().to_string(),
+            stake: value.stake_total.value().to_string(),
+            pending: value.pending_delegation_total.value().to_string(),
+            exits: value.exit_total.value().to_string(),
+            commission: value.commission_total.value().to_string(),
+            fees: value.fee_reserve.value().to_string(),
+            genesis_unclaimed: value.unclaimed_genesis_total.value().to_string(),
             completed_epochs: value.completed_epochs.to_string(),
+            halving_index: halving_index.to_string(),
+            halving_interval_epochs: policy.halving_interval_epochs.to_string(),
+            epoch_blocks: policy.epoch_blocks.to_string(),
+            next_halving_height,
+            current_era_budget: current_era_budget.to_string(),
+            next_epoch_quota: next_epoch_quota.to_string(),
+            emission_finished,
             monetary_policy_hash: hex::encode(value.monetary_policy_hash),
-        }
+        })
     }
 }
 
@@ -572,13 +814,41 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(supply["meta"]["state_height"], "0");
         assert_eq!(supply["supply"]["max_supply"], "10240000000000000000");
+        assert_eq!(supply["supply"]["halving_index"], "0");
+        assert_eq!(supply["supply"]["halving_interval_epochs"], "35040");
+        assert_eq!(supply["supply"]["epoch_blocks"], "720");
+        assert_eq!(supply["supply"]["next_halving_height"], "25228801");
+        assert_eq!(
+            supply["supply"]["current_era_budget"],
+            "5115000000000000000"
+        );
+        assert_eq!(supply["supply"]["next_epoch_quota"], "145976027397260");
+        assert_eq!(supply["supply"]["emission_finished"], false);
         assert_eq!(supply["proof"]["proof_format"], PROOF_FORMAT);
+        assert_eq!(supply["policy_proof"]["key"], "emission/policy");
         assert_eq!(
             supply["proof"]["proof_ops_base64"]
                 .as_array()
                 .unwrap()
                 .len(),
             2
+        );
+
+        let (status, network) = json(router.clone(), "/v1/network").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(network["meta"]["state_height"], "0");
+        assert_eq!(network["network"]["chain_context"], hex::encode([1; 32]));
+        assert_eq!(network["network"]["native_asset_id"], hex::encode([2; 32]));
+        assert_eq!(network["network"]["protocol_version"], 1);
+        assert_eq!(
+            network["network"]["emission_policy_id"],
+            "BUDGET_HALVING_EPOCH_V1"
+        );
+        assert_eq!(network["network"]["max_block_bytes"], "1000000");
+        assert_eq!(network["proofs"]["monetary_policy"]["state_height"], "0");
+        assert_eq!(
+            network["proofs"]["chain_context"]["app_hash"],
+            network["proofs"]["supply"]["app_hash"]
         );
 
         let (status, _) = json(
@@ -610,6 +880,20 @@ mod tests {
         let (status, ready) = json(router.clone(), "/health/ready").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(ready["status"], "ready");
+
+        let (status, network) = json(router.clone(), "/v1/network?height=1").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(network["meta"]["state_height"], "1");
+        assert_eq!(network["proofs"]["monetary_policy"]["state_height"], "1");
+
+        let (status, supply) = json(router.clone(), "/v1/supply?height=1").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(supply["proof"]["state_height"], "1");
+        assert_eq!(supply["policy_proof"]["state_height"], "1");
+
+        let (status, error) = json(router.clone(), "/v1/network?unknown=1").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(error["code"], "E_BAD_QUERY");
 
         let (status, compact) = json(
             router.clone(),

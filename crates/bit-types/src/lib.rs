@@ -20,7 +20,7 @@ pub use block::{
     MAX_BLOCK_ARTIFACT_BYTES,
 };
 pub use envelope::{ed25519_authorization_message, Authorization, Envelope, Role};
-pub use policy::{quota, scheduled_issuance, MonetaryPolicy};
+pub use policy::{quota, scheduled_issuance, MonetaryPolicy, EMPTY_SET_POLICY, POLICY_ID};
 pub use supply::SupplyAuditSnapshot;
 pub use tx::{
     chain_context, cohort_id, effect_hash, position_id, proof_hash, ticket_id, validator_id,

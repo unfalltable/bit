@@ -1,6 +1,6 @@
 # BIT D-022 RPC、API 与网关
 
-状态：`IN_PROGRESS`。公开只读网关的首批四类能力已经实现：健康检查、白名单状态证明、规范供应审计和有界 compact block 下载。交易广播、头同步、验证人/持仓/退出查询、检查点与浏览器接口仍待后续切片。
+状态：`IN_PROGRESS`。公开只读网关的首批五类能力已经实现：健康检查、带证明网络参数、白名单状态证明、完整供应审计和有界 compact block 下载。交易广播、头同步、验证人/持仓/退出查询、检查点与浏览器接口仍待后续切片。
 
 ## 1. 信任边界
 
@@ -16,8 +16,9 @@
 |---|---|
 | `GET /health/live` | 仅说明网关进程存活 |
 | `GET /health/ready` | 要求应用状态可读且 verified header height 不落后 |
+| `GET /v1/network?height=` | 返回 chain context、本币 ID、政策/资源限制，并附组成这些字段的同高证明；创世 manifest hash 尚待 D-025 正式结构接入 |
 | `GET /v1/state/proof?key=&height=` | 高度 0/省略表示最新，正数表示精确历史高度；返回原值、app hash 和一至两段 ICS23 proof |
-| `GET /v1/supply?height=` | 严格解码同高 `supply/audit_snapshot`，所有 Amount 以十进制字符串返回，并附覆盖完整规范快照的证明 |
+| `GET /v1/supply?height=` | 严格解码同高 `supply/audit_snapshot` 与 `emission/policy`，返回完整供应容器、减半阶段、下一配额和发行完成状态，并附两份证明 |
 | `GET /v1/compact-blocks?from_height=&limit=&max_bytes=` | 连续返回本地归档中的规范 compact bytes、域分离 hash 和同高 `compact/hash` 证明 |
 
 完整机器合同位于 [OpenAPI 3.1](D:/others/BIT/contracts/openapi.yaml)。
@@ -34,4 +35,4 @@ compact 请求默认最多 100 块、硬上限 100 块；规范 compact 载荷�
 
 ## 5. 后续工作
 
-下一阶段接入 CometBFT 已验证头源与真实 TLS 入口，再实现 `/v1/network`、`/v1/headers` 和交易广播。其后补验证人、持仓、退出票据、检查点和浏览器分页接口，并对 429/超时、并发、缓存、Tor 入口与恶意证明请求做压力和故障测试。
+下一阶段接入 CometBFT 已验证头源与真实 TLS 入口，再实现 `/v1/headers` 和交易广播。其后补验证人、持仓、退出票据、检查点和浏览器分页接口，并对 429/超时、并发、缓存、Tor 入口与恶意证明请求做压力和故障测试。
