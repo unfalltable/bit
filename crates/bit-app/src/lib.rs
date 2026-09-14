@@ -5,10 +5,12 @@
 //! protobuf requests into these methods without duplicating execution rules.
 
 pub mod abci;
+mod artifact_archive;
 mod artifacts;
 mod safety;
 mod state_sync;
 
+pub use artifact_archive::artifact_archive_path;
 pub use artifacts::BlockArtifacts;
 pub use safety::{
     acknowledge_safety_halt, decode_hash_hex, encode_hex, read_safety_halt,
@@ -25,6 +27,8 @@ use bit_transaction::Error as TransactionError;
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::{Mutex, RwLock};
+
+use artifact_archive::{ArtifactArchive, StagedArtifacts};
 
 pub type Hash32 = [u8; 32];
 
@@ -47,6 +51,8 @@ pub enum Error {
     BlockArtifact(#[from] bit_types::Error),
     #[error("block artifact shielded payload failed: {0}")]
     BlockArtifactShielded(#[from] bit_shielded::ShieldedError),
+    #[error("block artifact archive failed: {0}")]
+    ArtifactArchive(String),
     #[error("FinalizeBlock already produced an uncommitted block")]
     PendingBlockExists,
     #[error("Commit called without a finalized block")]
@@ -148,6 +154,11 @@ pub struct FinalizeOutcome {
     pub artifacts: BlockArtifacts,
 }
 
+struct PendingCommit {
+    block: PreparedBlock,
+    artifacts: StagedArtifacts,
+}
+
 pub struct ApplicationCore {
     state: RwLock<PersistentState>,
     protocol_version: u64,
@@ -155,17 +166,38 @@ pub struct ApplicationCore {
     max_block_bytes: u64,
     max_tx_lifetime_blocks: u64,
     max_envelope_bytes: usize,
-    pending: Mutex<Option<PreparedBlock>>,
+    artifact_archive: ArtifactArchive,
+    pending: Mutex<Option<PendingCommit>>,
 }
 
 impl ApplicationCore {
     pub async fn open(state_path: PathBuf, genesis: GenesisConfig) -> Result<Self> {
+        let archive_path = artifact_archive_path(&state_path);
+        Self::open_with_artifact_archive(state_path, archive_path, genesis).await
+    }
+
+    async fn open_with_artifact_archive(
+        state_path: PathBuf,
+        archive_path: PathBuf,
+        genesis: GenesisConfig,
+    ) -> Result<Self> {
         let protocol_version = genesis.protocol_version;
         let chain_context = genesis.chain_context;
         let max_block_bytes = genesis.max_block_bytes;
         let max_tx_lifetime_blocks = genesis.max_tx_lifetime_blocks;
         let max_envelope_bytes = genesis.max_envelope_bytes;
         let state = PersistentState::open(state_path, genesis).await?;
+        let artifact_archive = match ArtifactArchive::open(archive_path) {
+            Ok(archive) => archive,
+            Err(error) => {
+                state.close().await;
+                return Err(error);
+            }
+        };
+        if let Err(error) = artifact_archive.recover(&state).await {
+            state.close().await;
+            return Err(error);
+        }
         Ok(Self {
             state: RwLock::new(state),
             protocol_version,
@@ -173,6 +205,7 @@ impl ApplicationCore {
             max_block_bytes,
             max_tx_lifetime_blocks,
             max_envelope_bytes,
+            artifact_archive,
             pending: Mutex::new(None),
         })
     }
@@ -412,9 +445,17 @@ impl ApplicationCore {
             self.max_envelope_bytes,
             self.max_tx_lifetime_blocks,
         )?;
+        let staged_artifacts = self.artifact_archive.stage(&artifacts)?;
         block.set_block_digests(artifacts.execution_hash, artifacts.compact_hash);
-        let prepared = block.prepare().await?;
+        let prepared = match block.prepare().await {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.artifact_archive.discard(&staged_artifacts)?;
+                return Err(error.into());
+            }
+        };
         if prepared.shielded_tree_root != shielded_tree_root {
+            self.artifact_archive.discard(&staged_artifacts)?;
             return Err(bit_state::Error::CorruptState(
                 "compact block tree root differs from prepared state".to_owned(),
             )
@@ -429,23 +470,33 @@ impl ApplicationCore {
             validator_updates: system.validator_updates,
             artifacts,
         };
-        *pending = Some(prepared);
+        *pending = Some(PendingCommit {
+            block: prepared,
+            artifacts: staged_artifacts,
+        });
         Ok(outcome)
     }
 
     /// Durably commit the block produced by the last successful finalization.
     pub async fn commit(&self) -> Result<CommitReceipt> {
-        let prepared = self
+        let pending = self
             .pending
             .lock()
             .await
             .take()
             .ok_or(Error::NoPendingBlock)?;
-        Ok(self.state.read().await.commit(prepared)?)
+        let receipt = self.state.read().await.commit(pending.block)?;
+        self.artifact_archive.publish(pending.artifacts)?;
+        Ok(receipt)
     }
 
     pub async fn query_latest_with_proof(&self, key: &str) -> Result<QueryProof> {
         Ok(self.state.read().await.query_latest_with_proof(key).await?)
+    }
+
+    /// Load and validate a durably published block artifact pair.
+    pub fn block_artifacts(&self, height: u64) -> Result<Option<BlockArtifacts>> {
+        self.artifact_archive.load(height)
     }
 
     pub(crate) async fn export_state_snapshot(
@@ -469,6 +520,9 @@ impl ApplicationCore {
     }
 
     pub async fn close(self) {
+        if let Some(pending) = self.pending.into_inner() {
+            let _ = self.artifact_archive.discard(&pending.artifacts);
+        }
         self.state.into_inner().close().await;
     }
 }
@@ -633,7 +687,8 @@ mod tests {
     #[tokio::test]
     async fn empty_finalize_is_invisible_until_commit() {
         let dir = TempDir::new().unwrap();
-        let app = ApplicationCore::open(dir.path().to_path_buf(), genesis(1_000_000))
+        let genesis = genesis(1_000_000);
+        let app = ApplicationCore::open(dir.path().to_path_buf(), genesis.clone())
             .await
             .unwrap();
         let initial = app.info().await.unwrap();
@@ -661,6 +716,7 @@ mod tests {
         assert_eq!(compact.shielded_tree_root, finalized.shielded_tree_root);
         assert!(compact.transactions.is_empty());
         assert_eq!(execution.events, compact.events);
+        assert!(app.block_artifacts(1).unwrap().is_none());
         assert_eq!(app.info().await.unwrap(), initial);
         assert!(matches!(
             app.finalize_block(BlockRequest {
@@ -692,8 +748,102 @@ mod tests {
             Some(finalized.artifacts.compact_hash.to_vec())
         );
         assert_eq!(app.info().await.unwrap().last_block_height, 1);
+        assert_eq!(
+            app.block_artifacts(1).unwrap(),
+            Some(finalized.artifacts.clone())
+        );
         assert!(matches!(app.commit().await, Err(Error::NoPendingBlock)));
         app.close().await;
+
+        let reopened = ApplicationCore::open(dir.path().to_path_buf(), genesis)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.block_artifacts(1).unwrap(),
+            Some(finalized.artifacts)
+        );
+        reopened.close().await;
+    }
+
+    #[tokio::test]
+    async fn committed_artifact_stage_is_published_after_restart() {
+        let dir = TempDir::new().unwrap();
+        let genesis = genesis(1_000_000);
+        let app = ApplicationCore::open(dir.path().to_path_buf(), genesis.clone())
+            .await
+            .unwrap();
+        let finalized = app
+            .finalize_block(BlockRequest {
+                height: 1,
+                block_time_seconds: 1,
+                transactions: Vec::new(),
+                last_commit: None,
+                byzantine_evidence: Vec::new(),
+                next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
+            })
+            .await
+            .unwrap();
+
+        let pending = app.pending.lock().await.take().unwrap();
+        let committed = app.state.read().await.commit(pending.block).unwrap();
+        assert_eq!(committed.app_hash, finalized.app_hash);
+        drop(pending.artifacts);
+        assert!(app.block_artifacts(1).unwrap().is_none());
+        app.close().await;
+
+        let reopened = ApplicationCore::open(dir.path().to_path_buf(), genesis)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.block_artifacts(1).unwrap(),
+            Some(finalized.artifacts)
+        );
+        reopened.close().await;
+    }
+
+    #[tokio::test]
+    async fn uncommitted_artifact_stage_is_removed_after_restart() {
+        let dir = TempDir::new().unwrap();
+        let genesis = genesis(1_000_000);
+        let app = ApplicationCore::open(dir.path().to_path_buf(), genesis.clone())
+            .await
+            .unwrap();
+        app.finalize_block(BlockRequest {
+            height: 1,
+            block_time_seconds: 1,
+            transactions: Vec::new(),
+            last_commit: None,
+            byzantine_evidence: Vec::new(),
+            next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
+        })
+        .await
+        .unwrap();
+        let abandoned = app.pending.lock().await.take().unwrap();
+        drop(abandoned);
+        app.close().await;
+
+        let reopened = ApplicationCore::open(dir.path().to_path_buf(), genesis)
+            .await
+            .unwrap();
+        assert_eq!(reopened.info().await.unwrap().last_block_height, 0);
+        assert!(reopened.block_artifacts(1).unwrap().is_none());
+        let finalized = reopened
+            .finalize_block(BlockRequest {
+                height: 1,
+                block_time_seconds: 1,
+                transactions: Vec::new(),
+                last_commit: None,
+                byzantine_evidence: Vec::new(),
+                next_validators_hash: reopened.expected_next_validators_hash(1).await.unwrap(),
+            })
+            .await
+            .unwrap();
+        reopened.commit().await.unwrap();
+        assert_eq!(
+            reopened.block_artifacts(1).unwrap(),
+            Some(finalized.artifacts)
+        );
+        reopened.close().await;
     }
 
     #[tokio::test]

@@ -11,9 +11,9 @@ use crate::state_sync::{
     CompletedIncomingSnapshot, StateSyncManager,
 };
 use crate::{
-    encode_hex, read_safety_halt, safety_halt_journal_path, ApplicationCore, BlockRequest,
-    Error as CoreError, FinalizeOutcome, Hash32, LastCommit, SafetyHaltError, SafetyHaltRecord,
-    StateSyncConfig, TxResult,
+    artifact_archive_path, encode_hex, read_safety_halt, safety_halt_journal_path, ApplicationCore,
+    BlockRequest, Error as CoreError, FinalizeOutcome, Hash32, LastCommit, SafetyHaltError,
+    SafetyHaltRecord, StateSyncConfig, TxResult,
 };
 use bit_staking::{CommitVote, ValidatorStatus, COMETBFT_ADDRESS_BYTES};
 use bit_state::{ByzantineEvidence, ByzantineEvidenceKind, GenesisConfig, PersistentState};
@@ -347,7 +347,11 @@ impl AbciApplication {
             .enable_all()
             .build()
             .map_err(|_| CoreError::InvalidConfig("failed to create ABCI runtime"))?;
-        let core = runtime.block_on(ApplicationCore::open(active_path.clone(), genesis.clone()))?;
+        let core = runtime.block_on(ApplicationCore::open_with_artifact_archive(
+            active_path.clone(),
+            artifact_archive_path(&state_path),
+            genesis.clone(),
+        ))?;
         if let Some(marker) = marker.as_ref() {
             let summary = runtime.block_on(core.state_summary())?;
             validate_active_summary(marker, &summary, &genesis)?;

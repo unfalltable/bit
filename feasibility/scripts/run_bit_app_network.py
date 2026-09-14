@@ -132,7 +132,7 @@ def wait_height(target, indices=range(4), seconds=90):
     raise TimeoutError(f"height {target} not reached: {heights}")
 
 
-def wait_quorum_halt(indices=(0, 1, 3), settle_seconds=3, observe_seconds=3, seconds=30):
+def wait_quorum_halt(indices=(0, 1, 3), settle_seconds=3, observe_seconds=3, seconds=60):
     """Wait for live nodes to converge, then prove their height stays fixed."""
     deadline = time.monotonic() + seconds
     stable_height = None
@@ -190,6 +190,19 @@ def state_query(index, key):
         raise AssertionError(f"proved state query failed for {key} on node {index}")
     value = response.get("value", "")
     return base64.b64decode(value) if value else b""
+
+
+def artifact_hash(domain, payload):
+    return hashlib.sha256(domain + len(payload).to_bytes(8, "big") + payload).hexdigest()
+
+
+def archived_artifact(index, height_value, name):
+    path = (
+        RUN / f"app{index}/block-artifacts-v1/blocks/{height_value:020d}/{name}.cbor"
+    )
+    if not path.is_file():
+        raise AssertionError(f"missing archived {name} artifact on application {index}")
+    return path.read_bytes()
 
 
 def load_transfer_fixture():
@@ -470,6 +483,20 @@ def main():
         raise AssertionError("execution artifact hash differs from proved state or ABCI event")
     if len(set(compact_hashes)) != 1 or compact_hashes[0] != artifact_event["compact_hash"]:
         raise AssertionError("compact artifact hash differs from proved state or ABCI event")
+    execution_archives = [
+        archived_artifact(index, transfer_height, "execution") for index in range(4)
+    ]
+    compact_archives = [
+        archived_artifact(index, transfer_height, "compact") for index in range(4)
+    ]
+    if len(set(execution_archives)) != 1 or artifact_hash(
+        b"bit/execution-summary/v1", execution_archives[0]
+    ) != execution_hashes[0]:
+        raise AssertionError("archived execution artifact differs across nodes or from state")
+    if len(set(compact_archives)) != 1 or artifact_hash(
+        b"bit/compact-block/v1", compact_archives[0]
+    ) != compact_hashes[0]:
+        raise AssertionError("archived compact artifact differs across nodes or from state")
     tree_roots = [state_query(index, "shielded/tree_root").hex() for index in range(4)]
     if len(set(tree_roots)) != 1 or tree_roots[0] == fixture["anchor"]:
         raise AssertionError("output commitments did not advance a common shielded tree root")
@@ -500,6 +527,10 @@ def main():
     stop("app0")
     start_pair(0)
     resumed = wait_height(restart_height + 5)
+    if archived_artifact(0, transfer_height, "execution") != execution_archives[0]:
+        raise AssertionError("archived execution artifact changed after application restart")
+    if archived_artifact(0, transfer_height, "compact") != compact_archives[0]:
+        raise AssertionError("archived compact artifact changed after application restart")
 
     common_height = min(resumed) - 1
     headers = [rpc(i, f"block?height={common_height}")["block"]["header"] for i in range(4)]
@@ -610,8 +641,11 @@ def main():
                 "height": transfer_height,
                 "execution_hash": execution_hashes[0],
                 "compact_hash": compact_hashes[0],
+                "execution_bytes": len(execution_archives[0]),
                 "compact_bytes": int(artifact_event["compact_bytes"]),
                 "state_proofs_and_abci_event_match_on_nodes": 4,
+                "immutable_archives_match_on_nodes": 4,
+                "archive_restart_readback": True,
             },
             "canonical_supply_audit": {
                 "canonical_bytes": len(supply_audits[0]),

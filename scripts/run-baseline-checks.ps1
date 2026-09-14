@@ -123,6 +123,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'crates/bit-app/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/abci.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\abci.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'crates/bit-app/src/artifact_archive.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\artifact_archive.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/artifacts.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\artifacts.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/safety.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\safety.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/src/state_sync.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\state_sync.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },

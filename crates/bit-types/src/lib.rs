@@ -17,6 +17,7 @@ pub use block::{
     block_artifact_hash, AcceptedExecution, ActivationResult, BlockEvent, CompactBlock,
     CompactTransaction, ExecutionResult, ExecutionSummary, ValidatorPowerRecord,
     ValidatorRewardRecord, COMPACT_BLOCK_DOMAIN, EXECUTION_SUMMARY_DOMAIN,
+    MAX_BLOCK_ARTIFACT_BYTES,
 };
 pub use envelope::{ed25519_authorization_message, Authorization, Envelope, Role};
 pub use policy::{quota, scheduled_issuance, MonetaryPolicy};

@@ -63,7 +63,6 @@ warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/g
 ad-proving-keys' feature to obtain key files
 warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/nullifier_derivation_pk.bin enable '
 download-proving-keys' feature to obtain key files
-    Checking bit-types v0.1.0 (D:\others\BIT\crates\bit-types)
 warning: function `pick_connection_version` is never used
  --> feasibility\upstream\penumbra\crates\core\component\ibc\src\version.rs:4:8
   |
@@ -103,9 +102,4 @@ warning: function `previous` is never used
 
 warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo clippy --fix --lib -p penumbra-sdk-shielde
 d-pool -- -D warnings` to apply 1 suggestion)
-    Checking bit-emission v0.1.0 (D:\others\BIT\crates\bit-emission)
-    Checking bit-transaction v0.1.0 (D:\others\BIT\crates\bit-transaction)
-    Checking bit-staking v0.1.0 (D:\others\BIT\crates\bit-staking)
-    Checking bit-state v0.1.0 (D:\others\BIT\crates\bit-state)
-    Checking bit-app v0.1.0 (D:\others\BIT\crates\bit-app)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.75s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 14.83s

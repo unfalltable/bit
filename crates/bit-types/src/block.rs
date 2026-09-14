@@ -9,7 +9,7 @@ const MAX_TRANSACTIONS: usize = 100_000;
 const MAX_EVENTS: usize = 100_000;
 const MAX_EVENT_ITEMS: usize = 100_000;
 const MAX_OUTPUT_BODY_BYTES: usize = 8_192;
-const MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_BLOCK_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
 
 pub type Hash32 = [u8; 32];
 
@@ -154,7 +154,7 @@ impl ExecutionSummary {
         }
         encode_events(&mut writer, &self.events)?;
         let bytes = writer.finish();
-        if bytes.len() > MAX_ARTIFACT_BYTES {
+        if bytes.len() > MAX_BLOCK_ARTIFACT_BYTES {
             return Err(Error::InvalidBlockArtifact(
                 "execution summary is too large",
             ));
@@ -163,7 +163,7 @@ impl ExecutionSummary {
     }
 
     pub fn decode_canonical(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() > MAX_ARTIFACT_BYTES {
+        if bytes.len() > MAX_BLOCK_ARTIFACT_BYTES {
             return Err(Error::InvalidBlockArtifact(
                 "execution summary is too large",
             ));
@@ -261,14 +261,14 @@ impl CompactBlock {
         }
         encode_events(&mut writer, &self.events)?;
         let bytes = writer.finish();
-        if bytes.len() > MAX_ARTIFACT_BYTES {
+        if bytes.len() > MAX_BLOCK_ARTIFACT_BYTES {
             return Err(Error::InvalidBlockArtifact("compact block is too large"));
         }
         Ok(bytes)
     }
 
     pub fn decode_canonical(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() > MAX_ARTIFACT_BYTES {
+        if bytes.len() > MAX_BLOCK_ARTIFACT_BYTES {
             return Err(Error::InvalidBlockArtifact("compact block is too large"));
         }
         let mut cursor = Cursor::new(bytes);
