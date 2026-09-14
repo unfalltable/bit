@@ -1,6 +1,6 @@
 # BIT D-007 原生质押设计
 
-状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；实际签名 score、在线率窗口、自动奖励、CometBFT ValidatorUpdates、H/H+1/H+2 实际集合核验和最后有效验证者保护已实现。不包含 D-008 的退出与处罚实现。
+状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；实际签名 score、在线率窗口、自动奖励、增量候选索引、CometBFT ValidatorUpdates、H/H+1/H+2 实际集合核验和最后有效验证者保护已实现。不包含 D-008 的退出与处罚实现。
 
 ## 1. 唯一身份与对象
 
@@ -29,7 +29,7 @@ S' = S + minted
 
 持仓价值为 `floor(shares*P/S)`。部分销毁按同一比例，销毁池内最后全部份额时领取所有剩余 P，整数舍入留在原池且不会形成永久残余。奖励只允许加入已有份额的池，settled epoch 必须单调增加。
 
-候选资格要求状态为 Candidate 或 Active、接受委托且活动 self-bond 的当前池价值达到最低值。候选按池资产降序、validator_id 字节升序排列，截取参考上限 64。投票权为 `floor(P/power_unit_atomic)`，默认单位 1 BIT；单项及选中总和均检查不超过 `2^60-1`，不使用浮点或临时缩放。
+候选资格要求状态为 Candidate 或 Active、接受委托且活动 self-bond 的当前池价值达到最低值。候选按池资产降序、validator_id 字节升序排列，截取参考上限 64。该排序已由逐验证人的持久化索引维护，只有池余额、self-bond、停用和 jail 等资格变化才增量替换对应记录；重启时从 schema v12 记录恢复并逐项核对原始 validator、pool 和 position，索引缺失、重复或 stake 过期都会拒绝打开状态。投票权为 `floor(P/power_unit_atomic)`，默认单位 1 BIT；单项及选中总和均检查不超过 `2^60-1`，不使用浮点或临时缩放。
 
 质押逻辑集合转换为 CometBFT 实际集合后，按 power 降序、20 字节共识地址升序形成唯一规范顺序，并使用固定 Tendermint 0.40.4 实现计算集合哈希。已提交高度 H 的 schema v11 状态保存 H/H+1/H+2 三个集合；H 请求必须携带 H+1 哈希，H 返回的更新只应用到 H+2。H>1 的 last commit 必须与 H-1 集合逐项匹配地址、power 和顺序，不能用当前候选集合替代历史实际集合。
 
@@ -47,7 +47,7 @@ S' = S + minted
 
 ## 5. 本阶段验证
 
-schema v11 为 parameters、validator、pool、position、capacity 和三高度实际集合日程分别定义版本化、定长整数、大端序的持久化编码；parameters v3 固定在线率、jail、佣金通知和证据窗口参数，validator v5 记录完整公开元数据、sequence、累计佣金、压缩签名窗口、当前 epoch score、待生效变更、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、非零 bit padding、签名计数不符、尾随字节、非法 Amount、非法 UTF-8、不符合定长规则的收据、非规范集合顺序和缓存哈希不匹配。
+schema v12 为 parameters、validator、pool、position、capacity、候选索引和三高度实际集合日程分别定义版本化、定长整数、大端序的持久化编码；parameters v3 固定在线率、jail、佣金通知和证据窗口参数，validator v5 记录完整公开元数据、sequence、累计佣金、压缩签名窗口、当前 epoch score、待生效变更、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、非零 bit padding、签名计数不符、尾随字节、非法 Amount、非法 UTF-8、不符合定长规则的收据、非规范集合顺序、缓存哈希和候选 stake 不匹配。
 
 交易层现已对 RegisterValidator、Delegate、CancelPending、UpdateValidator、UnjailValidator、RotateConsensusKey 和 ClaimCommission 验证独立角色域的 Ed25519 签名。注册与轮换的 consensus-pop 域和 operator 域分离，所有既有验证人动作都从当前状态解析 operator 与精确 sequence。七类动作与 Spend/Output 证明、Spend 授权、最低费和公开 lock/release 一起进入同一个 binding equation。应用核心的 CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都通过统一动作调度进入该执行器。
 
@@ -65,6 +65,5 @@ ABCI PrepareProposal、ProcessProposal 和 FinalizeBlock 使用请求中的规�
 
 ## 6. 完成 D-007 还需要
 
-1. 实现增量候选索引，避免边界扫描全部历史验证人。
-2. 进入 D-008 退出 cohort、ticket、证据去重与 SlashJob。
-3. 在正式节点命令和生产摘要完成后，把真实质押交易加入多节点崩溃重放。
+1. 增量候选索引已经实现并进入 JMT；下一步进入 D-008 退出 cohort、ticket、证据去重与 SlashJob。
+2. 在正式节点命令和生产摘要完成后，把真实质押交易加入多节点崩溃重放。

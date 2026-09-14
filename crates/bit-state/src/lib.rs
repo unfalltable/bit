@@ -9,9 +9,9 @@ use bit_emission::{
     completed_epochs_after_height, FeeClass, FeePolicy, GenesisAllocation, SupplyAudit, SupplyState,
 };
 use bit_staking::{
-    ActivationCapacityRecord, ActivationOutcome, CommitVote, ConsensusPowerUpdate,
-    EffectiveValidatorSet, PositionStatus, StakePool, StakePosition, StakingBook,
-    StakingParameters, StakingTotals, Validator, ValidatorPower, ValidatorReward,
+    ActivationCapacityRecord, ActivationOutcome, CandidateIndexEntry, CommitVote,
+    ConsensusPowerUpdate, EffectiveValidatorSet, PositionStatus, StakePool, StakePosition,
+    StakingBook, StakingParameters, StakingTotals, Validator, ValidatorPower, ValidatorReward,
     ValidatorSetTransition, ValidatorUpdate,
 };
 use bit_transaction::{
@@ -35,7 +35,7 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 11;
+const STORAGE_SCHEMA_VERSION: u32 = 12;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -76,6 +76,7 @@ const STAKING_VALIDATOR_PREFIX: &str = "staking/validators/";
 const STAKING_POOL_PREFIX: &str = "staking/pools/";
 const STAKING_POSITION_PREFIX: &str = "staking/positions/";
 const STAKING_CAPACITY_PREFIX: &str = "staking/capacity/";
+const STAKING_CANDIDATE_PREFIX: &str = "staking/candidates/";
 const STAKING_EFFECTIVE_SCHEDULE: &str = "staking/effective_schedule";
 
 const SUBSTORES: &[&str] = &[
@@ -2048,6 +2049,12 @@ fn write_staking_genesis(delta: &mut StateDelta<Snapshot>, staking: &StakingBook
             capacity.encode_persistent(),
         );
     }
+    for candidate in staking.candidate_records() {
+        delta.put_raw(
+            staking_candidate_key(&candidate.validator_id),
+            candidate.encode_persistent(),
+        );
+    }
     Ok(())
 }
 
@@ -2079,6 +2086,16 @@ fn write_staking_updates(
             Error::CorruptState("touched activation capacity is missing".to_owned())
         })?;
         delta.put_raw(staking_capacity_key(*epoch), capacity.encode_persistent());
+    }
+    let candidate_ids: BTreeSet<Hash32> =
+        touches.validators.union(&touches.pools).copied().collect();
+    for id in candidate_ids {
+        let key = staking_candidate_key(&id);
+        if let Some(candidate) = staking.candidate_record(&id) {
+            delta.put_raw(key, candidate.encode_persistent());
+        } else {
+            delta.delete(key);
+        }
     }
     Ok(())
 }
@@ -2139,6 +2156,14 @@ async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result
         }
         capacity.push(record);
     }
+    let mut candidate_index = Vec::new();
+    let mut candidate_stream = snapshot.prefix_raw(STAKING_CANDIDATE_PREFIX);
+    while let Some(entry) = candidate_stream.next().await {
+        let (key, value) = entry?;
+        let candidate = CandidateIndexEntry::decode_persistent(&value)?;
+        require_hash_key(&key, STAKING_CANDIDATE_PREFIX, &candidate.validator_id)?;
+        candidate_index.push(candidate);
+    }
     Ok(StakingBook::from_records(
         chain_context,
         parameters,
@@ -2146,6 +2171,7 @@ async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result
         pools,
         positions,
         capacity,
+        candidate_index,
     )?)
 }
 
@@ -2192,6 +2218,10 @@ pub fn staking_position_key(id: &Hash32) -> String {
 
 pub fn staking_capacity_key(epoch: u64) -> String {
     format!("{STAKING_CAPACITY_PREFIX}{epoch:016x}")
+}
+
+pub fn staking_candidate_key(id: &Hash32) -> String {
+    hash_key("staking/candidates", id)
 }
 
 async fn read_fee_policy(snapshot: &Snapshot) -> Result<FeePolicy> {
@@ -2685,6 +2715,7 @@ mod tests {
                     StakingParameters::reference_testnet(),
                     [validator],
                     [pool],
+                    [],
                     [],
                     [],
                 )
@@ -3472,6 +3503,20 @@ mod tests {
         .unwrap();
         assert_eq!(stored_position.status, PositionStatus::Active);
         position_proof.verify().unwrap();
+        let candidate_proof = state
+            .query_latest_with_proof(&staking_candidate_key(&validator))
+            .await
+            .unwrap();
+        let stored_candidate = CandidateIndexEntry::decode_persistent(
+            candidate_proof
+                .value
+                .as_deref()
+                .expect("candidate index entry must exist"),
+        )
+        .unwrap();
+        assert_eq!(stored_candidate.validator_id, validator);
+        assert_eq!(stored_candidate.stake, deposit);
+        candidate_proof.verify().unwrap();
         state.close().await;
 
         let reopened = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
@@ -3512,7 +3557,9 @@ mod tests {
             .await
             .err()
             .expect("tampered staking pool must be rejected");
-        assert!(error.to_string().contains("P supply container"));
+        assert!(error
+            .to_string()
+            .contains("candidate index is inconsistent"));
     }
 
     #[tokio::test]

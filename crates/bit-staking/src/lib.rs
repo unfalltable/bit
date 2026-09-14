@@ -7,7 +7,10 @@
 use bit_types::{position_id, validator_id, Amount};
 use primitive_types::U256;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet, VecDeque},
+};
 use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
@@ -1005,6 +1008,53 @@ pub struct ValidatorPower {
     pub power: u64,
 }
 
+/// One durable candidate ranking record. Iteration order is stake descending,
+/// then validator identifier ascending, matching the consensus selection rule.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CandidateIndexEntry {
+    pub validator_id: Hash32,
+    pub stake: Amount,
+}
+
+impl Ord for CandidateIndexEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .stake
+            .cmp(&self.stake)
+            .then_with(|| self.validator_id.cmp(&other.validator_id))
+    }
+}
+
+impl PartialOrd for CandidateIndexEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl CandidateIndexEntry {
+    pub fn encode_persistent(&self) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.u8(1);
+        writer.hash32(&self.validator_id);
+        writer.amount(self.stake);
+        writer.finish()
+    }
+
+    pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(bytes);
+        reader.version(1)?;
+        let entry = Self {
+            validator_id: reader.hash32()?,
+            stake: reader.amount()?,
+        };
+        reader.finish()?;
+        if entry.stake == Amount::ZERO {
+            return Err(Error::InvalidEncoding("candidate stake is zero"));
+        }
+        Ok(entry)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StakingTotals {
     pub pooled_assets: Amount,
@@ -1021,6 +1071,8 @@ pub struct StakingBook {
     pools: BTreeMap<Hash32, StakePool>,
     positions: BTreeMap<Hash32, StakePosition>,
     capacity: BTreeMap<u64, CapacityLedger>,
+    candidate_index: BTreeSet<CandidateIndexEntry>,
+    candidate_lookup: BTreeMap<Hash32, CandidateIndexEntry>,
 }
 
 impl StakingBook {
@@ -1046,6 +1098,8 @@ impl StakingBook {
             pools: BTreeMap::new(),
             positions: BTreeMap::new(),
             capacity: BTreeMap::new(),
+            candidate_index: BTreeSet::new(),
+            candidate_lookup: BTreeMap::new(),
         })
     }
 
@@ -1064,6 +1118,7 @@ impl StakingBook {
         pools: impl IntoIterator<Item = StakePool>,
         positions: impl IntoIterator<Item = StakePosition>,
         capacity: impl IntoIterator<Item = ActivationCapacityRecord>,
+        candidate_index: impl IntoIterator<Item = CandidateIndexEntry>,
     ) -> Result<Self> {
         parameters.validate()?;
         let mut book = Self {
@@ -1073,6 +1128,8 @@ impl StakingBook {
             pools: BTreeMap::new(),
             positions: BTreeMap::new(),
             capacity: BTreeMap::new(),
+            candidate_index: BTreeSet::new(),
+            candidate_lookup: BTreeMap::new(),
         };
         for validator in validators {
             let id = validator.validator_id;
@@ -1106,6 +1163,19 @@ impl StakingBook {
                 return Err(Error::InvalidEncoding("duplicate capacity record"));
             }
         }
+        for entry in candidate_index {
+            if entry.stake == Amount::ZERO {
+                return Err(Error::InvalidEncoding("candidate stake is zero"));
+            }
+            if book
+                .candidate_lookup
+                .insert(entry.validator_id, entry)
+                .is_some()
+                || !book.candidate_index.insert(entry)
+            {
+                return Err(Error::InvalidEncoding("duplicate candidate index record"));
+            }
+        }
         book.validate()?;
         Ok(book)
     }
@@ -1130,6 +1200,14 @@ impl StakingBook {
                 accepted: ledger.accepted,
                 canceled_before_processing: ledger.canceled_before_processing,
             })
+    }
+
+    pub fn candidate_records(&self) -> impl Iterator<Item = CandidateIndexEntry> + '_ {
+        self.candidate_index.iter().copied()
+    }
+
+    pub fn candidate_record(&self, id: &Hash32) -> Option<CandidateIndexEntry> {
+        self.candidate_lookup.get(id).copied()
     }
 
     pub fn validator(&self, id: &Hash32) -> Option<&Validator> {
@@ -1257,6 +1335,7 @@ impl StakingBook {
                 },
             );
             next.pools.insert(id, StakePool::empty(id));
+            next.refresh_candidate_index(&id)?;
             Ok(())
         })
     }
@@ -1368,6 +1447,7 @@ impl StakingBook {
                 return Err(Error::EmptyValidatorUpdate);
             }
             validator.sequence = validator.sequence.checked_add(1).ok_or(Error::Overflow)?;
+            next.refresh_candidate_index(id)?;
             Ok(())
         })
     }
@@ -1393,6 +1473,7 @@ impl StakingBook {
             validator.voting_power = 0;
             validator.jailed_at_height = Some(current_height);
             validator.jailed_at_time_seconds = Some(current_time_seconds);
+            next.refresh_candidate_index(id)?;
             Ok(())
         })
     }
@@ -1439,6 +1520,7 @@ impl StakingBook {
             validator.jailed_at_height = None;
             validator.jailed_at_time_seconds = None;
             validator.sequence = validator.sequence.checked_add(1).ok_or(Error::Overflow)?;
+            next.refresh_candidate_index(id)?;
             Ok(())
         })
     }
@@ -1605,6 +1687,9 @@ impl StakingBook {
                     pool.credit_rewards(Amount::ZERO, settled_epoch)?;
                 }
             }
+            for id in &rewarded {
+                next.refresh_candidate_index(id)?;
+            }
             Ok(rewards)
         })
     }
@@ -1637,6 +1722,7 @@ impl StakingBook {
             let mut observed_validators = BTreeSet::new();
             let mut total_power = 0u64;
             let mut updates = Vec::new();
+            let mut candidate_changes = BTreeSet::new();
             for vote in votes {
                 if vote.power == 0 || vote.power > next.parameters.max_total_voting_power {
                     return Err(Error::InvalidCommitVotingPower);
@@ -1707,11 +1793,15 @@ impl StakingBook {
                     validator.voting_power = 0;
                     validator.jailed_at_height = Some(observed_at_height);
                     validator.jailed_at_time_seconds = Some(observed_at_time_seconds);
+                    candidate_changes.insert(validator_id);
                     updates.push(ConsensusPowerUpdate {
                         consensus_pubkey: validator.consensus_pubkey,
                         power: 0,
                     });
                 }
+            }
+            for id in &candidate_changes {
+                next.refresh_candidate_index(id)?;
             }
             Ok(LastCommitOutcome {
                 observed_validators,
@@ -1989,14 +2079,16 @@ impl StakingBook {
                 .self_bond_positions
                 .insert(*id);
         }
+        self.refresh_candidate_index(&validator_id)?;
         Ok(ActivationOutcome::Activated { minted_shares })
     }
 
     fn mark_refundable(&mut self, id: &Hash32) -> Result<()> {
         let position = self.positions.get_mut(id).ok_or(Error::PositionNotFound)?;
+        let validator_id = position.validator_id;
         let pool = self
             .pools
-            .get_mut(&position.validator_id)
+            .get_mut(&validator_id)
             .ok_or(Error::Invariant("validator pool missing"))?;
         pool.pending_total =
             checked_sub(pool.pending_total, position.pending_amount, "pending pool")?;
@@ -2004,6 +2096,7 @@ impl StakingBook {
         // container, but is no longer queued against an individual pool.
         position.status = PositionStatus::RefundablePending;
         position.sequence = position.sequence.checked_add(1).ok_or(Error::Overflow)?;
+        self.refresh_candidate_index(&validator_id)?;
         Ok(())
     }
 
@@ -2071,21 +2164,27 @@ impl StakingBook {
     }
 
     pub fn candidate_set(&self) -> Result<Vec<ValidatorPower>> {
-        let mut candidates = Vec::new();
-        for (id, validator) in &self.validators {
-            if !validator.accepts_delegation
-                || !validator.status.may_receive_delegation()
-                || !self.has_minimum_self_bond(id)?
-            {
-                continue;
-            }
+        let mut candidates = Vec::with_capacity(usize::from(self.parameters.max_validators));
+        for entry in self
+            .candidate_index
+            .iter()
+            .take(usize::from(self.parameters.max_validators))
+        {
+            let id = &entry.validator_id;
+            let validator = self
+                .validators
+                .get(id)
+                .ok_or(Error::Invariant("candidate validator missing"))?;
             let pool = self
                 .pools
                 .get(id)
                 .ok_or(Error::Invariant("validator pool missing"))?;
+            if pool.assets != entry.stake {
+                return Err(Error::Invariant("candidate index stake is stale"));
+            }
             let power = self.power_for_assets(pool.assets)?;
             if power == 0 {
-                continue;
+                return Err(Error::Invariant("candidate index has zero voting power"));
             }
             candidates.push(ValidatorPower {
                 validator_id: *id,
@@ -2094,13 +2193,6 @@ impl StakingBook {
                 power,
             });
         }
-        candidates.sort_by(|left, right| {
-            right
-                .stake
-                .cmp(&left.stake)
-                .then_with(|| left.validator_id.cmp(&right.validator_id))
-        });
-        candidates.truncate(usize::from(self.parameters.max_validators));
         let total = candidates.iter().try_fold(0u64, |sum, candidate| {
             sum.checked_add(candidate.power).ok_or(Error::Overflow)
         })?;
@@ -2414,8 +2506,56 @@ impl StakingBook {
                 ));
             }
         }
+        let mut expected_index = BTreeSet::new();
+        let mut expected_lookup = BTreeMap::new();
+        for id in self.validators.keys() {
+            if let Some(entry) = self.derive_candidate_entry(id)? {
+                expected_index.insert(entry);
+                expected_lookup.insert(*id, entry);
+            }
+        }
+        if self.candidate_index != expected_index || self.candidate_lookup != expected_lookup {
+            return Err(Error::Invariant("candidate index is inconsistent"));
+        }
         let _ = self.totals()?;
         let _ = self.candidate_set()?;
+        Ok(())
+    }
+
+    fn derive_candidate_entry(&self, id: &Hash32) -> Result<Option<CandidateIndexEntry>> {
+        let validator = self.validators.get(id).ok_or(Error::ValidatorNotFound)?;
+        if !validator.accepts_delegation
+            || !validator.status.may_receive_delegation()
+            || !self.has_minimum_self_bond(id)?
+        {
+            return Ok(None);
+        }
+        let pool = self
+            .pools
+            .get(id)
+            .ok_or(Error::Invariant("validator pool missing"))?;
+        if self.power_for_assets(pool.assets)? == 0 {
+            return Ok(None);
+        }
+        Ok(Some(CandidateIndexEntry {
+            validator_id: *id,
+            stake: pool.assets,
+        }))
+    }
+
+    fn refresh_candidate_index(&mut self, id: &Hash32) -> Result<()> {
+        if let Some(previous) = self.candidate_lookup.remove(id) {
+            if !self.candidate_index.remove(&previous) {
+                return Err(Error::Invariant("candidate index lookup is inconsistent"));
+            }
+        }
+        if let Some(entry) = self.derive_candidate_entry(id)? {
+            if self.candidate_lookup.insert(*id, entry).is_some()
+                || !self.candidate_index.insert(entry)
+            {
+                return Err(Error::Invariant("candidate index contains a duplicate"));
+            }
+        }
         Ok(())
     }
 
@@ -3141,6 +3281,7 @@ mod tests {
             validators.push(validator);
         }
         let selected = book.candidate_set().unwrap();
+        assert_eq!(book.candidate_records().count(), 3);
         let mut sorted_ids = validators.clone();
         sorted_ids.sort();
         assert_eq!(
@@ -3158,6 +3299,49 @@ mod tests {
                 .filter(|validator| validator.status == ValidatorStatus::Active)
                 .count(),
             2
+        );
+        let first = selected[0].validator_id;
+        book.update_validator(
+            &first,
+            0,
+            1,
+            10,
+            10,
+            ValidatorUpdate {
+                request_disable: Some(true),
+                ..ValidatorUpdate::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(book.candidate_record(&first), None);
+        assert!(!book
+            .candidate_set()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.validator_id == first));
+        book.update_validator(
+            &first,
+            1,
+            1,
+            11,
+            11,
+            ValidatorUpdate {
+                request_disable: Some(false),
+                ..ValidatorUpdate::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            book.candidate_record(&first).unwrap().stake,
+            amount(TESTNET_MIN_SELF_BOND_ATOMIC)
+        );
+        let zero_candidate = CandidateIndexEntry {
+            validator_id: first,
+            stake: Amount::ZERO,
+        };
+        assert_eq!(
+            CandidateIndexEntry::decode_persistent(&zero_candidate.encode_persistent()),
+            Err(Error::InvalidEncoding("candidate stake is zero"))
         );
         book.parameters.max_total_voting_power = 1;
         assert_eq!(book.candidate_set(), Err(Error::VotingPowerExceeded));
@@ -3222,6 +3406,12 @@ mod tests {
                 ActivationCapacityRecord::decode_persistent(&value.encode_persistent()).unwrap()
             })
             .collect();
+        let candidate_index: Vec<_> = book
+            .candidate_records()
+            .map(|value| {
+                CandidateIndexEntry::decode_persistent(&value.encode_persistent()).unwrap()
+            })
+            .collect();
         let rebuilt = StakingBook::from_records(
             book.chain_context(),
             parameters,
@@ -3229,6 +3419,7 @@ mod tests {
             pools,
             positions,
             capacity,
+            candidate_index,
         )
         .unwrap();
         assert_eq!(rebuilt, book);
