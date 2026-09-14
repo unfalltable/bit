@@ -23,7 +23,10 @@ use tendermint_proto::{
 
 const DEFAULT_READ_BUFFER_BYTES: usize = 16 * 1024 * 1024;
 const MAX_READ_BUFFER_BYTES: usize = 64 * 1024 * 1024;
-const USAGE: &str = "usage: bit-node start --bundle BUNDLE_DIR --state-dir STATE_DIR --listen LOOPBACK:PORT [--derived-signatures FILE] [--read-buffer-bytes BYTES]";
+const DEFAULT_STATE_SYNC_INTERVAL_BLOCKS: u64 = 1_000;
+const DEFAULT_STATE_SYNC_KEEP_RECENT: usize = 2;
+const MAX_STATE_SYNC_KEEP_RECENT: usize = 100;
+const USAGE: &str = "usage: bit-node start --bundle BUNDLE_DIR --state-dir STATE_DIR --listen LOOPBACK:PORT [--derived-signatures FILE] [--read-buffer-bytes BYTES] [--state-sync-dir DIR [--state-sync-interval-blocks BLOCKS] [--state-sync-keep-recent COUNT]]";
 
 type NodeResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -34,6 +37,14 @@ struct StartOptions {
     state_dir: PathBuf,
     listen: String,
     read_buffer_bytes: usize,
+    state_sync: Option<NodeStateSyncOptions>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct NodeStateSyncOptions {
+    directory: PathBuf,
+    interval_blocks: u64,
+    keep_recent: usize,
 }
 
 fn main() -> ExitCode {
@@ -53,6 +64,15 @@ fn run(args: Vec<OsString>) -> NodeResult<()> {
     let state_dir = normalized_absolute(&options.state_dir)?;
     let state_safety_path = resolve_path(&state_dir)?;
     require_disjoint(&bundle, &state_safety_path)?;
+    let state_sync_path = options
+        .state_sync
+        .as_ref()
+        .map(|state_sync| resolve_path(&state_sync.directory))
+        .transpose()?;
+    if let Some(path) = state_sync_path.as_ref() {
+        require_disjoint(&bundle, path)?;
+        require_disjoint(&state_safety_path, path)?;
+    }
 
     let runtime = tokio::runtime::Runtime::new()?;
     let verified = runtime.block_on(verify_bundle(&bundle, &options.derived_signatures))?;
@@ -61,7 +81,23 @@ fn run(args: Vec<OsString>) -> NodeResult<()> {
     fs::create_dir_all(&state_dir)?;
     let canonical_state = fs::canonicalize(&state_dir)?;
     require_disjoint(&bundle, &canonical_state)?;
-    let config = abci_config(&verified.init_chain)?;
+    let state_sync = match (options.state_sync, state_sync_path) {
+        (Some(options), Some(_)) => {
+            let directory = normalized_absolute(&options.directory)?;
+            fs::create_dir_all(&directory)?;
+            let canonical_directory = fs::canonicalize(&directory)?;
+            require_disjoint(&bundle, &canonical_directory)?;
+            require_disjoint(&canonical_state, &canonical_directory)?;
+            Some(bit_app::StateSyncConfig {
+                snapshot_directory: directory,
+                keep_recent: options.keep_recent,
+                snapshot_interval_blocks: options.interval_blocks,
+            })
+        }
+        (None, None) => None,
+        _ => return Err(invalid("inconsistent state-sync path resolution")),
+    };
+    let config = abci_config(&verified.init_chain, state_sync)?;
     let app = AbciApplication::open(state_dir, verified.genesis_config, config)?;
     eprintln!(
         "BIT node verified genesis {} / derived {}; listening {}",
@@ -89,6 +125,9 @@ fn parse_start_options(args: &[OsString]) -> NodeResult<StartOptions> {
             "--state-dir",
             "--listen",
             "--read-buffer-bytes",
+            "--state-sync-dir",
+            "--state-sync-interval-blocks",
+            "--state-sync-keep-recent",
         ]
         .contains(&flag)
         {
@@ -121,13 +160,67 @@ fn parse_start_options(args: &[OsString]) -> NodeResult<StartOptions> {
             "--read-buffer-bytes must be between 1 and 67108864",
         ));
     }
+    let state_sync = match options.get("--state-sync-dir") {
+        Some(directory) => {
+            let interval_blocks = optional_decimal(
+                &options,
+                "--state-sync-interval-blocks",
+                DEFAULT_STATE_SYNC_INTERVAL_BLOCKS,
+            )?;
+            let keep_recent = optional_decimal(
+                &options,
+                "--state-sync-keep-recent",
+                DEFAULT_STATE_SYNC_KEEP_RECENT,
+            )?;
+            if interval_blocks == 0 {
+                return Err(invalid(
+                    "--state-sync-interval-blocks must be greater than zero",
+                ));
+            }
+            if keep_recent == 0 || keep_recent > MAX_STATE_SYNC_KEEP_RECENT {
+                return Err(invalid(
+                    "--state-sync-keep-recent must be between 1 and 100",
+                ));
+            }
+            Some(NodeStateSyncOptions {
+                directory: PathBuf::from(directory),
+                interval_blocks,
+                keep_recent,
+            })
+        }
+        None => {
+            if options.contains_key("--state-sync-interval-blocks")
+                || options.contains_key("--state-sync-keep-recent")
+            {
+                return Err(invalid(
+                    "--state-sync-dir is required when state-sync options are provided",
+                ));
+            }
+            None
+        }
+    };
     Ok(StartOptions {
         bundle,
         derived_signatures,
         state_dir,
         listen,
         read_buffer_bytes,
+        state_sync,
     })
+}
+
+fn optional_decimal<T>(options: &BTreeMap<&str, OsString>, flag: &str, default: T) -> NodeResult<T>
+where
+    T: std::str::FromStr,
+{
+    match options.get(flag) {
+        Some(value) => value
+            .to_str()
+            .ok_or_else(|| invalid(format!("{flag} must be UTF-8")))?
+            .parse::<T>()
+            .map_err(|_| invalid(format!("{flag} must be a decimal integer"))),
+        None => Ok(default),
+    }
 }
 
 fn required_path(options: &BTreeMap<&str, OsString>, flag: &str) -> NodeResult<PathBuf> {
@@ -207,7 +300,10 @@ fn require_loopback_listen(listen: &str) -> NodeResult<()> {
     Ok(())
 }
 
-fn abci_config(init: &GenesisInitChain) -> NodeResult<AbciConfig> {
+fn abci_config(
+    init: &GenesisInitChain,
+    state_sync: Option<bit_app::StateSyncConfig>,
+) -> NodeResult<AbciConfig> {
     let validators = init
         .validators
         .iter()
@@ -260,7 +356,7 @@ fn abci_config(init: &GenesisInitChain) -> NodeResult<AbciConfig> {
             initial_height: init.initial_height,
         },
         retain_height: 0,
-        state_sync: None,
+        state_sync,
     })
 }
 
@@ -286,6 +382,7 @@ mod tests {
             PathBuf::from("bundle/derived-signatures.cbor")
         );
         assert_eq!(options.read_buffer_bytes, DEFAULT_READ_BUFFER_BYTES);
+        assert_eq!(options.state_sync, None);
         assert!(parse_start_options(&[
             "start".into(),
             "--bundle".into(),
@@ -296,6 +393,38 @@ mod tests {
         .is_err());
         assert!(require_loopback_listen("127.0.0.1:26658").is_ok());
         assert!(require_loopback_listen("0.0.0.0:26658").is_err());
+        let options = parse_start_options(&[
+            "start".into(),
+            "--bundle".into(),
+            "bundle".into(),
+            "--state-dir".into(),
+            "state".into(),
+            "--listen".into(),
+            "127.0.0.1:26658".into(),
+            "--state-sync-dir".into(),
+            "snapshots".into(),
+        ])
+        .unwrap();
+        assert_eq!(
+            options.state_sync,
+            Some(NodeStateSyncOptions {
+                directory: PathBuf::from("snapshots"),
+                interval_blocks: DEFAULT_STATE_SYNC_INTERVAL_BLOCKS,
+                keep_recent: DEFAULT_STATE_SYNC_KEEP_RECENT,
+            })
+        );
+        assert!(parse_start_options(&[
+            "start".into(),
+            "--bundle".into(),
+            "bundle".into(),
+            "--state-dir".into(),
+            "state".into(),
+            "--listen".into(),
+            "127.0.0.1:26658".into(),
+            "--state-sync-keep-recent".into(),
+            "2".into(),
+        ])
+        .is_err());
     }
 
     #[test]
@@ -318,7 +447,7 @@ mod tests {
             }],
             app_state_json: br#"{"format":"BIT-APP-GENESIS"}"#.to_vec(),
         };
-        let config = abci_config(&init).unwrap();
+        let config = abci_config(&init, None).unwrap();
         let request = config.expected_init_chain;
         assert_eq!(request.chain_id, init.chain_id);
         assert_eq!(request.validators[0].power, 4);

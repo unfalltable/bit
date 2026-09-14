@@ -1,17 +1,17 @@
 {
   "scope": "official bit-node genesis bundle replay, exact InitChain, real CometBFT blocks, proved state, and application restart",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-genesis-node-20260914T225807071555",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-genesis-node-20260914T233829709331",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
     "bit_sha256": "3d067174bf6f3bbd4d45e35f36a10b90eb10a61f7759559401572638dec0662c",
-    "bit_node_sha256": "fcf2d863e1982b210d7240ff6848d46d56f8e5b1073ceb10af733dd97ba387e2"
+    "bit_node_sha256": "6d187d926314b0b38b8908b78a07552c240f5450a18aa7d9f4112ca1773887c4"
   },
   "checks": {
-    "identity_manifest_hash": "b27e059d25b8f7257e804bc0d5b8d3b662b2665dc15addc40ed1eff030daf765",
-    "derived_manifest_hash": "b610431adcf2d4c032915abe56d02604aee9436394d3527fca53b50d4fe8ef12",
-    "genesis_app_hash": "baa249d06d5c636c92c1059e20de6e81500ca6024f64ea1075c4b4af3a30d05a",
+    "identity_manifest_hash": "78de63529bbdef8cccf359df0956d0d037e03fb9fd5051670344df6f4da6b71e",
+    "derived_manifest_hash": "7eab612e0e86c49b32a67502e00cf2efe84f9476225be3f5d174cfddbe1d4960",
+    "genesis_app_hash": "58d178051e195db9b19fa088817eadc0267e064d1458421edb49793ed819c114",
     "identity_approval_count": 2,
     "derived_approval_count": 2,
     "independent_bundle_replay": true,
@@ -29,6 +29,6 @@
     "production service management is outside this smoke test"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T22:58:07.071656+00:00",
-  "finished_at": "2026-09-14T22:58:30.192976+00:00"
+  "started_at": "2026-09-14T23:38:29.709434+00:00",
+  "finished_at": "2026-09-14T23:38:53.884798+00:00"
 }

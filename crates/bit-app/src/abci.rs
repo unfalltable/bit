@@ -356,7 +356,7 @@ impl AbciApplication {
         );
         if let Some(marker) = marker.as_ref() {
             let summary = runtime.block_on(core.state_summary())?;
-            validate_active_summary(marker, &summary, &genesis)?;
+            validate_active_anchor(&runtime, core.as_ref(), marker, &summary, &genesis)?;
         }
         let initialized = runtime.block_on(core.info())?.last_block_height > 0;
         let state_sync = StateSyncManager::new(
@@ -929,11 +929,24 @@ impl Application for AbciApplication {
 
     fn commit(&self) -> ResponseCommit {
         self.ensure_initialized();
-        let _guard = self.execution_guard();
-        match self.inner.runtime.block_on(self.inner.core.commit()) {
-            Ok(_) => ResponseCommit {
-                retain_height: self.inner.config.retain_height,
-            },
+        let committed = {
+            let _guard = self.execution_guard();
+            self.inner.runtime.block_on(self.inner.core.commit())
+        };
+        match committed {
+            Ok(receipt) => {
+                if self.inner.state_sync.should_publish(receipt.state_height) {
+                    if let Err(error) = self.create_state_sync_snapshot() {
+                        eprintln!(
+                            "BIT state-sync snapshot publication failed at height {}: {error}",
+                            receipt.state_height
+                        );
+                    }
+                }
+                ResponseCommit {
+                    retain_height: self.inner.config.retain_height,
+                }
+            }
             Err(error) => self.halt(format!("Commit failed: {error}")),
         }
     }
@@ -1055,6 +1068,48 @@ fn remove_orphan_active_state(path: &Path) -> crate::Result<()> {
             path.display()
         ))),
     }
+}
+
+fn validate_active_anchor(
+    runtime: &tokio::runtime::Runtime,
+    core: &ApplicationCore,
+    marker: &ActiveStateMarker,
+    latest: &bit_state::StateSummary,
+    genesis: &GenesisConfig,
+) -> crate::Result<()> {
+    if marker.chain_context != genesis.chain_context {
+        return Err(CoreError::StateSync(
+            "active state marker belongs to another chain context".to_owned(),
+        ));
+    }
+    if latest.state_height < marker.state_height {
+        return Err(CoreError::StateSync(
+            "active state is behind its durable activation marker".to_owned(),
+        ));
+    }
+
+    let proof = runtime
+        .block_on(core.query_at_height_with_proof("meta/height", marker.state_height))
+        .map_err(|error| {
+            CoreError::StateSync(format!(
+                "cannot verify the durable activation marker at height {}: {error}",
+                marker.state_height
+            ))
+        })?;
+    let expected_height = marker.state_height.to_be_bytes();
+    if proof.storage_version != marker.state_height
+        || proof.app_hash != marker.app_hash
+        || proof.value.as_deref() != Some(expected_height.as_slice())
+    {
+        return Err(CoreError::StateSync(
+            "active state differs from its durable activation marker".to_owned(),
+        ));
+    }
+    proof.verify().map_err(|error| {
+        CoreError::StateSync(format!(
+            "durable activation marker proof verification failed: {error}"
+        ))
+    })
 }
 
 fn block_time_seconds(
@@ -1399,6 +1454,7 @@ mod tests {
                 state_sync: Some(StateSyncConfig {
                     snapshot_directory,
                     keep_recent: 2,
+                    snapshot_interval_blocks: 1,
                 }),
             },
         )
@@ -1675,7 +1731,10 @@ mod tests {
         Application::commit(&source);
         let expected_app_hash = finalized.app_hash.to_vec();
 
+        let automatically_published = Application::list_snapshots(&source).snapshots;
+        assert_eq!(automatically_published.len(), 1);
         let snapshot = source.create_state_sync_snapshot().unwrap();
+        assert_eq!(snapshot, automatically_published[0]);
         assert_eq!(snapshot.height, 1);
         assert_eq!(snapshot.format, crate::STATE_SYNC_SNAPSHOT_FORMAT);
         assert!(snapshot.chunks >= 2);
@@ -1863,6 +1922,30 @@ mod tests {
             Application::info(&target, RequestInfo::default()).last_block_height,
             1
         );
+        Application::finalize_block(
+            &target,
+            RequestFinalizeBlock {
+                hash: vec![10; 32].into(),
+                height: 2,
+                time: Some(Timestamp {
+                    seconds: 1_800_000_002,
+                    nanos: 0,
+                }),
+                decided_last_commit: Some(CommitInfo {
+                    round: 0,
+                    votes: vec![VoteInfo {
+                        validator: Some(Validator {
+                            address: consensus_address(&[7; 32]).to_vec().into(),
+                            power: 1_000,
+                        }),
+                        block_id_flag: BlockIdFlag::Commit as i32,
+                    }],
+                }),
+                next_validators_hash: genesis_next_validators_hash().into(),
+                ..Default::default()
+            },
+        );
+        Application::commit(&target);
         let query = Application::query(
             &target,
             RequestQuery {
@@ -1897,7 +1980,7 @@ mod tests {
             state_sync_application(target_state.clone(), target_snapshots.clone(), 1_000_000);
         assert_eq!(
             Application::info(&reopened, RequestInfo::default()).last_block_height,
-            1
+            2
         );
         assert!(marker.is_file());
         assert!(!temporary_marker.exists());
@@ -1918,6 +2001,7 @@ mod tests {
                 state_sync: Some(StateSyncConfig {
                     snapshot_directory: target_snapshots,
                     keep_recent: 2,
+                    snapshot_interval_blocks: 1_000,
                 }),
             },
         );

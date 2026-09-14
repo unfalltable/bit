@@ -1,6 +1,6 @@
 # BIT D-004 持久化状态设计
 
-状态：`IN_PROGRESS`。可运行状态层已接入 ABCI 和供应会计，并在 Windows 桌面工具链通过测试；本地分块校验快照、ABCI State Sync 传输与隔离激活、重启后精确历史高度证明已实现，跨平台恢复演练和完整故障注入仍待后续实现。
+状态：`IN_PROGRESS`。可运行状态层已接入 ABCI 和供应会计，并在 Windows 桌面工具链通过测试；本地分块校验快照、ABCI State Sync 传输与隔离激活、正式节点周期发布、真实 CometBFT 新节点恢复及重启后精确历史高度证明已实现，跨平台恢复演练和完整故障注入仍待后续实现。
 
 ## 1. 边界与依赖
 
@@ -105,7 +105,9 @@ schema v20 延续 v18 的统一版本证明规则：创世及每个区块给九�
 
 ABCI State Sync 使用固定 format 1。chunk 0 携带规范 manifest，后续 chunk 与 manifest 中的数据库 chunk 一一对应，每块不超过 4 MiB，总数不超过 CometBFT 默认的 100000 上限。`OfferSnapshot` 只在高度零且尚未 InitChain 的空应用上接受请求，并要求快照元数据的高度、数量、snapshot ID、chain context、schema 与本地规则一致，同时要求 manifest 声明的 app hash 等于 CometBFT 从轻客户端状态提供的 `RequestOfferSnapshot.app_hash`。传输会话可乱序落盘；manifest 到达后校验所有已收块，坏块要求重取并返回对应 peer，全部块通过后才重组成普通快照。
 
-恢复继续经过 `import_snapshot` 的文件集、chunk hash、完整配置和状态不变量检查，目标写入由 snapshot ID 派生的独立状态目录。通过后先同步写入带校验和的活动状态标记，再替换进程内状态；重启根据标记选择该目录并再次核对高度、app hash 和 chain context。有效的临时标记会自动完成发布，冲突、损坏或指向不一致状态的标记会拒绝启动。应用状态目录与共识 signer 水位目录没有复用，State Sync 不接触签名状态。D-010 仍需实现独立证人、可信期与检查点更新流程，并用真实 CometBFT 新节点执行联网恢复及断点演练。
+恢复继续经过 `import_snapshot` 的文件集、chunk hash、完整配置和状态不变量检查，目标写入由 snapshot ID 派生的独立状态目录。通过后先同步写入带校验和的活动状态标记，再替换进程内状态；重启根据标记选择该目录。刚激活时标记与数据库摘要精确相等；节点继续提交后，启动会要求当前高度不低于激活高度，并在标记高度重新取得 `meta/height` 的 ICS23 成员证明，核对 storage version、值和标记 app hash。有效的临时标记会自动完成发布，冲突、损坏或历史锚点不一致会拒绝启动。应用状态目录与共识 signer 水位目录没有复用，State Sync 不接触签名状态。
+
+正式 `bit-node` 用 `--state-sync-dir` 启用周期发布，默认每 1000 块生成一次并保留最近 2 份，保留数限制为 1 至 100；快照目录、活动状态目录和 bundle 必须两两隔离。快照生成在 Commit 成功后运行，失败会记录错误且不改变已经提交的共识结果。真实网络由 CometBFT 的两个 RPC 服务器验证可信头，一个指定 P2P 发布者提供物理 checkpoint；`RequestOfferSnapshot.app_hash` 把应用导入结果绑定到该已验证头。D-010 仍需完成签名检查点、可信期过期/更新、中断下载恢复和独立故障域部署。
 
 ## 6. 已验证不变量
 
@@ -119,7 +121,8 @@ ABCI State Sync 使用固定 format 1。chunk 0 携带规范 manifest，后续 c
 - anchor 只在配置窗口内有效；裁剪 anchor 不裁剪 nullifier 或当前状态。
 - 主存储、子存储的 ICS23 成员和非成员证明都能针对最新或精确历史高度返回的 app hash 验证；释放并重启 RocksDB 后仍可重建旧版本证明。
 - 快照导出绑定完整状态摘要和逐 chunk hash；额外文件、非规范清单、错误不可变配置、篡改数据、已有目标或源目录内目标都会在发布前拒绝，合法恢复保持同一 app hash/TCT 根并可继续提交新区块。
-- ABCI State Sync 拒绝错误 format、错误轻客户端 app hash、不同 chain/schema 和超量 chunk；乱序数据可先落盘，manifest 到达后会定位坏块并要求重取。完整恢复保持同一高度、app hash 和 ICS23 proof，活动状态标记支持临时文件崩溃恢复并对损坏保持关闭。
+- ABCI State Sync 拒绝错误 format、错误轻客户端 app hash、不同 chain/schema 和超量 chunk；乱序数据可先落盘，manifest 到达后会定位坏块并要求重取。完整恢复保持同一高度、app hash 和 ICS23 proof，活动状态标记支持临时文件崩溃恢复、同步后继续出块和重启历史锚点复核，并对损坏保持关闭。
+- 三节点真实 CometBFT 验证使用两个一致的 RPC 轻客户端来源和一个指定 P2P 快照发布者；空节点完成发现、下载、激活、追块和重启续块，激活 app hash 与源头一致，导入高度的历史 ICS23 证明在重启后不变。机器报告为 `reports/state-sync-smoke.json`。
 - 真实 2 Spend/2 Output Transfer 使用四份 Groth16 证明、两份 Spend 授权和 binding 签名完成验证、Prepare、RocksDB Commit、重启恢复及重启后的 ICS23 查询；同一 envelope 在下一高度被 tx_id 重放检查拒绝。
 - 创世资产容器必须精确合计为创世供应量；Transfer fee 原子执行 `Q -= fee; F += fee`，总供应量不变，余额不足时交易和供应状态均不变。
 - 创世领取清单哈希与启动配置不可变；领取记录的键、派生 ID、公钥、金额、高度和未领取合计会与供应容器 G 交叉核对。ClaimGenesis 原子执行 `G -= amount; Q += amount-fee; F += fee`，成功后记录领取高度。
@@ -134,4 +137,4 @@ ABCI State Sync 使用固定 format 1。chunk 0 携带规范 manifest，后续 c
 
 ## 7. 后续工作
 
-D-004 仍需完成真实磁盘配额耗尽、操作系统 fsync 失败、数据库文件损坏和版本回退的进程级故障注入；快照跨平台恢复与长期 nullifier、frontier、JMT 历史版本增长测试。D-005 已把同一执行器接到完整 ABCI 生命周期和 State Sync，并完成真实四节点/JMT 重启、真实 Transfer、生产 execution/compact 摘要、精确历史查询及重复投票处罚实验；后续还需执行真实 CometBFT 新节点 State Sync、实现区块产物下载和正式节点命令，并覆盖多节点真实退出。
+D-004 仍需完成真实磁盘配额耗尽、操作系统 fsync 失败、数据库文件损坏和版本回退的进程级故障注入；快照跨平台恢复与长期 nullifier、frontier、JMT 历史版本增长测试。D-005 已把同一执行器接到完整 ABCI 生命周期和 State Sync，并完成真实四节点/JMT 重启、真实 Transfer、生产 execution/compact 摘要、精确历史查询、重复投票处罚及真实 CometBFT 新节点 State Sync；后续还需完成中断同步恢复、正式区块产物服务和多节点真实退出。

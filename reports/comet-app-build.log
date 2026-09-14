@@ -102,4 +102,5 @@ warning: function `previous` is never used
 
 warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo fix --lib -p penumbra-sdk-shielded-pool` t
 o apply 1 suggestion)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s
+   Compiling bit-app v0.1.0 (D:\others\BIT\crates\bit-app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.70s

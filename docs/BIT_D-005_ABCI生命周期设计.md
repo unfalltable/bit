@@ -1,6 +1,6 @@
 # BIT D-005 ABCI 生命周期设计
 
-状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心，并通过真实 Transfer、ClaimGenesis、规范区块摘要、精确历史证明、重启、证据处罚和投票权实验；正式 `bit-node` 已从两阶段批准的创世 bundle 重放状态并完成真实单节点 InitChain、出块、证明和重启。ABCI State Sync 已接入可验证快照、轻客户端可信 app hash 和隔离激活，真实联网 State Sync 仍未完成。
+状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心，并通过真实 Transfer、ClaimGenesis、规范区块摘要、精确历史证明、重启、证据处罚和投票权实验；正式 `bit-node` 已从两阶段批准的创世 bundle 重放状态并完成真实单节点 InitChain、出块、证明和重启。ABCI State Sync 已接入周期快照、轻客户端可信 app hash、隔离激活和真实三节点联网恢复，签名检查点与跨故障域验收仍未完成。
 
 ## 1. 单一执行入口
 
@@ -36,7 +36,7 @@ FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`�
 
 查询路径固定为 `/bit/state/key`。`height=0` 表示最新高度，正高度表示精确的已提交历史高度；负数或高于最新提交的高度返回 `UNSUPPORTED_HEIGHT`，不会使应用停机。`prove=true` 时，应用先在本地验证 Cnidarium 生成的 ICS23 证明，再把每层 commitment proof 编码为 `jmt:v` ProofOp。响应高度和证明根都对应实际查询的状态版本。
 
-本链的 vote extension 默认关闭：`ExtendVote` 始终返回空字节，`VerifyVoteExtension` 只接受空扩展。启用 `StateSyncConfig` 后，应用可显式为最新已提交高度创建并保留有限数量的快照；`ListSnapshots` 按高度倒序发布，`LoadSnapshotChunk` 逐块复核本地文件，`OfferSnapshot` 绑定 CometBFT 轻客户端提供的可信 app hash，`ApplySnapshotChunk` 支持乱序接收、坏块重取和 peer 拒绝。全部 chunk 通过规范 manifest 后，应用在独立目录重组、导入并完整打开状态，随后用耐久活动标记切换；标记临时文件可恢复，损坏或与数据库摘要不一致则拒绝启动。未配置 State Sync 时仍返回无快照或 `REJECT_FORMAT`，已有已提交状态或已执行 InitChain 的应用不会接受远端快照。
+本链的 vote extension 默认关闭：`ExtendVote` 始终返回空字节，`VerifyVoteExtension` 只接受空扩展。启用 `StateSyncConfig` 后，应用在配置间隔的 Commit 成功后自动为最新高度创建快照并保留有限数量，也保留显式创建入口；`ListSnapshots` 按高度倒序发布，`LoadSnapshotChunk` 逐块复核本地文件，`OfferSnapshot` 绑定 CometBFT 轻客户端提供的可信 app hash，`ApplySnapshotChunk` 支持乱序接收、坏块重取和 peer 拒绝。全部 chunk 通过规范 manifest 后，应用在独立目录重组、导入并完整打开状态，随后用耐久活动标记切换；标记临时文件可恢复，损坏或与历史高度的 ICS23 锚点不一致则拒绝启动。未配置 State Sync 时仍返回无快照或 `REJECT_FORMAT`，已有已提交状态或已执行 InitChain 的应用不会接受远端快照。
 
 ## 4. 稳定交易结果代码
 
@@ -52,10 +52,12 @@ ABCI `bit.block.v1` 事件公开高度、两个摘要和 compact 字节数，状
 
 ## 6. 当前验证与下一切片
 
-当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。State Sync 用例在两个独立应用间传输真实 RocksDB checkpoint，覆盖错误 format/app hash、超量 chunk、非空目标拒绝、manifest 延后到达、坏块定位与 peer 拒绝、恢复后的高度/app hash/ICS23 proof、活动标记临时文件恢复和损坏标记拒绝启动。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励，检查返回的 Ed25519 key/power 更新只在 H+2 集合生效且重启后保持一致；错误请求哈希、commit power、缺失 commit、错误地址、非正 power、未知 block-id flag，以及证据的未知类型、缺失字段、非法地址/power/height/time 均被拒绝。
+当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。State Sync 用例在两个独立应用间传输真实 RocksDB checkpoint，覆盖周期自动发布、错误 format/app hash、超量 chunk、非空目标拒绝、manifest 延后到达、坏块定位与 peer 拒绝、恢复后的高度/app hash/ICS23 proof、同步后继续提交、活动标记临时文件恢复、重启历史锚点验证和损坏标记拒绝启动。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励，检查返回的 Ed25519 key/power 更新只在 H+2 集合生效且重启后保持一致；错误请求哈希、commit power、缺失 commit、错误地址、非正 power、未知 block-id flag，以及证据的未知类型、缺失字段、非法地址/power/height/time 均被拒绝。
 
 `comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。测试从两个创世承诺广播一笔冻结的 2 Spend/2 Output Groth16 Transfer，在链继续推进后按 Transfer 的精确高度核对交易/nullifier、TCT 根、供应审计和 execution/compact 状态证明、ABCI 事件及四节点 app hash。随后广播带 Ed25519 领取授权、binding 签名和两个 Groth16 Output 证明的 ClaimGenesis，四节点逐字节核对领取记录与供应容器转换；另一笔密码学有效且 tx id 不同的同领取权交易会到达 BIT CheckTx，并按已领取状态拒绝。应用重启后再次查询 Transfer 和 ClaimGenesis 的旧高度证明。测试还确认奖励更新在 H+2 生效、应用从 durable JMT 状态重启并追块。集成注入器使用隔离网络的临时验证人密钥构造 CometBFT 可验证的冲突 prevote，通过标准 RPC 广播后，四个应用一致执行证据持久化、Burn 和 H+2 验证人移除。处罚后停止一个仍有投票权的验证者，剩余 power 恰为三分之二时链停止，恢复该验证者后继续出块。每次运行的精确高度和哈希写入 `feasibility/reports/bit-app-network-result.json`。
 
 `run-genesis-node-smoke.py` 使用 CometBFT 临时生成的真实 FilePV 共识密钥构造公开测试 identity，完成两阶段 2-of-2 签名、物化和独立重放，再启动正式 `bit-node`。测试要求真实 CometBFT 接受完整 InitChain，区块 1 header 提交物化 app hash，初始验证人 power 为 4，`meta/genesis_manifest_hash` 返回 ICS23 证明；随后成对重启应用和 CometBFT 并继续出块。结果与二进制 SHA-256 写入 `reports/genesis-node-smoke.json`。
 
-ClaimGenesis 已完成四节点真实广播、一次性领取、供应转换和重启后历史证明。下一步把真实退出放进四节点重放及崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人；D-022 继续完成头同步、广播与公网入口。
+`run-state-sync-smoke.py` 使用相同正式 `bit-node` 启动两个源节点和一个全新目标节点。两个 RPC 源在信任高度返回同一块哈希，CometBFT 据此执行轻客户端验证；一个指定 P2P 发布者按 5 块间隔生成应用快照。目标节点发现并激活快照、追上源链，在应用和 CometBFT 成对重启后继续出块，并再次核对导入高度的历史状态值和 ICS23 proof。物理 RocksDB checkpoint 可能因各副本 compaction 布局不同而具有不同字节，因此本轮没有让多个发布者以相同 height/format 混合供块；生产分发需要指定发布者、镜像同一快照，或后续改为规范逻辑快照。结果写入 `reports/state-sync-smoke.json`。
+
+ClaimGenesis 已完成四节点真实广播、一次性领取、供应转换和重启后历史证明，正式节点 State Sync 已完成发现、下载、可信 app hash、隔离激活、追块和重启验证。下一步把真实退出放进四节点重放及崩溃恢复实验。D-010 继续完成签名检查点、可信期过期/更新、中断下载恢复及跨独立故障域来源；D-022 继续完成头同步、广播与公网入口。

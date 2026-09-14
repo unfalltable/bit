@@ -66,6 +66,7 @@ try {
     Invoke-BitCheck 'comet-evidence-build' (Join-Path $bitRoot 'feasibility\.tools\go\bin\go.exe') @('-C', (Join-Path $bitRoot 'feasibility\evidence-injector'), 'build', '-trimpath', '-o', (Join-Path $bitRoot 'feasibility\.tools\bin\bit-evidence-injector.exe'), '.')
     Invoke-BitCheck 'genesis-node-build' 'cargo' @('build', '-p', 'bit-genesis', '--bin', 'bit', '-p', 'bit-app', '--bin', 'bit-node', '--locked')
     Invoke-BitCheck 'genesis-node-smoke' 'py' @('-B', 'scripts/run-genesis-node-smoke.py')
+    Invoke-BitCheck 'state-sync-network' 'py' @('-B', 'scripts/run-state-sync-smoke.py')
     Invoke-BitCheck 'comet-app-build' 'cargo' @('build', '-p', 'bit-app', '--example', 'comet_network_probe', '--locked')
     Invoke-BitCheck 'comet-app-network' 'py' @('-B', 'feasibility/scripts/run_bit_app_network.py')
 } finally {
@@ -97,6 +98,7 @@ $bitReport = [ordered]@{
     upstream_warnings = 'Present in pinned Penumbra dependencies; BIT crates pass clippy -D warnings'
     artifacts = @(
         [ordered]@{ path = 'reports/genesis-node-smoke.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'reports\genesis-node-smoke.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'reports/state-sync-smoke.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'reports\state-sync-smoke.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/reports/bit-app-network-result.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\reports\bit-app-network-result.json') -Algorithm SHA256).Hash.ToLowerInvariant() }
     )
     inputs = @(
@@ -172,6 +174,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'feasibility/scripts/rust_env.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\rust_env.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/bootstrap_tools.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\bootstrap_tools.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'scripts/run-genesis-node-smoke.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'scripts\run-genesis-node-smoke.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'scripts/run-state-sync-smoke.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'scripts\run-state-sync-smoke.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'scripts/run-baseline-checks.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'scripts\run-baseline-checks.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() }
     )
 }

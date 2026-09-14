@@ -1,6 +1,6 @@
 # BIT D-025 CLI 与创世清单
 
-状态：`IN_PROGRESS`。创世公开领取权的共识身份、状态编码、交易执行和证明查询已经实现；identity manifest v1、派生结果 manifest v1、两阶段多方签名包、运行时输入合同、确定性高度零构建器、独立重放校验器、正式节点入口、离线 CLI 与 release preflight 已实现。manifest hash 已绑定高度零状态、chain context 和网关证明；真实外部输入、发布证据合同与生产运维仍待完成。
+状态：`IN_PROGRESS`。创世公开领取权的共识身份、状态编码、交易执行和证明查询已经实现；identity manifest v1、派生结果 manifest v1、两阶段多方签名包、运行时输入合同、确定性高度零构建器、独立重放校验器、正式节点入口、周期 State Sync 快照、离线 CLI 与 release preflight 已实现。manifest hash 已绑定高度零状态、chain context 和网关证明；真实外部输入、发布证据合同与生产运维仍待完成。
 
 ## 1. 哈希依赖顺序
 
@@ -135,7 +135,7 @@ identity 的 `consensus_parameters_sha256` 是这份运行时输入文件原始�
 
 公开 fixture 连续构建两次会得到相同的 app hash、TCT 根、CometBFT genesis 和 derived bytes；黄金结果位于 `tests/vectors/genesis-materialized-vectors.json`。`verify-bundle` 不信任 bundle 内的 RocksDB，而是在新的临时目录从 identity、第一阶段签名和运行时输入重建全部确定性文件，逐字节比较 genesis、derived 和报告，再验证第二阶段签名。输入必须是普通文件/目录，拒绝符号链接、超限文件、缺项、非规范 JSON 和任何重放差异。
 
-`bit-node start` 只接受 bundle、第二阶段签名、独立状态目录和 loopback ABCI 地址。它从已验证结果构造 `GenesisConfig` 和完整 `RequestInitChain`，保留 `genesis.json` 中 CometBFT 实际传递的原始 `app_state` JSON 字节，拒绝本地参数覆盖和 bundle/state 路径重叠。由 Go module v0.38.23 构建的实际 CometBFT 二进制（自报 0.38.22）已完成 InitChain 并连续出块；区块 1 header 的 app hash、初始验证人投票权和 ICS23 manifest 证明均与重放结果一致，应用与 CometBFT 成对重启后继续推进。
+`bit-node start` 只接受 bundle、第二阶段签名、独立状态目录和 loopback ABCI 地址。它从已验证结果构造 `GenesisConfig` 和完整 `RequestInitChain`，保留 `genesis.json` 中 CometBFT 实际传递的原始 `app_state` JSON 字节，拒绝本地参数覆盖和 bundle/state 路径重叠。由 Go module v0.38.23 构建的实际 CometBFT 二进制（自报 0.38.22）已完成 InitChain 并连续出块；区块 1 header 的 app hash、初始验证人投票权和 ICS23 manifest 证明均与重放结果一致，应用与 CometBFT 成对重启后继续推进。可选 `--state-sync-dir` 启用应用快照服务；间隔默认 1000 块、保留默认 2 份，目录与 bundle/state 两两隔离。真实空节点已通过两个 RPC 信任源和一个指定 P2P 快照发布者完成同步、追块和重启。
 
 ## 8. CLI 与 preflight
 
@@ -167,7 +167,9 @@ bit release preflight --input mainnet.json \
   --derived-manifest derived.cbor --derived-signatures derived-approvals.cbor \
   --runtime-inputs runtime-inputs.json --cometbft-genesis genesis.json
 bit-node start --bundle genesis-bundle --state-dir node-state \
-  --listen 127.0.0.1:26658
+  --listen 127.0.0.1:26658 \
+  [--state-sync-dir snapshots \
+   --state-sync-interval-blocks 1000 --state-sync-keep-recent 2]
 ```
 
 identity `inspect` 输出 manifest/policy hash、chain context、四类分配合计，以及派生的 claim、validator 和自质押 position ID。`inspect-runtime` 严格解码运行时合同并输出文件 SHA-256。derived `inspect` 输出两阶段 manifest hash、运行时输入 hash、状态根、app hash 和 CometBFT genesis hash。`verify-bundle` 输出两阶段审批数和已复算的关键哈希。`materialize` 和所有 `build`、`sign` 命令默认拒绝覆盖已有目标；节点未指定 `--derived-signatures` 时只读取 bundle 内的 `derived-signatures.cbor`。

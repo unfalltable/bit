@@ -33,6 +33,7 @@ static SESSION_NONCE: AtomicU64 = AtomicU64::new(0);
 pub struct StateSyncConfig {
     pub snapshot_directory: PathBuf,
     pub keep_recent: usize,
+    pub snapshot_interval_blocks: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -343,6 +344,11 @@ impl StateSyncManager {
                     "state-sync keep_recent must be between 1 and 100",
                 ));
             }
+            if config.snapshot_interval_blocks == 0 {
+                return Err(crate::Error::InvalidConfig(
+                    "state-sync snapshot_interval_blocks must be greater than zero",
+                ));
+            }
             fs::create_dir_all(&config.snapshot_directory).map_err(|error| {
                 state_sync_io(
                     "create state-sync snapshot directory",
@@ -380,6 +386,12 @@ impl StateSyncManager {
 
     pub fn enabled(&self) -> bool {
         self.config.is_some()
+    }
+
+    pub fn should_publish(&self, height: u64) -> bool {
+        self.config
+            .as_ref()
+            .is_some_and(|config| height > 0 && height % config.snapshot_interval_blocks == 0)
     }
 
     pub fn snapshot_destination(&self, height: u64) -> crate::Result<PathBuf> {

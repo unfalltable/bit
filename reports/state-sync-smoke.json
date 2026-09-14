@@ -1,0 +1,60 @@
+{
+  "scope": "official bit-node snapshot publication and real CometBFT State Sync using two RPC trust sources, one P2P snapshot publisher, and one fresh target",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-state-sync-20260914T233854104563",
+  "toolchain": {
+    "cometbft_module": "v0.38.23",
+    "cometbft_self_reported": "0.38.22",
+    "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
+    "bit_sha256": "3d067174bf6f3bbd4d45e35f36a10b90eb10a61f7759559401572638dec0662c",
+    "bit_node_sha256": "6d187d926314b0b38b8908b78a07552c240f5450a18aa7d9f4112ca1773887c4"
+  },
+  "checks": {
+    "identity_manifest_hash": "e98b60d80285e735ad2a65edbd8c2619c3e8fd219d4215f8f3bf73050e388323",
+    "derived_manifest_hash": "87a8607f8431cbd83889630bc86e0f9ca1a9df5f629691b1e319016338ed0a27",
+    "derived_approval_count": 2,
+    "snapshot_interval_blocks": 5,
+    "source_snapshot_heights": {
+      "0": [
+        5,
+        10,
+        15,
+        20,
+        25,
+        30,
+        35,
+        40,
+        45,
+        50,
+        55
+      ]
+    },
+    "initial_published_snapshot_height": 10,
+    "rpc_sources": 2,
+    "snapshot_p2p_sources": 1,
+    "trust_height": 11,
+    "trust_hash": "61dbc82807b2705eae4493d47ada9eb60843c8e41f89a87e797044b2b5269756",
+    "rpc_sources_agreed_on_trust_block": true,
+    "activated_snapshot": {
+      "snapshot_id": "350ce7c09b81c7d415d9a5b4d8440c81aa7df3e66ca1474e3785c171161910a3",
+      "state_height": 25,
+      "app_hash": "16540b6de002cfbe29635b1c34b5aab5f23f72035f071affea156a8cca755377",
+      "chain_context": "880470845bf7d3205652201ade6d817d8a03717cdbda212736b097dcff7f421f"
+    },
+    "state_sync_elapsed_seconds": 21.427872799977195,
+    "target_caught_up_height": 47,
+    "active_app_hash_matches_source_light_block": true,
+    "historical_ics23_value_and_proof_after_restart": true,
+    "restart_height": 47,
+    "resumed_height": 52
+  },
+  "limitations": [
+    "public deterministic genesis fixture and test approval keys",
+    "three CometBFT processes share one physical host and failure domain",
+    "upstream CometBFT FilePV signer rather than an independent BIT signer",
+    "one designated P2P snapshot publisher; both source nodes independently serve the trusted light block",
+    "bad-peer chunk refetch remains covered by the direct ABCI test rather than this live network run"
+  ],
+  "status": "PASS",
+  "started_at": "2026-09-14T23:38:54.104671+00:00",
+  "finished_at": "2026-09-14T23:39:59.746490+00:00"
+}
