@@ -5,6 +5,8 @@ At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
     + CategoryInfo          : NotSpecified: (test_all_emissi..._points) ... ok:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
 
+test_empty_block_artifact_encoding_and_domain_hashes (test_protocol_oracle.ProtocolOracleTests.test_empty_block_artifac
+t_encoding_and_domain_hashes) ... ok
 test_policy_bytes_and_hash (test_protocol_oracle.ProtocolOracleTests.test_policy_bytes_and_hash) ... ok
 test_reference_config_keeps_mainnet_unapproved (test_protocol_oracle.ProtocolOracleTests.test_reference_config_keeps_ma
 innet_unapproved) ... ok
@@ -12,6 +14,6 @@ test_transaction_body_effect_and_envelope (test_protocol_oracle.ProtocolOracleTe
 velope) ... ok
 
 ----------------------------------------------------------------------
-Ran 4 tests in 0.002s
+Ran 5 tests in 0.004s
 
 OK

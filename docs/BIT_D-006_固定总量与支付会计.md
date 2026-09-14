@@ -78,7 +78,7 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 ## 6. 完成 D-006 还需要
 
-1. 四节点空块向量已验证 H/H+1/H+2 实际集合、last commit power、请求哈希和奖励后投票权；下一步加入真实 Transfer 与费用池变化。
+1. 四节点实验已验证 H/H+1/H+2 实际集合、last commit power、请求哈希、奖励后投票权，以及真实 Transfer 的费用、交易/nullifier 证明、TCT 根和 execution/compact 摘要一致；下一步补区块产物分发及多节点真实退出。
 2. 为钱包和网关提供带证明的费率、在线率、奖励和佣金报价接口。
 3. 接入 GenesisClaim 和 Slash 等剩余容器转换；Delegate、Unbond、ClaimExit 和 ClaimCommission 已接入。
 4. 冻结 SPEC-04 后实现 `supply/audit_snapshot` 的规范编码、查询路由、共享测试向量和跨语言读取器。

@@ -1002,6 +1002,23 @@ impl ActionAuthorizationView for StakingAuthorizationSnapshot<'_> {
 }
 
 impl BlockSession<'_> {
+    /// Preview the exact root that `prepare` will commit after sealing this
+    /// block. Canonical compact encoding binds this value before the digests
+    /// themselves enter the JMT batch.
+    pub fn preview_shielded_tree_root(&self) -> Result<Hash32> {
+        let mut tree = self.tree.clone();
+        tree.end_block().map_err(|_| Error::CommitmentTreeFull)?;
+        Ok(tree_root_bytes(&tree))
+    }
+
+    /// Install the hashes produced by BIT's canonical execution and compact
+    /// encoders. The application calls this after all block effects are known
+    /// and before `prepare` creates the durable batch.
+    pub fn set_block_digests(&mut self, execution_hash: Hash32, compact_hash: Hash32) {
+        self.execution_hash = execution_hash;
+        self.compact_hash = compact_hash;
+    }
+
     /// Dispatch one canonical user transaction through the verifier for its
     /// action. All enabled actions share the same block overlay.
     pub async fn verify_and_stage_transaction(&mut self, envelope_bytes: &[u8]) -> Result<Hash32> {

@@ -47,6 +47,25 @@ class ProtocolOracleTests(unittest.TestCase):
         self.assertEqual(envelope.hex(), vector["canonical_envelope_hex"])
         self.assertEqual(hashlib.sha256(envelope).hexdigest(), vector["tx_id_hex"])
 
+    def test_empty_block_artifact_encoding_and_domain_hashes(self):
+        vector = json.loads((ROOT / "tests/vectors/block-artifact-vectors.json").read_text(
+            encoding="utf-8"))["empty_block"]
+        artifact = oracle.empty_block_artifact(
+            bytes.fromhex(vector["chain_context_hex"]),
+            vector["height"],
+            vector["block_time_seconds"],
+            bytes.fromhex(vector["shielded_tree_root_hex"]),
+        )
+        self.assertEqual(artifact.hex(), vector["canonical_cbor_hex"])
+        self.assertEqual(
+            oracle.block_artifact_hash(b"bit/execution-summary/v1", artifact).hex(),
+            vector["execution_hash_hex"],
+        )
+        self.assertEqual(
+            oracle.block_artifact_hash(b"bit/compact-block/v1", artifact).hex(),
+            vector["compact_hash_hex"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

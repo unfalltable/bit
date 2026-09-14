@@ -34,15 +34,16 @@ use tendermint_abci::{Application, Server, ServerBuilder};
 use tendermint_proto::v0_38::{
     abci::{
         response_apply_snapshot_chunk, response_offer_snapshot, response_process_proposal,
-        response_verify_vote_extension, CommitInfo, ExecTxResult, ExtendedCommitInfo, Misbehavior,
-        MisbehaviorType, RequestApplySnapshotChunk, RequestCheckTx, RequestExtendVote,
-        RequestFinalizeBlock, RequestInfo, RequestInitChain, RequestLoadSnapshotChunk,
-        RequestOfferSnapshot, RequestPrepareProposal, RequestProcessProposal, RequestQuery,
-        RequestVerifyVoteExtension, ResponseApplySnapshotChunk, ResponseCheckTx, ResponseCommit,
-        ResponseExtendVote, ResponseFinalizeBlock, ResponseInfo, ResponseInitChain,
-        ResponseListSnapshots, ResponseLoadSnapshotChunk, ResponseOfferSnapshot,
-        ResponsePrepareProposal, ResponseProcessProposal, ResponseQuery,
-        ResponseVerifyVoteExtension, Snapshot, ValidatorUpdate as ProtoValidatorUpdate,
+        response_verify_vote_extension, CommitInfo, Event, EventAttribute, ExecTxResult,
+        ExtendedCommitInfo, Misbehavior, MisbehaviorType, RequestApplySnapshotChunk,
+        RequestCheckTx, RequestExtendVote, RequestFinalizeBlock, RequestInfo, RequestInitChain,
+        RequestLoadSnapshotChunk, RequestOfferSnapshot, RequestPrepareProposal,
+        RequestProcessProposal, RequestQuery, RequestVerifyVoteExtension,
+        ResponseApplySnapshotChunk, ResponseCheckTx, ResponseCommit, ResponseExtendVote,
+        ResponseFinalizeBlock, ResponseInfo, ResponseInitChain, ResponseListSnapshots,
+        ResponseLoadSnapshotChunk, ResponseOfferSnapshot, ResponsePrepareProposal,
+        ResponseProcessProposal, ResponseQuery, ResponseVerifyVoteExtension, Snapshot,
+        ValidatorUpdate as ProtoValidatorUpdate,
     },
     crypto::{public_key, ProofOp, ProofOps},
     types::BlockIdFlag,
@@ -73,38 +74,6 @@ pub enum BindError {
     EmptyReadBuffer,
     #[error("failed to bind ABCI server: {0}")]
     Abci(#[source] Box<tendermint_abci::Error>),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FinalizeDigests {
-    pub execution_hash: Hash32,
-    pub compact_hash: Hash32,
-}
-
-/// Supplies hashes produced by the versioned execution and compact encoders.
-///
-/// The ABCI adapter deliberately has no fallback implementation: the
-/// consensus encoders must be supplied explicitly before a node can finalize.
-pub trait FinalizeDigestProvider: Send + Sync + 'static {
-    fn digests(
-        &self,
-        request: &RequestFinalizeBlock,
-    ) -> std::result::Result<FinalizeDigests, String>;
-}
-
-impl<F> FinalizeDigestProvider for F
-where
-    F: Fn(&RequestFinalizeBlock) -> std::result::Result<FinalizeDigests, String>
-        + Send
-        + Sync
-        + 'static,
-{
-    fn digests(
-        &self,
-        request: &RequestFinalizeBlock,
-    ) -> std::result::Result<FinalizeDigests, String> {
-        self(request)
-    }
 }
 
 #[derive(Clone)]
@@ -327,7 +296,6 @@ struct Inner {
     genesis: GenesisConfig,
     state_path: PathBuf,
     chain_context: Hash32,
-    digest_provider: Arc<dyn FinalizeDigestProvider>,
     state_sync: StateSyncManager,
     initialized: AtomicBool,
     halted: AtomicBool,
@@ -343,7 +311,6 @@ impl AbciApplication {
         state_path: PathBuf,
         genesis: GenesisConfig,
         config: AbciConfig,
-        digest_provider: Arc<dyn FinalizeDigestProvider>,
     ) -> crate::Result<Self> {
         config.validate(&genesis)?;
         let chain_context = genesis.chain_context;
@@ -401,7 +368,6 @@ impl AbciApplication {
                 genesis,
                 state_path,
                 chain_context,
-                digest_provider,
                 state_sync,
                 initialized: AtomicBool::new(initialized),
                 halted: AtomicBool::new(false),
@@ -572,6 +538,31 @@ impl AbciApplication {
     }
 
     fn map_finalize(&self, outcome: FinalizeOutcome) -> ResponseFinalizeBlock {
+        let block_event = Event {
+            r#type: "bit.block.v1".to_owned(),
+            attributes: vec![
+                EventAttribute {
+                    key: "height".to_owned(),
+                    value: outcome.height.to_string(),
+                    index: true,
+                },
+                EventAttribute {
+                    key: "execution_hash".to_owned(),
+                    value: encode_hex(&outcome.artifacts.execution_hash),
+                    index: true,
+                },
+                EventAttribute {
+                    key: "compact_hash".to_owned(),
+                    value: encode_hex(&outcome.artifacts.compact_hash),
+                    index: true,
+                },
+                EventAttribute {
+                    key: "compact_bytes".to_owned(),
+                    value: outcome.artifacts.compact_block.len().to_string(),
+                    index: false,
+                },
+            ],
+        };
         ResponseFinalizeBlock {
             tx_results: outcome
                 .transaction_results
@@ -591,6 +582,7 @@ impl AbciApplication {
                 })
                 .collect(),
             app_hash: outcome.app_hash.to_vec().into(),
+            events: vec![block_event],
             ..Default::default()
         }
     }
@@ -859,17 +851,10 @@ impl Application for AbciApplication {
             .runtime
             .block_on(self.inner.core.state_summary())
             .unwrap_or_else(|error| self.halt(format!("state summary lookup failed: {error}")));
-        let digests = self
-            .inner
-            .digest_provider
-            .digests(&request)
-            .unwrap_or_else(|error| self.halt(format!("block digest production failed: {error}")));
         let block = BlockRequest {
             height,
             block_time_seconds,
             transactions: request.txs.into_iter().map(Vec::from).collect(),
-            execution_hash: digests.execution_hash,
-            compact_hash: digests.compact_hash,
             last_commit,
             byzantine_evidence: byzantine_evidence.clone(),
             next_validators_hash,
@@ -1351,12 +1336,6 @@ mod tests {
 
     fn application(dir: &TempDir, max_block_bytes: u64) -> AbciApplication {
         let expected_init_chain = init_chain(max_block_bytes as i64);
-        let provider = |_: &RequestFinalizeBlock| {
-            Ok(FinalizeDigests {
-                execution_hash: [4; 32],
-                compact_hash: [5; 32],
-            })
-        };
         AbciApplication::open(
             dir.path().to_path_buf(),
             genesis(max_block_bytes),
@@ -1367,7 +1346,6 @@ mod tests {
                 retain_height: 0,
                 state_sync: None,
             },
-            Arc::new(provider),
         )
         .unwrap()
     }
@@ -1377,12 +1355,6 @@ mod tests {
         snapshot_directory: PathBuf,
         max_block_bytes: u64,
     ) -> AbciApplication {
-        let provider = |_: &RequestFinalizeBlock| {
-            Ok(FinalizeDigests {
-                execution_hash: [4; 32],
-                compact_hash: [5; 32],
-            })
-        };
         AbciApplication::open(
             state_path,
             genesis(max_block_bytes),
@@ -1396,7 +1368,6 @@ mod tests {
                     keep_recent: 2,
                 }),
             },
-            Arc::new(provider),
         )
         .unwrap()
     }
@@ -1435,12 +1406,6 @@ mod tests {
         let mismatch_dir = TempDir::new().unwrap();
         let mut mismatched_init = init_chain(1_000_000);
         mismatched_init.validators[0].power += 1;
-        let provider = |_: &RequestFinalizeBlock| {
-            Ok(FinalizeDigests {
-                execution_hash: [0; 32],
-                compact_hash: [0; 32],
-            })
-        };
         assert!(matches!(
             AbciApplication::open(
                 mismatch_dir.path().to_path_buf(),
@@ -1452,7 +1417,6 @@ mod tests {
                     retain_height: 0,
                     state_sync: None,
                 },
-                Arc::new(provider),
             ),
             Err(CoreError::InvalidConfig(_))
         ));
@@ -1467,12 +1431,6 @@ mod tests {
             .as_mut()
             .unwrap()
             .vote_extensions_enable_height = 2;
-        let provider = |_: &RequestFinalizeBlock| {
-            Ok(FinalizeDigests {
-                execution_hash: [0; 32],
-                compact_hash: [0; 32],
-            })
-        };
         let result = AbciApplication::open(
             bad_dir.path().to_path_buf(),
             genesis(999_999),
@@ -1483,7 +1441,6 @@ mod tests {
                 retain_height: 0,
                 state_sync: None,
             },
-            Arc::new(provider),
         );
         assert!(matches!(result, Err(CoreError::InvalidConfig(_))));
     }
@@ -1555,6 +1512,24 @@ mod tests {
         );
         assert_eq!(finalized.app_hash.len(), 32);
         assert!(finalized.tx_results.is_empty());
+        assert_eq!(finalized.events.len(), 1);
+        assert_eq!(finalized.events[0].r#type, "bit.block.v1");
+        let execution_hash = finalized.events[0]
+            .attributes
+            .iter()
+            .find(|attribute| attribute.key == "execution_hash")
+            .unwrap()
+            .value
+            .clone();
+        let compact_hash = finalized.events[0]
+            .attributes
+            .iter()
+            .find(|attribute| attribute.key == "compact_hash")
+            .unwrap()
+            .value
+            .clone();
+        assert_eq!(execution_hash.len(), 64);
+        assert_eq!(compact_hash.len(), 64);
         assert_eq!(Application::commit(&app).retain_height, 0);
 
         assert_eq!(
@@ -1583,6 +1558,23 @@ mod tests {
         for op in ops {
             assert_eq!(op.r#type, PROOF_OP_TYPE);
             ics23::CommitmentProof::decode(op.data.as_slice()).unwrap();
+        }
+        for (key, expected) in [
+            ("execution/block/00000000000000000001", execution_hash),
+            ("compact/hash/00000000000000000001", compact_hash),
+        ] {
+            let query = Application::query(
+                &app,
+                RequestQuery {
+                    data: key.as_bytes().to_vec().into(),
+                    path: STATE_QUERY_PATH.to_owned(),
+                    height: 1,
+                    prove: true,
+                },
+            );
+            assert_eq!(query.code, QueryCode::Ok as u32);
+            assert_eq!(hex::encode(query.value), expected);
+            assert!(query.proof_ops.is_some());
         }
 
         assert!(Application::extend_vote(&app, RequestExtendVote::default())
@@ -1871,12 +1863,6 @@ mod tests {
         let last_marker_byte = marker_bytes.len() - 1;
         marker_bytes[last_marker_byte] ^= 1;
         std::fs::write(&marker, marker_bytes).unwrap();
-        let provider = |_: &RequestFinalizeBlock| {
-            Ok(FinalizeDigests {
-                execution_hash: [4; 32],
-                compact_hash: [5; 32],
-            })
-        };
         let corrupt_reopen = AbciApplication::open(
             target_state,
             genesis(1_000_000),
@@ -1890,7 +1876,6 @@ mod tests {
                     keep_recent: 2,
                 }),
             },
-            Arc::new(provider),
         );
         assert!(matches!(corrupt_reopen, Err(CoreError::StateSync(_))));
     }
@@ -2057,12 +2042,6 @@ mod tests {
         assert_eq!(record.evidence.len(), 1);
         let record_hash = record.record_hash();
 
-        let provider = |_: &RequestFinalizeBlock| {
-            Ok(FinalizeDigests {
-                execution_hash: [4; 32],
-                compact_hash: [5; 32],
-            })
-        };
         assert!(matches!(
             AbciApplication::open(
                 state_path.clone(),
@@ -2074,7 +2053,6 @@ mod tests {
                     retain_height: 0,
                     state_sync: None,
                 },
-                Arc::new(provider),
             ),
             Err(CoreError::SafetyHaltActive { .. })
         ));
@@ -2083,12 +2061,6 @@ mod tests {
         assert!(archive.is_file());
         drop(app);
 
-        let provider = |_: &RequestFinalizeBlock| {
-            Ok(FinalizeDigests {
-                execution_hash: [4; 32],
-                compact_hash: [5; 32],
-            })
-        };
         let reopened = AbciApplication::open(
             state_path.clone(),
             genesis(1_000_000),
@@ -2099,7 +2071,6 @@ mod tests {
                 retain_height: 0,
                 state_sync: None,
             },
-            Arc::new(provider),
         )
         .unwrap();
         assert_eq!(

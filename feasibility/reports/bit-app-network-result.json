@@ -1,78 +1,102 @@
 {
-  "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T153536767403",
+  "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, canonical block artifacts, staking and emission",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T162704171268",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "application_sha256": "a43a10f236918b7593e0b99838f6a0a8139f458a2b6c4153cb5a5dbbff2e8cf1",
-    "evidence_injector_sha256": "0f2d8a6fa60aa97fb1262d64c4e3082398cdac0f1c23daa7626bb4d4ac42b6ce"
+    "application_sha256": "2dc7d11f637cd281afb833212af9674f052c84d2fdac58fec1593e565347acaa",
+    "evidence_injector_sha256": "995f9df668edf56ff5c9ce9b99631a22d0817fa194c506ca3b245b36cb567d54"
   },
   "checks": {
+    "real_transfer": {
+      "fixture_source_sha256": "23f12f2a7fe91b41f147fd321ed163752ad138bd9968283365570518a5571e2d",
+      "height": 12,
+      "index": 0,
+      "canonical_envelope_bytes": 2762,
+      "tx_id": "1ce9ef43a8badffa95ae4c9f4d8f059a7f3d0a6d4dcddced376dbeff851d9f0a",
+      "nullifiers": [
+        "70ae5cb031ff84870905d389b9e86467e26a4ec157dac4ff06c97ddef3b91e09",
+        "331035c456c1e9f01e421583708e3eefee93b0743fcc5943ed1900cc81b4b80d"
+      ],
+      "output_commitments": [
+        "c0027804d433213c547a2eee4daf0a45a3add6c3362404c05ac35e8bcf3eb208",
+        "3d980155e7974444608add1f1d58e76c07e5614299562bd3c2788e4bee425b02"
+      ],
+      "transaction_record_proved_on_nodes": 4,
+      "nullifier_records_proved_on_nodes": 4,
+      "post_transfer_tree_root": "f39cfb2b0c15f9ecb7db42822873216564459be096826ed6b3015f7a2ddd5d05",
+      "post_transfer_app_hash": "2db0ed50e3e8a9e2d166106c9d3998ca02e3beaf1e3fb932027298387ac054bf"
+    },
+    "canonical_block_artifacts": {
+      "height": 12,
+      "execution_hash": "19f4970336af67f03af831a6cd6a2ee1c43f5d237dd5d849721671bb97735e5c",
+      "compact_hash": "b4c99e714f659adf475bfa2f7470bc21cd63bd60c1e73525eb9f1db1d339a294",
+      "compact_bytes": 1577,
+      "state_proofs_and_abci_event_match_on_nodes": 4
+    },
     "validator_powers_h6_h7_h8": {
       "6": {
-        "7fdcba0a44bc2c1c9756742c8d87a66fef595596f87717345186e59ef4330254": 10,
-        "7f3a35a98cac5693c1c68a4d4389f01fa06e38adda59064f4d3d56f145219c41": 10,
-        "1e9052393bf80961dafb06f1720fc8c8a70e72899517b04e7dd2f44a8e8c4c18": 10,
-        "6cc8d28a330ac3a35e6d71bfc6b00981e88bb722cd3931c82fa778766c9b9c3d": 10
+        "fb6f95f31a23ba2ddab0348fbd71c6ebe9c4c3cb83b395499570fc0d6e8b0f20": 10,
+        "237ee7469b4e8d4955b85d300bd93a37773da8d49ec0afacf15f206a58690bff": 10,
+        "a0f471a9574f8051e98576f3d095aed16fec519685072fe964a0053c453e257c": 10,
+        "23874bc0c4b2d6e34c9757433b9da9d894657698125224d0c5e49311176ffd6c": 10
       },
       "7": {
-        "7fdcba0a44bc2c1c9756742c8d87a66fef595596f87717345186e59ef4330254": 10,
-        "7f3a35a98cac5693c1c68a4d4389f01fa06e38adda59064f4d3d56f145219c41": 10,
-        "1e9052393bf80961dafb06f1720fc8c8a70e72899517b04e7dd2f44a8e8c4c18": 10,
-        "6cc8d28a330ac3a35e6d71bfc6b00981e88bb722cd3931c82fa778766c9b9c3d": 10
+        "fb6f95f31a23ba2ddab0348fbd71c6ebe9c4c3cb83b395499570fc0d6e8b0f20": 10,
+        "237ee7469b4e8d4955b85d300bd93a37773da8d49ec0afacf15f206a58690bff": 10,
+        "a0f471a9574f8051e98576f3d095aed16fec519685072fe964a0053c453e257c": 10,
+        "23874bc0c4b2d6e34c9757433b9da9d894657698125224d0c5e49311176ffd6c": 10
       },
       "8": {
-        "7fdcba0a44bc2c1c9756742c8d87a66fef595596f87717345186e59ef4330254": 3476,
-        "7f3a35a98cac5693c1c68a4d4389f01fa06e38adda59064f4d3d56f145219c41": 3476,
-        "1e9052393bf80961dafb06f1720fc8c8a70e72899517b04e7dd2f44a8e8c4c18": 3476,
-        "6cc8d28a330ac3a35e6d71bfc6b00981e88bb722cd3931c82fa778766c9b9c3d": 3476
+        "fb6f95f31a23ba2ddab0348fbd71c6ebe9c4c3cb83b395499570fc0d6e8b0f20": 3476,
+        "237ee7469b4e8d4955b85d300bd93a37773da8d49ec0afacf15f206a58690bff": 3476,
+        "a0f471a9574f8051e98576f3d095aed16fec519685072fe964a0053c453e257c": 3476,
+        "23874bc0c4b2d6e34c9757433b9da9d894657698125224d0c5e49311176ffd6c": 3476
       }
     },
     "h_plus_two_update": true,
-    "process_restart_from_durable_jmt_height": 10,
+    "process_restart_from_durable_jmt_height": 14,
     "resumed_heights": [
-      15,
-      15,
-      15,
-      15
+      19,
+      19,
+      19,
+      19
     ],
-    "same_app_hash_height": 14,
-    "same_app_hash": "13bbae8b79579f2e9dfd3a7b5fb4b6bb3212bf823ded0ab56005a7b806326869",
+    "same_app_hash_height": 18,
+    "same_app_hash": "a0fdf6b85dccd58805accbd869b922dff437fc472890377305975c3b658312b5",
     "latest_ics23_proof": true,
     "real_duplicate_vote_evidence": {
-      "comet_evidence_hash": "0f0c61401f2089649d1d27a0b03e79ad3dbc690eb5a8976c75e0de756ced358e",
-      "validator_address": "65c9fbe4407c851d77ddf531bd2925b0f06b6b7a",
+      "comet_evidence_hash": "016a6d379aead3adb27e6f1eb1facdddfc17cc871ed93c8533e56efaf4edbc32",
+      "validator_address": "04fa41eaa6e05522b4c7b74c47403031032d5cdd",
       "validator_power": 6943,
-      "infraction_height": 13,
-      "infraction_time_seconds": 1789400158,
-      "infraction_time_nanos": 809671200,
+      "infraction_height": 17,
+      "infraction_time_seconds": 1789403251,
+      "infraction_time_nanos": 938037500,
       "total_voting_power": 27772,
-      "inclusion_height": 16,
-      "bit_evidence_hash": "4a68c43ad68f80dd48c3dcf8a16cd709f715c43fd3653eeaa0203dab3eda78ce",
+      "inclusion_height": 20,
+      "bit_evidence_hash": "f4a156a6036548397db8e62f2c25199a100473d1cc0e7b6caa4eee59380db429",
       "validator_present_at_h_plus_one": true,
       "validator_removed_at_h_plus_two": true,
       "post_evidence_validator_count": 3,
-      "burned_atomic": "3471930650685",
-      "same_app_hash": "0429d6f605e04f557f81307fb8dfd08569ad0060bea162ff77fb19294c75499a",
+      "burned_atomic": "4858822721098",
+      "same_app_hash": "3b5be2af9c822d623bc494cc31c0461eb1e5adc50610e8238f9ea600a2a1760b",
       "ics23_evidence_membership": true
     },
-    "quorum_halt_height": 19,
+    "quorum_halt_height": 23,
     "quorum_recovery_heights": [
-      23,
-      23,
-      23,
-      23
+      27,
+      27,
+      27,
+      27
     ]
   },
   "limitations": [
     "accelerated five-block epochs and deterministic probe genesis",
-    "temporary domain-separated request digests pending SPEC-03",
-    "empty user-transaction blocks; real transfer remains covered by in-process and TCP tests",
     "upstream CometBFT FilePV signer, not the future independent BIT signer",
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T15:35:36.767503+00:00",
-  "finished_at": "2026-09-14T15:36:18.530044+00:00"
+  "started_at": "2026-09-14T16:27:04.171374+00:00",
+  "finished_at": "2026-09-14T16:27:51.504095+00:00"
 }

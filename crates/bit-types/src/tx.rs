@@ -122,7 +122,7 @@ impl Action {
         }
     }
 
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         match self {
             Self::Delegate { recovery, .. } if recovery.len() != 512 => Err(
                 Error::InvalidTransaction("delegate recovery receipt must be 512 bytes"),
@@ -186,7 +186,7 @@ impl Action {
         }
     }
 
-    fn encode(&self, w: &mut Writer) -> Result<()> {
+    pub(crate) fn encode(&self, w: &mut Writer) -> Result<()> {
         self.validate()?;
         match self {
             Self::Transfer => {
@@ -341,7 +341,7 @@ impl Action {
         Ok(())
     }
 
-    fn decode(c: &mut Cursor<'_>) -> Result<Self> {
+    pub(crate) fn decode(c: &mut Cursor<'_>) -> Result<Self> {
         let len = c.array()?;
         let tag = c.uint()?;
         let action = match tag {

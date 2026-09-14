@@ -475,6 +475,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "bit-emission",
+ "bit-shielded",
  "bit-staking",
  "bit-state",
  "bit-transaction",

@@ -75,7 +75,7 @@ P0 表示进入依赖该内容的开发前应解决；P1 表示应在对应模�
 |---|---|---|---|
 | SPEC-01 | genesis manifest 的规范编码、hash 输入、签名覆盖范围和生成次序 | chain_context 来自 genesis_manifest_hash，而初始 position/state 又使用 chain_context；如把派生后的状态根无条件放回被哈希主体，可能形成循环依赖 | 画清哈希依赖图，区分身份输入与派生输出；S0/S1 固定，D-025 实现 |
 | SPEC-02 | native_asset_id、地址 HRP、恢复词到 root、支付/operator 等完整派生规则 | 文档列出若干域及 manifest 必填项，尚缺完整可交叉复现的 manifest/向量 | 上游兼容说明、完整 key/address vectors、所有平台一致性 |
-| SPEC-03 | compact canonical_records、树增量、memo、恢复收据正文、公开事件的精确编码 | 当前 Protobuf 多以 bytes 承载；只有字段清单不足以确定完整性哈希和恢复 | 独立版本、长度、排序、域和黄金数据；D-002/003/010/012 共用 |
+| SPEC-03 | compact canonical_records、树增量、memo、恢复收据正文、公开事件的精确编码 | 执行摘要、紧凑交易、TCT 结果根和当前系统公共事件已冻结 v1 字节合同与黄金向量；完整归档、恢复收据正文和客户端分发仍未完成 | 已落地 [D-002 区块产物规范编码](D:/others/BIT/docs/BIT_D-002_区块产物规范编码.md)；D-003/010/012 继续完成服务与客户端边界 |
 | SPEC-04 | supply/audit_snapshot 的规范值编码与 REST 映射 | API 列出字段不能自动证明这些字段和某个 KV 值完全相同 | 编码规范、同高证明 fixture、字段篡改负例；D-002/009/010/022 |
 | SPEC-05 | 检查点的到期字段/推导规则、发布者名单、签名阈值、轮换与撤销语义 | 正文要求生成时间和到期时间，旧 Checkpoint 必填列表只有 issued_at，未明确到期表达 | 规范消息与信任状态机；测试过期、冲突、错签名者和长期离线 |
 | SPEC-06 | 节点请求、配对挑战、最终 PoP、动画 QR 分片与已认证本地传输 | 现有描述很明确，但缺完整的机器消息和多轮交互合同 | typed messages、大小/过期/重放限制；D-012/019/020 联合验证 |

@@ -1,29 +1,28 @@
 //! Four-node integration probe for the real BIT application and state crates.
 //!
 //! This is not a production node executable. It intentionally uses an
-//! accelerated epoch and temporary domain-separated block digests until the
-//! production execution and compact encodings are frozen.
+//! accelerated epoch while exercising the production execution and compact
+//! block encoders.
 
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use bit_app::abci::{AbciApplication, AbciConfig, FinalizeDigests};
+use bit_app::abci::{AbciApplication, AbciConfig};
 use bit_emission::{FeePolicy, GenesisAllocation};
 use bit_staking::{
     consensus_address, StakingBook, StakingParameters, ATOMIC_PER_BIT, RECOVERY_RECEIPT_BYTES,
 };
 use bit_state::GenesisConfig;
-use bit_types::{position_id, validator_id, Amount, MonetaryPolicy};
+use bit_types::{chain_context, position_id, validator_id, Amount, MonetaryPolicy};
 use decaf377::Fq;
-use prost::Message;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf};
 use tendermint::Time;
 use tendermint_proto::{
     google::protobuf::{Duration, Timestamp},
     v0_38::{
-        abci::{RequestFinalizeBlock, RequestInitChain, ValidatorUpdate},
+        abci::{RequestInitChain, ValidatorUpdate},
         crypto::{public_key, PublicKey},
         types::{
             AbciParams, BlockParams, ConsensusParams, EvidenceParams, ValidatorParams,
@@ -34,6 +33,8 @@ use tendermint_proto::{
 
 const PROBE_EPOCH_BLOCKS: u64 = 5;
 const PROBE_POWER_UNIT_ATOMIC: u128 = 100 * ATOMIC_PER_BIT;
+const PROBE_SHIELDED_ATOMIC: u128 = 15_000_000_000;
+const PROBE_GENESIS_MANIFEST_HASH: [u8; 32] = [0x33; 32];
 
 #[derive(Deserialize)]
 struct GenesisDocument {
@@ -43,6 +44,13 @@ struct GenesisDocument {
     consensus_params: JsonConsensusParams,
     validators: Vec<JsonValidator>,
     app_state: Value,
+}
+
+#[derive(Deserialize)]
+struct ProbeAppState {
+    bit_app_network_probe: u64,
+    genesis_manifest_hash_hex: String,
+    genesis_commitments_hex: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -112,8 +120,11 @@ fn domain_hash(domain: &[u8], value: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn request_digest(domain: &[u8], request: &RequestFinalizeBlock) -> [u8; 32] {
-    domain_hash(domain, &request.encode_to_vec())
+fn hash32_hex(value: &str, name: &'static str) -> Result<[u8; 32]> {
+    let bytes = hex::decode(value).with_context(|| format!("invalid {name} hex"))?;
+    bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("{name} must be 32 bytes"))
 }
 
 fn protobuf_timestamp(value: &str) -> Result<Timestamp> {
@@ -160,10 +171,34 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
         parse_number(&document.consensus_params.version.app, "app version")?;
     ensure!(protocol_version > 0, "app version must be positive");
 
-    let chain_context = domain_hash(
-        b"BIT-COMET-NETWORK-PROBE-CHAIN-V1",
-        document.chain_id.as_bytes(),
+    let app_state: ProbeAppState = serde_json::from_value(document.app_state.clone())
+        .context("invalid BIT probe app_state")?;
+    ensure!(
+        app_state.bit_app_network_probe == 2,
+        "unsupported BIT probe app_state version"
     );
+    let genesis_manifest_hash = hash32_hex(
+        &app_state.genesis_manifest_hash_hex,
+        "genesis_manifest_hash",
+    )?;
+    ensure!(
+        genesis_manifest_hash == PROBE_GENESIS_MANIFEST_HASH,
+        "unexpected probe genesis manifest hash"
+    );
+    let genesis_commitments = app_state
+        .genesis_commitments_hex
+        .iter()
+        .map(|value| hash32_hex(value, "genesis commitment"))
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        genesis_commitments.len() == 2,
+        "probe genesis must contain two commitments"
+    );
+    ensure!(
+        genesis_commitments[0] != genesis_commitments[1],
+        "probe genesis commitments must be distinct"
+    );
+    let chain_context = chain_context(genesis_manifest_hash);
     let mut parameters = StakingParameters::reference_testnet();
     parameters.power_unit_atomic = Amount::new(PROBE_POWER_UNIT_ATOMIC)?;
     let mut staking = StakingBook::new(chain_context, parameters)?;
@@ -237,11 +272,13 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
     )?;
     let mut monetary_policy = MonetaryPolicy::reference_testnet();
     monetary_policy.epoch_blocks = PROBE_EPOCH_BLOCKS;
+    let shielded = Amount::new(PROBE_SHIELDED_ATOMIC)?;
     let unclaimed = Amount::new(
         monetary_policy
             .genesis_supply
             .value()
             .checked_sub(total_stake.value())
+            .and_then(|value| value.checked_sub(shielded.value()))
             .context("genesis stake exceeds supply")?,
     )?;
     let mut native_asset_id = [0u8; 32];
@@ -298,7 +335,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
         monetary_policy,
         fee_policy: FeePolicy::reference_testnet(),
         genesis_allocation: GenesisAllocation {
-            shielded: Amount::ZERO,
+            shielded,
             stake: total_stake,
             pending_delegation: Amount::ZERO,
             exits: Amount::ZERO,
@@ -307,7 +344,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
             unclaimed_genesis: unclaimed,
         },
         genesis_staking: staking,
-        genesis_commitments: Vec::new(),
+        genesis_commitments,
         genesis_execution_hash: domain_hash(
             b"BIT-COMET-NETWORK-PROBE-GENESIS-EXECUTION-V1",
             &app_state_bytes,
@@ -341,16 +378,10 @@ fn main() -> Result<()> {
     )
     .context("cannot decode CometBFT genesis JSON")?;
     let (genesis, config) = build_configuration(document)?;
-    let provider = |request: &RequestFinalizeBlock| {
-        Ok(FinalizeDigests {
-            execution_hash: request_digest(b"BIT-COMET-NETWORK-PROBE-EXECUTION-V1", request),
-            compact_hash: request_digest(b"BIT-COMET-NETWORK-PROBE-COMPACT-V1", request),
-        })
-    };
     fs::create_dir_all(&state_path)?;
-    let app = AbciApplication::open(state_path, genesis, config, Arc::new(provider))?;
+    let app = AbciApplication::open(state_path, genesis, config)?;
     eprintln!(
-        "BIT real-app/JMT CometBFT probe; temporary digests; listening {}",
+        "BIT real-app/JMT CometBFT probe; canonical block artifacts; listening {}",
         listen.to_string_lossy()
     );
     app.bind(listen.to_string_lossy().as_ref(), 16 * 1024 * 1024)?

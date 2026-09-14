@@ -8,9 +8,11 @@ publish = false
 
 [dependencies]
 bit-emission = { path = "../bit-emission" }
+bit-shielded = { path = "../bit-shielded" }
 bit-staking = { path = "../bit-staking" }
 bit-state = { path = "../bit-state" }
 bit-transaction = { path = "../bit-transaction" }
+bit-types = { path = "../bit-types" }
 ics23 = "0.12.0"
 hex = "0.4.3"
 prost = "0.13.5"
@@ -23,7 +25,6 @@ tokio = { version = "1.38.0", features = ["rt-multi-thread", "sync"] }
 [dev-dependencies]
 anyhow = "1.0.86"
 base64 = "0.22.1"
-bit-types = { path = "../bit-types" }
 decaf377 = "0.10.1"
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"

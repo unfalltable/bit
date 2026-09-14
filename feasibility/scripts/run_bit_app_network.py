@@ -1,8 +1,7 @@
 """Four CometBFT processes against the real BIT ABCI/JMT application.
 
-The node executable is an integration probe with accelerated epochs and
-temporary block digests. User transactions and production compact encoding are
-outside this experiment.
+The node executable uses accelerated epochs and a deterministic public fixture,
+while exercising production transaction and block-artifact encodings.
 """
 
 from pathlib import Path
@@ -17,18 +16,21 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 COMET = ROOT / ".tools/bin/cometbft.exe"
 GO = ROOT / ".tools/go/bin/go.exe"
 EVIDENCE_INJECTOR = ROOT / ".tools/bin/bit-evidence-injector.exe"
-TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", REPO / "target"))
+TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
 APP = TARGET_DIR / "debug/examples/comet_network_probe.exe"
 RUN = ROOT / "runtime" / (
     "bit-app-network-" + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%f")
 )
 REPORT = ROOT / "reports/bit-app-network-result.json"
+TRANSFER_SOURCE = ROOT / "reports/proof-stdout.json"
+GENESIS_MANIFEST_HASH_HEX = "33" * 32
 ENV = os.environ.copy()
 ENV["PATH"] = os.pathsep.join(
     [
@@ -190,14 +192,101 @@ def state_query(index, key):
     return base64.b64decode(value) if value else b""
 
 
+def load_transfer_fixture():
+    report_bytes = TRANSFER_SOURCE.read_bytes()
+    transfer = json.loads(report_bytes)["complete_transfer"]
+    envelope = bytes.fromhex(transfer["canonical_envelope_hex"])
+    if len(envelope) != int(transfer["canonical_envelope_bytes"]):
+        raise AssertionError("transfer fixture envelope length mismatch")
+    tx_id = hashlib.sha256(envelope).hexdigest()
+    if tx_id != transfer["tx_id"]:
+        raise AssertionError("transfer fixture transaction ID mismatch")
+    for name in (
+        "genesis_commitments_hex",
+        "nullifiers_hex",
+        "output_commitments_hex",
+    ):
+        values = transfer[name]
+        if len(values) != 2 or len(set(values)) != 2:
+            raise AssertionError(f"transfer fixture {name} must contain two distinct values")
+        if any(len(bytes.fromhex(value)) != 32 for value in values):
+            raise AssertionError(f"transfer fixture {name} contains a non-32-byte value")
+    return {
+        "envelope": envelope,
+        "tx_id": tx_id,
+        "anchor": transfer["anchor_hex"],
+        "genesis_commitments": transfer["genesis_commitments_hex"],
+        "nullifiers": transfer["nullifiers_hex"],
+        "output_commitments": transfer["output_commitments_hex"],
+        "source_sha256": hashlib.sha256(report_bytes).hexdigest(),
+    }
+
+
+def broadcast_transfer(fixture):
+    response = rpc(0, "broadcast_tx_sync?tx=0x" + fixture["envelope"].hex())
+    if int(response["code"]) != 0:
+        raise AssertionError(f"CheckTx rejected transfer: {response}")
+    if response["hash"].lower() != fixture["tx_id"]:
+        raise AssertionError("CometBFT transaction hash differs from BIT transaction ID")
+
+
+def wait_transaction(fixture, first_height, seconds=90):
+    deadline = time.monotonic() + seconds
+    checked_through = first_height - 1
+    pending = None
+    while time.monotonic() < deadline:
+        if pending is not None:
+            block_height, index = pending
+            try:
+                results = rpc(0, f"block_results?height={block_height}")
+            except urllib.error.HTTPError:
+                time.sleep(0.1)
+                continue
+            tx_results = results.get("txs_results") or []
+            if index >= len(tx_results) or int(tx_results[index]["code"]) != 0:
+                raise AssertionError("FinalizeBlock rejected the transfer")
+            return block_height, index, results
+        latest = height(0)
+        for block_height in range(checked_through + 1, latest + 1):
+            block = rpc(0, f"block?height={block_height}")["block"]
+            transactions = block.get("data", {}).get("txs") or []
+            for index, encoded in enumerate(transactions):
+                if base64.b64decode(encoded) != fixture["envelope"]:
+                    continue
+                pending = (block_height, index)
+                break
+            if pending is not None:
+                break
+        checked_through = max(checked_through, latest)
+        time.sleep(0.3)
+    raise TimeoutError(f"transfer was not included after height {first_height}")
+
+
+def block_artifact_event(results, block_height):
+    events = results.get("finalize_block_events") or []
+    matches = [event for event in events if event.get("type") == "bit.block.v1"]
+    if len(matches) != 1:
+        raise AssertionError(f"expected one block artifact event, got {len(matches)}")
+    attributes = {attribute["key"]: attribute["value"] for attribute in matches[0]["attributes"]}
+    if attributes.get("height") != str(block_height):
+        raise AssertionError("block artifact event height mismatch")
+    for name in ("execution_hash", "compact_hash"):
+        if len(bytes.fromhex(attributes[name])) != 32:
+            raise AssertionError(f"invalid {name} in block artifact event")
+    if int(attributes.get("compact_bytes", "0")) <= 0:
+        raise AssertionError("compact block event reported an empty artifact")
+    return attributes
+
+
 def domain_hash(domain, value):
     return hashlib.sha256(domain + len(value).to_bytes(8, "big") + value).digest()
 
 
 def bit_evidence_hash(chain_id, evidence):
-    chain_context = domain_hash(
-        b"BIT-COMET-NETWORK-PROBE-CHAIN-V1", chain_id.encode("utf-8")
-    )
+    del chain_id
+    chain_context = hashlib.sha256(
+        b"bit/chain/v1" + bytes.fromhex(GENESIS_MANIFEST_HASH_HEX)
+    ).digest()
     payload = b"".join(
         [
             b"BIT-EVIDENCE-V1",
@@ -237,7 +326,7 @@ def wait_evidence_inclusion(first_height, validator_address, seconds=60):
     raise TimeoutError(f"evidence was not included after height {first_height}")
 
 
-def configure_network():
+def configure_network(fixture):
     command(
         [
             COMET,
@@ -262,7 +351,11 @@ def configure_network():
     genesis["initial_height"] = "1"
     genesis["consensus_params"]["version"]["app"] = "1"
     genesis["consensus_params"]["abci"]["vote_extensions_enable_height"] = "0"
-    genesis["app_state"] = {"bit_app_network_probe": 1}
+    genesis["app_state"] = {
+        "bit_app_network_probe": 2,
+        "genesis_commitments_hex": fixture["genesis_commitments"],
+        "genesis_manifest_hash_hex": GENESIS_MANIFEST_HASH_HEX,
+    }
     for validator in genesis["validators"]:
         validator["power"] = "10"
     genesis_bytes = json.dumps(genesis, separators=(",", ":"))
@@ -316,6 +409,7 @@ def main():
         or not EVIDENCE_INJECTOR.is_file()
     ):
         raise RuntimeError("build the probe and bootstrap CometBFT before running")
+    fixture = load_transfer_fixture()
     comet_self_reported_version = command([COMET, "version"])
     comet_build_info = command([GO, "version", "-m", COMET])
     module_match = re.search(
@@ -334,11 +428,59 @@ def main():
         with socket.socket() as check:
             check.bind(("127.0.0.1", port))
     RUN.mkdir(parents=True)
-    configure_network()
+    configure_network(fixture)
     for index in range(4):
         start_pair(index)
 
     wait_height(10)
+    first_transfer_height = height(0) + 1
+    broadcast_transfer(fixture)
+    transfer_height, transfer_index, transfer_results = wait_transaction(
+        fixture, first_transfer_height
+    )
+    wait_height(transfer_height + 2)
+    artifact_event = block_artifact_event(transfer_results, transfer_height)
+    transaction_records = [
+        state_query(index, f"transactions/applied/{fixture['tx_id']}")
+        for index in range(4)
+    ]
+    if not transaction_records[0] or len(set(transaction_records)) != 1:
+        raise AssertionError("proved transaction records differ across applications")
+    nullifier_records = {
+        nullifier: [
+            state_query(index, f"shielded/nullifier/{nullifier}")
+            for index in range(4)
+        ]
+        for nullifier in fixture["nullifiers"]
+    }
+    if any(
+        not values[0] or len(set(values)) != 1
+        for values in nullifier_records.values()
+    ):
+        raise AssertionError("proved nullifier records differ across applications")
+    execution_hashes = [
+        state_query(index, f"execution/block/{transfer_height:020}").hex()
+        for index in range(4)
+    ]
+    compact_hashes = [
+        state_query(index, f"compact/hash/{transfer_height:020}").hex()
+        for index in range(4)
+    ]
+    if len(set(execution_hashes)) != 1 or execution_hashes[0] != artifact_event["execution_hash"]:
+        raise AssertionError("execution artifact hash differs from proved state or ABCI event")
+    if len(set(compact_hashes)) != 1 or compact_hashes[0] != artifact_event["compact_hash"]:
+        raise AssertionError("compact artifact hash differs from proved state or ABCI event")
+    tree_roots = [state_query(index, "shielded/tree_root").hex() for index in range(4)]
+    if len(set(tree_roots)) != 1 or tree_roots[0] == fixture["anchor"]:
+        raise AssertionError("output commitments did not advance a common shielded tree root")
+    transfer_app_hashes = {
+        rpc(index, f"block?height={transfer_height + 1}")["block"]["header"][
+            "app_hash"
+        ].lower()
+        for index in range(4)
+    }
+    if len(transfer_app_hashes) != 1:
+        raise AssertionError("application hash diverged after transfer execution")
     powers = {
         str(height_value): validator_powers(height_value)
         for height_value in (6, 7, 8)
@@ -436,7 +578,7 @@ def main():
     recovered = wait_height(halted_height + 4)
 
     return {
-        "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, staking and emission",
+        "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, canonical block artifacts, staking and emission",
         "runtime_dir": str(RUN),
         "toolchain": {
             "cometbft_module": comet_module_version,
@@ -448,6 +590,26 @@ def main():
             ).hexdigest(),
         },
         "checks": {
+            "real_transfer": {
+                "fixture_source_sha256": fixture["source_sha256"],
+                "height": transfer_height,
+                "index": transfer_index,
+                "canonical_envelope_bytes": len(fixture["envelope"]),
+                "tx_id": fixture["tx_id"],
+                "nullifiers": fixture["nullifiers"],
+                "output_commitments": fixture["output_commitments"],
+                "transaction_record_proved_on_nodes": 4,
+                "nullifier_records_proved_on_nodes": 4,
+                "post_transfer_tree_root": tree_roots[0],
+                "post_transfer_app_hash": next(iter(transfer_app_hashes)),
+            },
+            "canonical_block_artifacts": {
+                "height": transfer_height,
+                "execution_hash": execution_hashes[0],
+                "compact_hash": compact_hashes[0],
+                "compact_bytes": int(artifact_event["compact_bytes"]),
+                "state_proofs_and_abci_event_match_on_nodes": 4,
+            },
             "validator_powers_h6_h7_h8": powers,
             "h_plus_two_update": True,
             "process_restart_from_durable_jmt_height": restart_height,
@@ -471,8 +633,6 @@ def main():
         },
         "limitations": [
             "accelerated five-block epochs and deterministic probe genesis",
-            "temporary domain-separated request digests pending SPEC-03",
-            "empty user-transaction blocks; real transfer remains covered by in-process and TCP tests",
             "upstream CometBFT FilePV signer, not the future independent BIT signer",
             "same physical host, not independent failure domains",
         ],

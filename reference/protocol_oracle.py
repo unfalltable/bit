@@ -94,3 +94,18 @@ def structural_envelope(body: bytes) -> bytes:
 
 def effect_hash(body: bytes) -> bytes:
     return hashlib.blake2b(b"bit/effect/v1" + len(body).to_bytes(8, "big") + body, digest_size=64).digest()
+
+
+def empty_block_artifact(chain_context: bytes, height: int, block_time_seconds: int,
+                         shielded_tree_root: bytes) -> bytes:
+    if len(chain_context) != 32 or len(shielded_tree_root) != 32 or height <= 0:
+        raise ValueError("invalid empty block artifact input")
+    return cbor_array(
+        cbor_uint(1), cbor_bytes(chain_context), cbor_uint(height),
+        cbor_uint(block_time_seconds), cbor_bytes(shielded_tree_root),
+        cbor_array(), cbor_array(),
+    )
+
+
+def block_artifact_hash(domain: bytes, artifact: bytes) -> bytes:
+    return hashlib.sha256(domain + len(artifact).to_bytes(8, "big") + artifact).digest()

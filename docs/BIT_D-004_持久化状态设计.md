@@ -129,4 +129,4 @@ ABCI State Sync 使用固定 format 1。chunk 0 携带规范 manifest，后续 c
 
 ## 7. 后续工作
 
-D-004 仍需完成真实磁盘配额耗尽、操作系统 fsync 失败、数据库文件损坏和版本回退的进程级故障注入；重启后的历史证明服务；快照跨平台恢复与长期 nullifier、frontier、JMT 增长测试。D-005 已把同一执行器接到完整 ABCI 生命周期和 State Sync，并完成真实四节点/JMT 重启及重复投票处罚实验；后续还需执行真实 CometBFT 新节点 State Sync、实现生产摘要和正式节点命令，并覆盖多节点真实 Transfer。
+D-004 仍需完成真实磁盘配额耗尽、操作系统 fsync 失败、数据库文件损坏和版本回退的进程级故障注入；重启后的历史证明服务；快照跨平台恢复与长期 nullifier、frontier、JMT 增长测试。D-005 已把同一执行器接到完整 ABCI 生命周期和 State Sync，并完成真实四节点/JMT 重启、真实 Transfer、生产 execution/compact 摘要及重复投票处罚实验；后续还需执行真实 CometBFT 新节点 State Sync、实现区块产物归档/下载和正式节点命令，并覆盖多节点真实退出。

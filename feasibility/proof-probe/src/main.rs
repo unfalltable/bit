@@ -1,6 +1,7 @@
 //! Real upstream primitive experiments, NOT a BIT transaction codec or blockchain.
 //! Fresh ephemeral fixture secrets only. No tracing subscriber or secret output.
 use anyhow::{ensure, Result};
+use bit_emission::FeePolicy;
 use bit_shielded::{
     validate_proof_bytes, verify_output, verify_output_public, verify_spend, verify_spend_public,
 };
@@ -132,9 +133,14 @@ fn main() -> Result<()> {
             .unwrap()
         })
         .collect();
+    let genesis_commitments = inputs
+        .iter()
+        .map(|note| <[u8; 32]>::from(note.commit()))
+        .collect::<Vec<_>>();
     for note in &inputs {
         tree.insert(tct::Witness::Keep, note.commit())?;
     }
+    tree.end_block()?;
     let mut results = vec![];
     let mut complete_transfer = None;
     for sample in 0..samples {
@@ -302,7 +308,14 @@ fn main() -> Result<()> {
             };
             let envelope_bytes = envelope.encode_canonical(50, 100)?;
             let native_asset_id = value(0, 1).asset_id.to_bytes();
-            let mut ledger = MemoryLedger::new(chain, native_asset_id, 50, 100, 65_536);
+            let mut ledger = MemoryLedger::new(
+                chain,
+                native_asset_id,
+                50,
+                100,
+                65_536,
+                FeePolicy::reference_testnet(),
+            );
             ledger.allow_anchor(anchor);
             let verified = ledger.verify_and_record(&envelope_bytes)?;
             ensure!(verified.nullifiers.len() == 2, "verified nullifier count");
@@ -360,7 +373,14 @@ fn main() -> Result<()> {
             let mut bad_authorization = envelope.clone();
             bad_authorization.authorizations[0].signature[0] ^= 1;
             let bad_authorization_bytes = bad_authorization.encode_canonical(50, 100)?;
-            let mut auth_ledger = MemoryLedger::new(chain, native_asset_id, 50, 100, 65_536);
+            let mut auth_ledger = MemoryLedger::new(
+                chain,
+                native_asset_id,
+                50,
+                100,
+                65_536,
+                FeePolicy::reference_testnet(),
+            );
             auth_ledger.allow_anchor(anchor);
             ensure!(
                 matches!(
@@ -379,7 +399,14 @@ fn main() -> Result<()> {
             let mut bad_envelope = envelope;
             bad_envelope.binding_signature[0] ^= 1;
             let bad_bytes = bad_envelope.encode_canonical(50, 100)?;
-            let mut clean_ledger = MemoryLedger::new(chain, native_asset_id, 50, 100, 65_536);
+            let mut clean_ledger = MemoryLedger::new(
+                chain,
+                native_asset_id,
+                50,
+                100,
+                65_536,
+                FeePolicy::reference_testnet(),
+            );
             clean_ledger.allow_anchor(anchor);
             ensure!(
                 clean_ledger.verify_and_record(&bad_bytes).is_err(),
@@ -396,8 +423,13 @@ fn main() -> Result<()> {
 
             complete_transfer = Some(json!({
                 "canonical_envelope_bytes": envelope_bytes.len(),
+                "canonical_envelope_hex": hex::encode(&envelope_bytes),
                 "tx_id": hex::encode(verified.tx_id),
                 "effect_hash": hex::encode(verified.effect_hash),
+                "anchor_hex": hex::encode(anchor),
+                "genesis_commitments_hex": genesis_commitments.iter().map(hex::encode).collect::<Vec<_>>(),
+                "nullifiers_hex": verified.nullifiers.iter().map(hex::encode).collect::<Vec<_>>(),
+                "output_commitments_hex": verified.output_commitments.iter().map(hex::encode).collect::<Vec<_>>(),
                 "spends": verified.nullifiers.len(),
                 "outputs": verified.output_commitments.len(),
                 "memo_ciphertext_bytes": 528,

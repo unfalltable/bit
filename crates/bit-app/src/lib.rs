@@ -5,9 +5,11 @@
 //! protobuf requests into these methods without duplicating execution rules.
 
 pub mod abci;
+mod artifacts;
 mod safety;
 mod state_sync;
 
+pub use artifacts::BlockArtifacts;
 pub use safety::{
     acknowledge_safety_halt, decode_hash_hex, encode_hex, read_safety_halt,
     safety_halt_journal_path, SafetyHaltError, SafetyHaltReason, SafetyHaltRecord,
@@ -41,6 +43,10 @@ pub enum Error {
     State(#[from] bit_state::Error),
     #[error("state sync operation failed: {0}")]
     StateSync(String),
+    #[error("block artifact operation failed: {0}")]
+    BlockArtifact(#[from] bit_types::Error),
+    #[error("block artifact shielded payload failed: {0}")]
+    BlockArtifactShielded(#[from] bit_shielded::ShieldedError),
     #[error("FinalizeBlock already produced an uncommitted block")]
     PendingBlockExists,
     #[error("Commit called without a finalized block")]
@@ -118,10 +124,6 @@ pub struct BlockRequest {
     pub height: u64,
     pub block_time_seconds: u64,
     pub transactions: Vec<Vec<u8>>,
-    /// Digest produced by the deterministic business-action executor.
-    pub execution_hash: Hash32,
-    /// Digest produced by the versioned compact-block encoder.
-    pub compact_hash: Hash32,
     /// Actual votes for height `height - 1`; absent only at height one.
     pub last_commit: Option<LastCommit>,
     /// CometBFT-validated Byzantine evidence included in this finalized block.
@@ -143,24 +145,34 @@ pub struct FinalizeOutcome {
     pub transaction_results: Vec<TxResult>,
     pub accepted_transactions: usize,
     pub validator_updates: Vec<ConsensusPowerUpdate>,
+    pub artifacts: BlockArtifacts,
 }
 
 pub struct ApplicationCore {
     state: RwLock<PersistentState>,
     protocol_version: u64,
+    chain_context: Hash32,
     max_block_bytes: u64,
+    max_tx_lifetime_blocks: u64,
+    max_envelope_bytes: usize,
     pending: Mutex<Option<PreparedBlock>>,
 }
 
 impl ApplicationCore {
     pub async fn open(state_path: PathBuf, genesis: GenesisConfig) -> Result<Self> {
         let protocol_version = genesis.protocol_version;
+        let chain_context = genesis.chain_context;
         let max_block_bytes = genesis.max_block_bytes;
+        let max_tx_lifetime_blocks = genesis.max_tx_lifetime_blocks;
+        let max_envelope_bytes = genesis.max_envelope_bytes;
         let state = PersistentState::open(state_path, genesis).await?;
         Ok(Self {
             state: RwLock::new(state),
             protocol_version,
+            chain_context,
             max_block_bytes,
+            max_tx_lifetime_blocks,
+            max_envelope_bytes,
             pending: Mutex::new(None),
         })
     }
@@ -368,12 +380,7 @@ impl ApplicationCore {
         }
         let state = self.state.read().await;
         let mut block = state
-            .begin_block_at(
-                request.height,
-                request.block_time_seconds,
-                request.execution_hash,
-                request.compact_hash,
-            )
+            .begin_block_at(request.height, request.block_time_seconds, [0; 32], [0; 32])
             .await?;
         let system = block
             .stage_consensus_system(
@@ -393,7 +400,26 @@ impl ApplicationCore {
             };
             transaction_results.push(result);
         }
+        let shielded_tree_root = block.preview_shielded_tree_root()?;
+        let artifacts = artifacts::build_block_artifacts(
+            self.chain_context,
+            request.height,
+            request.block_time_seconds,
+            shielded_tree_root,
+            &request.transactions,
+            &transaction_results,
+            &system,
+            self.max_envelope_bytes,
+            self.max_tx_lifetime_blocks,
+        )?;
+        block.set_block_digests(artifacts.execution_hash, artifacts.compact_hash);
         let prepared = block.prepare().await?;
+        if prepared.shielded_tree_root != shielded_tree_root {
+            return Err(bit_state::Error::CorruptState(
+                "compact block tree root differs from prepared state".to_owned(),
+            )
+            .into());
+        }
         let outcome = FinalizeOutcome {
             height: prepared.state_height,
             app_hash: prepared.app_hash,
@@ -401,6 +427,7 @@ impl ApplicationCore {
             accepted_transactions: prepared.transaction_count,
             transaction_results,
             validator_updates: system.validator_updates,
+            artifacts,
         };
         *pending = Some(prepared);
         Ok(outcome)
@@ -529,7 +556,9 @@ mod tests {
         consensus_address, StakingBook, StakingParameters, RECOVERY_RECEIPT_BYTES,
         TESTNET_MIN_SELF_BOND_ATOMIC,
     };
-    use bit_types::{position_id, validator_id, Amount, MonetaryPolicy};
+    use bit_types::{
+        position_id, validator_id, Amount, CompactBlock, ExecutionSummary, MonetaryPolicy,
+    };
     use decaf377::Fq;
     use tempfile::TempDir;
 
@@ -616,22 +645,28 @@ mod tests {
                 height: 1,
                 block_time_seconds: 1,
                 transactions: Vec::new(),
-                execution_hash: [4; 32],
-                compact_hash: [5; 32],
                 last_commit: None,
                 byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
             })
             .await
             .unwrap();
+        let execution =
+            ExecutionSummary::decode_canonical(&finalized.artifacts.execution_summary).unwrap();
+        let compact = CompactBlock::decode_canonical(&finalized.artifacts.compact_block).unwrap();
+        assert_eq!(execution.height, 1);
+        assert_eq!(execution.shielded_tree_root, finalized.shielded_tree_root);
+        assert!(execution.transactions.is_empty());
+        assert_eq!(compact.height, 1);
+        assert_eq!(compact.shielded_tree_root, finalized.shielded_tree_root);
+        assert!(compact.transactions.is_empty());
+        assert_eq!(execution.events, compact.events);
         assert_eq!(app.info().await.unwrap(), initial);
         assert!(matches!(
             app.finalize_block(BlockRequest {
                 height: 1,
                 block_time_seconds: 1,
                 transactions: Vec::new(),
-                execution_hash: [4; 32],
-                compact_hash: [5; 32],
                 last_commit: None,
                 byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
@@ -642,6 +677,20 @@ mod tests {
 
         let committed = app.commit().await.unwrap();
         assert_eq!(committed.app_hash, finalized.app_hash);
+        assert_eq!(
+            app.query_latest_with_proof("execution/block/00000000000000000001")
+                .await
+                .unwrap()
+                .value,
+            Some(finalized.artifacts.execution_hash.to_vec())
+        );
+        assert_eq!(
+            app.query_latest_with_proof("compact/hash/00000000000000000001")
+                .await
+                .unwrap()
+                .value,
+            Some(finalized.artifacts.compact_hash.to_vec())
+        );
         assert_eq!(app.info().await.unwrap().last_block_height, 1);
         assert!(matches!(app.commit().await, Err(Error::NoPendingBlock)));
         app.close().await;
@@ -671,8 +720,6 @@ mod tests {
                 height: 1,
                 block_time_seconds: 1,
                 transactions: vec![vec![1, 2, 3, 4, 5]],
-                execution_hash: [8; 32],
-                compact_hash: [9; 32],
                 last_commit: None,
                 byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
@@ -698,8 +745,6 @@ mod tests {
                 height: 1,
                 block_time_seconds: 1,
                 transactions: vec![vec![0xff]],
-                execution_hash: [6; 32],
-                compact_hash: [7; 32],
                 last_commit: None,
                 byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(1).await.unwrap(),
@@ -736,8 +781,6 @@ mod tests {
                     height,
                     block_time_seconds: height,
                     transactions: Vec::new(),
-                    execution_hash: [height as u8; 32],
-                    compact_hash: [height as u8 + 10; 32],
                     last_commit: (height > 1).then(|| LastCommit { votes: vec![vote] }),
                     byzantine_evidence: Vec::new(),
                     next_validators_hash: app.expected_next_validators_hash(height).await.unwrap(),
@@ -753,8 +796,6 @@ mod tests {
                 height: 3,
                 block_time_seconds: 3,
                 transactions: Vec::new(),
-                execution_hash: [3; 32],
-                compact_hash: [13; 32],
                 last_commit: Some(LastCommit { votes: vec![vote] }),
                 byzantine_evidence: Vec::new(),
                 next_validators_hash: app.expected_next_validators_hash(3).await.unwrap(),
@@ -838,8 +879,6 @@ mod tests {
                 height: 1,
                 block_time_seconds: 1,
                 transactions: Vec::new(),
-                execution_hash: [31; 32],
-                compact_hash: [32; 32],
                 last_commit: None,
                 byzantine_evidence: Vec::new(),
                 next_validators_hash: wrong_hash,
@@ -853,8 +892,6 @@ mod tests {
             height: 1,
             block_time_seconds: 1,
             transactions: Vec::new(),
-            execution_hash: [31; 32],
-            compact_hash: [32; 32],
             last_commit: None,
             byzantine_evidence: Vec::new(),
             next_validators_hash: expected_h1,
@@ -874,8 +911,6 @@ mod tests {
                 height: 2,
                 block_time_seconds: 2,
                 transactions: Vec::new(),
-                execution_hash: [33; 32],
-                compact_hash: [34; 32],
                 last_commit: Some(LastCommit {
                     votes: vec![wrong_vote],
                 }),

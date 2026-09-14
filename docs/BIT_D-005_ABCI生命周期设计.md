@@ -1,6 +1,6 @@
 # BIT D-005 ABCI 生命周期设计
 
-状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心并通过空块、重启和投票权实验；ABCI State Sync 已接入可验证快照、轻客户端可信 app hash 和隔离激活，生产摘要编码器、正式节点命令、真实联网 State Sync 和多节点真实 Transfer 仍未完成。
+状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates，H/H+1/H+2 集合与请求哈希已由持久状态核验。真实四节点 CometBFT 已接入同一 `bit-app`/JMT 核心，并通过真实 Transfer、规范区块摘要、重启、证据处罚和投票权实验；ABCI State Sync 已接入可验证快照、轻客户端可信 app hash 和隔离激活，正式节点命令与真实联网 State Sync 仍未完成。
 
 ## 1. 单一执行入口
 
@@ -42,16 +42,16 @@ FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`�
 
 后续动作只能追加代码，不能重排已发布值。ABCI `ResponseCheckTx` 和 `ExecTxResult` 将直接映射这些数值；日志只作诊断，调用方不能解析日志决定业务状态。
 
-## 5. 未决编码边界
+## 5. 区块产物边界
 
-`BlockRequest` 要求上层业务执行器显式提供 `execution_hash` 和 `compact_hash`。目前没有用零值或临时 JSON 替代 compact block，因为 SPEC-03 尚未冻结。D-006 与 compact 编码任务完成后，两类摘要必须由唯一规范编码器产生，并在 ProcessProposal 与 FinalizeBlock 中得到相同结果。
+`BlockRequest` 不再接受外部提供的 `execution_hash` 或 `compact_hash`。FinalizeBlock 执行全部系统事件和交易后预览最终 TCT 根，由唯一编码器构造版本化 execution summary 与 compact block，再把两个域分离哈希写入同一候选状态。树根、产物和提交批次会在 Commit 前交叉核对；编码失败属于共识关键错误。
 
-ABCI 适配通过 `FinalizeDigestProvider` 强制注入两个摘要来源；没有默认零值或用区块 hash 代替 compact hash 的降级路径。摘要生成失败会让应用进入 halted 状态。四节点实验使用明确标记的域分离请求摘要，只用于在 SPEC-03 冻结前驱动真实应用状态机，不能作为生产 compact 编码。
+ABCI `bit.block.v1` 事件公开高度、两个摘要和 compact 字节数，状态键 `execution/block/<height>` 与 `compact/hash/<height>` 可用 ICS23 proof 核对。精确字节合同、排序、限制和哈希公式见 [D-002 区块产物规范编码](D:/others/BIT/docs/BIT_D-002_区块产物规范编码.md)。完整产物归档和下载服务仍待实现。
 
 ## 6. 当前验证与下一切片
 
 当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。State Sync 用例在两个独立应用间传输真实 RocksDB checkpoint，覆盖错误 format/app hash、超量 chunk、非空目标拒绝、manifest 延后到达、坏块定位与 peer 拒绝、恢复后的高度/app hash/ICS23 proof、活动标记临时文件恢复和损坏标记拒绝启动。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励，检查返回的 Ed25519 key/power 更新只在 H+2 集合生效且重启后保持一致；错误请求哈希、commit power、缺失 commit、错误地址、非正 power、未知 block-id flag，以及证据的未知类型、缺失字段、非法地址/power/height/time 均被拒绝。
 
-`comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。测试确认奖励更新在 H+2 生效；一个应用从 durable JMT 状态重启并追块，四节点在同一固定高度的 app hash 相同，最新状态返回 ICS23 proof。集成注入器使用隔离网络的临时验证人密钥构造 CometBFT 可验证的冲突 prevote，通过标准 RPC 广播后，四个应用一致执行证据持久化、Burn 和 H+2 验证人移除。处罚后停止一个仍有投票权的验证者，剩余 power 恰为三分之二时链停止，恢复该验证者后继续出块。每次运行的精确高度和证据哈希写入 `feasibility/reports/bit-app-network-result.json`。
+`comet_network_probe` 和 `run_bit_app_network.py` 启动四个由 CometBFT Go module v0.38.23 构建的进程及四个真实 BIT 应用状态实例，并同时记录二进制自报版本与 SHA-256。测试从两个创世承诺广播一笔冻结的 2 Spend/2 Output Groth16 Transfer，核对 CheckTx、入块结果、交易/nullifier 状态证明、TCT 根、execution/compact 摘要、ABCI 事件和四节点 app hash；还确认奖励更新在 H+2 生效、应用从 durable JMT 状态重启并追块。集成注入器使用隔离网络的临时验证人密钥构造 CometBFT 可验证的冲突 prevote，通过标准 RPC 广播后，四个应用一致执行证据持久化、Burn 和 H+2 验证人移除。处罚后停止一个仍有投票权的验证者，剩余 power 恰为三分之二时链停止，恢复该验证者后继续出块。每次运行的精确高度和哈希写入 `feasibility/reports/bit-app-network-result.json`。
 
-下一步实现版本化 execution/compact 编码器及创世语义校验，形成正式节点命令，再把真实 Transfer 和退出放进四节点重放与崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人及历史高度证明。
+下一步实现完整区块产物归档/下载和创世语义校验，形成正式节点命令，再把真实退出放进四节点重放与崩溃恢复实验。D-010 继续用真实 CometBFT 新节点验证 State Sync 的发现、下载、可信期和断点恢复，并补独立证人及历史高度证明。

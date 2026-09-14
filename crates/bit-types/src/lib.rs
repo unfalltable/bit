@@ -5,12 +5,18 @@
 //! authorization signatures and does not contain mainnet genesis values.
 
 mod amount;
+mod block;
 mod cbor;
 mod envelope;
 mod policy;
 mod tx;
 
 pub use amount::{Amount, MAX_AMOUNT_EXCLUSIVE, MAX_SUPPLY_ATOMIC};
+pub use block::{
+    block_artifact_hash, AcceptedExecution, ActivationResult, BlockEvent, CompactBlock,
+    CompactTransaction, ExecutionResult, ExecutionSummary, ValidatorPowerRecord,
+    ValidatorRewardRecord, COMPACT_BLOCK_DOMAIN, EXECUTION_SUMMARY_DOMAIN,
+};
 pub use envelope::{ed25519_authorization_message, Authorization, Envelope, Role};
 pub use policy::{quota, scheduled_issuance, MonetaryPolicy};
 pub use tx::{
@@ -24,6 +30,7 @@ use core::fmt;
 pub enum Error {
     InvalidAmount,
     InvalidCbor(&'static str),
+    InvalidBlockArtifact(&'static str),
     InvalidEnvelope(&'static str),
     InvalidPolicy(&'static str),
     InvalidTransaction(&'static str),
@@ -35,6 +42,7 @@ impl fmt::Display for Error {
         match self {
             Self::InvalidAmount => f.write_str("amount must be below 2^120"),
             Self::InvalidCbor(reason) => write!(f, "invalid canonical CBOR: {reason}"),
+            Self::InvalidBlockArtifact(reason) => write!(f, "invalid block artifact: {reason}"),
             Self::InvalidEnvelope(reason) => write!(f, "invalid canonical envelope: {reason}"),
             Self::InvalidPolicy(reason) => write!(f, "invalid monetary policy: {reason}"),
             Self::InvalidTransaction(reason) => write!(f, "invalid transaction: {reason}"),

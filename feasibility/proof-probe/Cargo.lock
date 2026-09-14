@@ -448,10 +448,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bit-emission"
+version = "0.1.0"
+dependencies = [
+ "bit-types",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "bit-proof-probe"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bit-emission",
  "bit-shielded",
  "bit-transaction",
  "bit-types",
@@ -491,8 +500,10 @@ dependencies = [
 name = "bit-transaction"
 version = "0.1.0"
 dependencies = [
+ "bit-emission",
  "bit-shielded",
  "bit-types",
+ "ed25519-consensus",
 ]
 
 [[package]]
@@ -1094,7 +1105,9 @@ dependencies = [
  "curve25519-dalek-ng",
  "hex",
  "rand_core",
+ "serde",
  "sha2 0.9.9",
+ "thiserror 1.0.69",
  "zeroize",
 ]
 
