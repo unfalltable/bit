@@ -174,6 +174,14 @@ impl Action {
             } if *requested_amount == Amount::ZERO => {
                 Err(Error::InvalidTransaction("commission claim is zero"))
             }
+            Self::Unbond { shares, .. } if *shares == Amount::ZERO => {
+                Err(Error::InvalidTransaction("unbond shares are zero"))
+            }
+            Self::ClaimExit {
+                expected_release, ..
+            } if *expected_release == Amount::ZERO => {
+                Err(Error::InvalidTransaction("exit claim is zero"))
+            }
             _ => Ok(()),
         }
     }

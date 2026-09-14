@@ -14,7 +14,7 @@
 
 | 键 | 值 | 约束 |
 |---|---|---|
-| `meta/version` | 4 字节大端 schema 版本 | 当前为 11，未知版本拒绝启动 |
+| `meta/version` | 4 字节大端 schema 版本 | 当前为 13，未知版本拒绝启动 |
 | `meta/height` | 8 字节大端状态高度 | 必须等于 Cnidarium 最新版本 |
 | `meta/block_time_seconds` | 8 字节大端 Unix 秒 | ABCI 区块时间，不允许相对 durable 状态倒退 |
 | `meta/chain_context` | 32 字节 | 创世后不可变 |
@@ -46,11 +46,14 @@
 | `fees/new_position_surcharge_atomic` | 16 字节大端 Amount | 创建持仓附加费 |
 | `fees/validator_registration_surcharge_atomic` | 16 字节大端 Amount | 注册验证者附加费 |
 | `genesis/unclaimed_total` | 16 字节大端 Amount | 未领取创世分配 G |
-| `staking/parameters` | v3 严格持久化记录 | 创世后不可变，包含最低委托、自质押、容量、投票权、在线率、jail、佣金通知和证据窗口参数 |
+| `staking/parameters` | v4 严格持久化记录 | 创世后不可变，另含退出双窗口、Byzantine 罚没率和每块 cohort 处理上限 |
 | `staking/validators/<validator_id>` | v5 Validator 记录 | 键必须匹配 operator 与 chain context 派生 ID；含 sequence、累计佣金、签名窗口/epoch score、待生效变更、jail 标记和共识键历史 |
 | `staking/pools/<validator_id>` | v1 StakePool 记录 | pool 资产和 pending 分别交叉核对 P、D |
 | `staking/positions/<position_id>` | v1 StakePosition 记录 | owner 不可修改，恢复收据严格为 512 字节 |
 | `staking/capacity/<epoch_hex>` | v1 ActivationCapacity 记录 | 接受数减取消数不得下溢 |
+| `staking/candidates/<validator_id>` | v1 CandidateIndex 记录 | stake 降序、ID 升序索引必须与 validator/pool/position 精确一致 |
+| `staking/exits/cohorts/<cohort_id>` | v1 ExitCohort 记录 | C/U、暴露和成熟双条件、状态必须与票据及参数一致 |
+| `staking/exits/tickets/<ticket_id>` | v1 ExitTicket 记录 | owner/position/cohort/units/sequence/claimed 严格交叉校验 |
 | `staking/effective_schedule` | v1 三高度实际集合记录 | 在已提交高度 H 保存 H/H+1/H+2 的规范顺序、power 和 CometBFT 集合哈希 |
 | `shielded/tree_root` | 32 字节 TCT 根 | 必须与 frontier 重算结果一致 |
 | `shielded/tree_frontier` | 固定依赖版本的 bincode TCT | 纳入 JMT；解码前限制为 64 MiB |
@@ -63,7 +66,7 @@
 
 初始化时按签名创世清单的顺序校验并插入隐私承诺，然后关闭高度零 TCT block；非法字段元素或重复承诺会在写盘前拒绝。清单摘要使用 `BIT-GENESIS-COMMITMENTS-V1 || count_be_u64 || commitments` 的 SHA-256，重启配置必须给出同一有序清单。主网清单仍属于未批准外部输入。
 
-TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11；逐验证人的持久化候选排序记录进入 schema v12。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
+TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11；逐验证人的持久化候选排序记录进入 schema v12；退出参数、cohort 和 ticket 进入 schema v13。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
 
 ## 3. 块生命周期
 
@@ -96,7 +99,7 @@ Prepare 结果被丢弃时，数据库版本不变。重启后从最后 durable 
 - `T = Q + ΣP + D + ΣX + ΣC + F + G = G0 + Mint - Burn`，且 `Mint + K` 必须等于按 epoch 已调度额度；任一持久化字段被独立篡改时节点拒绝打开。
 - 最低费使用完整规范 envelope 字节数向上取整到 KiB，并叠加 Spend/Output proof 数量和动作附加费；低费交易在 Groth16 前拒绝，费率配置变化时旧数据库拒绝打开。
 - `completed_epochs` 必须等于提交高度推导出的 `max(0,(h-1)/epoch_blocks)`；缺少边界系统结算时 Prepare 失败且 durable 高度不推进。
-- validator、pool、position 和 activation-capacity 使用独立 JMT 键；重启逐项解码并重建账本，拒绝键/ID 不符、非法编码、质押参数变化、份额索引不一致及 `sum(P)`/`sum(D)`/`sum(C)` 与供应容器不一致。
+- validator、pool、position、activation-capacity、candidate、exit cohort 和 exit ticket 使用独立 JMT 键；重启逐项解码并重建账本，拒绝键/ID 不符、非法编码、质押参数变化、份额/候选/票据索引不一致及 `sum(P)`/`sum(D)`/`sum(X)`/`sum(C)` 与供应容器不一致。
 - 实际验证者按 CometBFT 的 power 降序、地址升序形成唯一集合并计算原生集合哈希；错误的 `next_validators_hash`、last commit 成员、顺序或 power 在修改系统状态前拒绝。
 - H 返回的 ValidatorUpdates 只改变 H+2 集合；三高度滚动日程与质押逻辑集合在 Prepare 和重启时交叉核对。任何错误会回滚系统阶段的内存变更，移除最后一个有效验证者返回 `HALT_NO_SAFE_VALIDATOR_SET`。
 

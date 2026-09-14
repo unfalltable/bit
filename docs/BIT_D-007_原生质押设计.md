@@ -1,6 +1,6 @@
 # BIT D-007 原生质押设计
 
-状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；实际签名 score、在线率窗口、自动奖励、增量候选索引、CometBFT ValidatorUpdates、H/H+1/H+2 实际集合核验和最后有效验证者保护已实现。不包含 D-008 的退出与处罚实现。
+状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；实际签名 score、在线率窗口、自动奖励、增量候选索引、CometBFT ValidatorUpdates、H/H+1/H+2 实际集合核验和最后有效验证者保护已实现。退出与处罚由 D-008 单独跟踪。
 
 ## 1. 唯一身份与对象
 
@@ -65,5 +65,5 @@ ABCI PrepareProposal、ProcessProposal 和 FinalizeBlock 使用请求中的规�
 
 ## 6. 完成 D-007 还需要
 
-1. 增量候选索引已经实现并进入 JMT；下一步进入 D-008 退出 cohort、ticket、证据去重与 SlashJob。
+1. 增量候选索引已经实现并进入 JMT；D-008 已完成退出 cohort/ticket 第一阶段，证据去重与 SlashJob 继续推进。
 2. 在正式节点命令和生产摘要完成后，把真实质押交易加入多节点崩溃重放。

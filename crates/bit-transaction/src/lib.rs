@@ -55,6 +55,20 @@ pub enum VerifiedStakingAction {
         expected_release: Amount,
         fee_source: FeeSource,
     },
+    Unbond {
+        position_id: Hash32,
+        expected_sequence: u64,
+        shares: Amount,
+        minimum_gross: Amount,
+        maximum_fee: Amount,
+        fee_source: FeeSource,
+    },
+    ClaimExit {
+        ticket_id: Hash32,
+        expected_sequence: u64,
+        expected_release: Amount,
+        fee_source: FeeSource,
+    },
     UpdateValidator {
         validator_id: Hash32,
         expected_sequence: u64,
@@ -100,10 +114,31 @@ pub trait ActionAuthorizationView {
     fn pending_position(&self, _position_id: &Hash32) -> Option<PendingPositionAuthorization> {
         None
     }
+
+    fn active_position(&self, _position_id: &Hash32) -> Option<PositionAuthorization> {
+        None
+    }
+
+    fn exit_ticket(&self, _ticket_id: &Hash32) -> Option<ExitTicketAuthorization> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PendingPositionAuthorization {
+    pub owner: Hash32,
+    pub sequence: u64,
+    pub release: Amount,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PositionAuthorization {
+    pub owner: Hash32,
+    pub sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExitTicketAuthorization {
     pub owner: Hash32,
     pub sequence: u64,
     pub release: Amount,
@@ -146,6 +181,7 @@ pub enum Error {
     NullifierAlreadySpent,
     TransactionAlreadyApplied,
     FeeTooLow { required: Amount, provided: Amount },
+    FeeAboveMaximum { maximum: Amount, provided: Amount },
     FeeCalculation(bit_emission::Error),
     IdentifierMismatch(&'static str),
     AuthorizationKeyNotFound { role: Role, id: Hash32 },
@@ -171,6 +207,12 @@ impl fmt::Display for Error {
                 write!(
                     f,
                     "transaction fee {provided} is below required minimum {required}"
+                )
+            }
+            Self::FeeAboveMaximum { maximum, provided } => {
+                write!(
+                    f,
+                    "transaction fee {provided} exceeds signed maximum {maximum}"
                 )
             }
             Self::FeeCalculation(error) => write!(f, "minimum fee calculation failed: {error}"),
@@ -428,6 +470,82 @@ pub fn verify_staking_stateless<S: ActionAuthorizationView + ?Sized>(
                 expected_release.value(),
             )
         }
+        Action::Unbond {
+            position_id,
+            expected_sequence,
+            shares,
+            min_gross,
+            max_fee,
+            fee_source,
+        } => {
+            if body.fee > *max_fee {
+                return Err(Error::FeeAboveMaximum {
+                    maximum: *max_fee,
+                    provided: body.fee,
+                });
+            }
+            match fee_source {
+                FeeSource::Shielded if body.spends.is_empty() => {
+                    return Err(Error::InvalidFeeSource(
+                        "SHIELDED requires at least one private Spend",
+                    ));
+                }
+                FeeSource::ReleasedValue if body.fee >= *min_gross => {
+                    return Err(Error::InvalidFeeSource(
+                        "RELEASED_VALUE requires minimum gross greater than fee",
+                    ));
+                }
+                _ => {}
+            }
+            (
+                VerifiedStakingAction::Unbond {
+                    position_id: *position_id,
+                    expected_sequence: *expected_sequence,
+                    shares: *shares,
+                    minimum_gross: *min_gross,
+                    maximum_fee: *max_fee,
+                    fee_source: *fee_source,
+                },
+                FeeClass::Standard,
+                0,
+                if *fee_source == FeeSource::ReleasedValue {
+                    body.fee.value()
+                } else {
+                    0
+                },
+            )
+        }
+        Action::ClaimExit {
+            ticket_id,
+            expected_sequence,
+            expected_release,
+            fee_source,
+        } => {
+            match fee_source {
+                FeeSource::Shielded if body.spends.is_empty() => {
+                    return Err(Error::InvalidFeeSource(
+                        "SHIELDED requires at least one private Spend",
+                    ));
+                }
+                FeeSource::ReleasedValue if *expected_release <= body.fee => {
+                    return Err(Error::InvalidFeeSource(
+                        "RELEASED_VALUE requires release greater than fee",
+                    ));
+                }
+                _ => {}
+            }
+            (
+                VerifiedStakingAction::ClaimExit {
+                    ticket_id: *ticket_id,
+                    expected_sequence: *expected_sequence,
+                    expected_release: *expected_release,
+                    fee_source: *fee_source,
+                },
+                FeeClass::Standard,
+                0,
+                expected_release.value(),
+            )
+        }
         Action::UpdateValidator {
             validator_id,
             expected_sequence,
@@ -588,7 +706,7 @@ pub fn verify_staking_authorizations<S: ActionAuthorizationView + ?Sized>(
         .checked_sub(match action {
             Action::Delegate { self_bond, .. } => 1 + usize::from(*self_bond),
             Action::RegisterValidator { .. } => 2,
-            Action::CancelPending { .. } => 1,
+            Action::CancelPending { .. } | Action::Unbond { .. } | Action::ClaimExit { .. } => 1,
             Action::UpdateValidator { .. }
             | Action::UnjailValidator { .. }
             | Action::ClaimCommission { .. } => 1,
@@ -673,6 +791,52 @@ pub fn verify_staking_authorizations<S: ActionAuthorizationView + ?Sized>(
                 &envelope.authorizations[first],
                 Role::PositionOwner,
                 &pending.owner,
+                effect_hash,
+            )?;
+        }
+        Action::Unbond {
+            position_id,
+            expected_sequence,
+            ..
+        } => {
+            let position = authorization_view.active_position(position_id).ok_or(
+                Error::AuthorizationKeyNotFound {
+                    role: Role::PositionOwner,
+                    id: *position_id,
+                },
+            )?;
+            if position.sequence != *expected_sequence {
+                return Err(Error::StaleStateQuote("position sequence"));
+            }
+            verify_ed25519(
+                &envelope.authorizations[first],
+                Role::PositionOwner,
+                &position.owner,
+                effect_hash,
+            )?;
+        }
+        Action::ClaimExit {
+            ticket_id,
+            expected_sequence,
+            expected_release,
+            ..
+        } => {
+            let ticket = authorization_view.exit_ticket(ticket_id).ok_or(
+                Error::AuthorizationKeyNotFound {
+                    role: Role::PositionOwner,
+                    id: *ticket_id,
+                },
+            )?;
+            if ticket.sequence != *expected_sequence {
+                return Err(Error::StaleStateQuote("exit ticket sequence"));
+            }
+            if ticket.release != *expected_release {
+                return Err(Error::StaleStateQuote("exit release"));
+            }
+            verify_ed25519(
+                &envelope.authorizations[first],
+                Role::PositionOwner,
+                &ticket.owner,
                 effect_hash,
             )?;
         }
@@ -971,6 +1135,27 @@ mod tests {
 
         fn pending_position(&self, position_id: &Hash32) -> Option<PendingPositionAuthorization> {
             (*position_id == self.position_id).then_some(self.pending)
+        }
+    }
+
+    struct ExitView {
+        position_id: Hash32,
+        position: PositionAuthorization,
+        ticket_id: Hash32,
+        ticket: ExitTicketAuthorization,
+    }
+
+    impl ActionAuthorizationView for ExitView {
+        fn validator_operator(&self, _validator_id: &Hash32) -> Option<Hash32> {
+            None
+        }
+
+        fn active_position(&self, position_id: &Hash32) -> Option<PositionAuthorization> {
+            (*position_id == self.position_id).then_some(self.position)
+        }
+
+        fn exit_ticket(&self, ticket_id: &Hash32) -> Option<ExitTicketAuthorization> {
+            (*ticket_id == self.ticket_id).then_some(self.ticket)
         }
     }
 
@@ -1290,6 +1475,85 @@ mod tests {
         assert!(matches!(
             verify_staking_authorizations(&envelope, &stale, &body.chain_context, &effect, &view),
             Err(Error::StaleStateQuote("position sequence"))
+        ));
+    }
+
+    #[test]
+    fn unbond_and_exit_claim_bind_live_owner_sequences_and_quote() {
+        let chain = chain_context([0x55; 32]);
+        let owner_key = Ed25519SigningKey::from([0x45; 32]);
+        let owner = owner_key.verification_key().to_bytes();
+        let position = position_id(&chain, &owner);
+        let exit_ticket = [0x46; 32];
+        let view = ExitView {
+            position_id: position,
+            position: PositionAuthorization { owner, sequence: 7 },
+            ticket_id: exit_ticket,
+            ticket: ExitTicketAuthorization {
+                owner,
+                sequence: 2,
+                release: Amount::new(500).unwrap(),
+            },
+        };
+
+        let unbond = Action::Unbond {
+            position_id: position,
+            expected_sequence: 7,
+            shares: Amount::new(1).unwrap(),
+            min_gross: Amount::new(1).unwrap(),
+            max_fee: Amount::new(10).unwrap(),
+            fee_source: FeeSource::ReleasedValue,
+        };
+        let (_, body) = staking_envelope(unbond.clone(), vec![]);
+        let effect = body.effect_hash().unwrap();
+        let (envelope, _) = staking_envelope(
+            unbond.clone(),
+            vec![ed25519_authorization(
+                Role::PositionOwner,
+                &owner_key,
+                &effect,
+            )],
+        );
+        verify_staking_authorizations(&envelope, &unbond, &chain, &effect, &view).unwrap();
+        let mut stale_unbond = unbond;
+        if let Action::Unbond {
+            expected_sequence, ..
+        } = &mut stale_unbond
+        {
+            *expected_sequence = 6;
+        }
+        assert!(matches!(
+            verify_staking_authorizations(&envelope, &stale_unbond, &chain, &effect, &view),
+            Err(Error::StaleStateQuote("position sequence"))
+        ));
+
+        let claim = Action::ClaimExit {
+            ticket_id: exit_ticket,
+            expected_sequence: 2,
+            expected_release: Amount::new(500).unwrap(),
+            fee_source: FeeSource::ReleasedValue,
+        };
+        let (_, body) = staking_envelope(claim.clone(), vec![]);
+        let effect = body.effect_hash().unwrap();
+        let (envelope, _) = staking_envelope(
+            claim.clone(),
+            vec![ed25519_authorization(
+                Role::PositionOwner,
+                &owner_key,
+                &effect,
+            )],
+        );
+        verify_staking_authorizations(&envelope, &claim, &chain, &effect, &view).unwrap();
+        let mut stale_claim = claim;
+        if let Action::ClaimExit {
+            expected_release, ..
+        } = &mut stale_claim
+        {
+            *expected_release = Amount::new(499).unwrap();
+        }
+        assert!(matches!(
+            verify_staking_authorizations(&envelope, &stale_claim, &chain, &effect, &view),
+            Err(Error::StaleStateQuote("exit release"))
         ));
     }
 

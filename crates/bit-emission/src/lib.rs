@@ -498,6 +498,57 @@ impl SupplyState {
         Ok(())
     }
 
+    /// Remove redeemed principal from P and place its net value in X. A
+    /// released-value fee is retained directly from the redeemed principal;
+    /// a shielded fee is debited independently from Q.
+    pub fn open_exit(
+        &mut self,
+        policy: &MonetaryPolicy,
+        gross: Amount,
+        fee: Amount,
+        fee_source: FeeSource,
+    ) -> Result<Amount> {
+        if fee_source == FeeSource::ReleasedValue && fee >= gross {
+            return Err(Error::Insufficient("released unbond value"));
+        }
+        let exit_assets = if fee_source == FeeSource::ReleasedValue {
+            amount(gross.value() - fee.value())?
+        } else {
+            gross
+        };
+        let mut next = self.clone();
+        next.stake_total = subtract(next.stake_total, gross, "stake total")?;
+        next.exit_total = amount(add(next.exit_total.value(), exit_assets.value())?)?;
+        if fee_source == FeeSource::Shielded {
+            next.shielded_total = subtract(next.shielded_total, fee, "shielded total")?;
+        }
+        next.fee_reserve = amount(add(next.fee_reserve.value(), fee.value())?)?;
+        next.validate(policy)?;
+        *self = next;
+        Ok(exit_assets)
+    }
+
+    /// Release a mature exit ticket from X into Q and collect its fee.
+    pub fn release_exit(
+        &mut self,
+        policy: &MonetaryPolicy,
+        released: Amount,
+        fee: Amount,
+        fee_source: FeeSource,
+    ) -> Result<()> {
+        if fee_source == FeeSource::ReleasedValue && fee > released {
+            return Err(Error::Insufficient("released exit value"));
+        }
+        let mut next = self.clone();
+        next.exit_total = subtract(next.exit_total, released, "exit total")?;
+        next.shielded_total = amount(add(next.shielded_total.value(), released.value())?)?;
+        next.shielded_total = subtract(next.shielded_total, fee, "shielded total")?;
+        next.fee_reserve = amount(add(next.fee_reserve.value(), fee.value())?)?;
+        next.validate(policy)?;
+        *self = next;
+        Ok(())
+    }
+
     pub fn burn_from(
         &mut self,
         policy: &MonetaryPolicy,
@@ -809,6 +860,56 @@ mod tests {
             state.audit(&policy).unwrap().scheduled_to_date.value(),
             policy.scheduled(2).unwrap()
         );
+    }
+
+    #[test]
+    fn unbond_and_claim_move_value_through_exit_container_atomically() {
+        let policy = policy();
+        let mut state = SupplyState::genesis(
+            &policy,
+            GenesisAllocation::shielded_only(policy.genesis_supply),
+        )
+        .unwrap();
+        let principal = Amount::new(1_000).unwrap();
+        state
+            .open_pending_delegation(&policy, principal, Amount::ZERO)
+            .unwrap();
+        state
+            .activate_pending_delegation(&policy, principal)
+            .unwrap();
+
+        let gross = Amount::new(400).unwrap();
+        let fee = Amount::new(10).unwrap();
+        let exit_assets = state
+            .open_exit(&policy, gross, fee, FeeSource::ReleasedValue)
+            .unwrap();
+        assert_eq!(exit_assets, Amount::new(390).unwrap());
+        assert_eq!(state.stake_total, Amount::new(600).unwrap());
+        assert_eq!(state.exit_total, exit_assets);
+        assert_eq!(state.fee_reserve, fee);
+
+        state
+            .release_exit(&policy, exit_assets, fee, FeeSource::ReleasedValue)
+            .unwrap();
+        assert_eq!(state.exit_total, Amount::ZERO);
+        assert_eq!(state.fee_reserve, Amount::new(20).unwrap());
+        assert_eq!(
+            state.shielded_total.value(),
+            policy.genesis_supply.value() - 600 - 20
+        );
+        state.validate(&policy).unwrap();
+
+        let before = state.clone();
+        assert!(matches!(
+            state.open_exit(
+                &policy,
+                Amount::new(1).unwrap(),
+                Amount::new(1).unwrap(),
+                FeeSource::ReleasedValue,
+            ),
+            Err(Error::Insufficient("released unbond value"))
+        ));
+        assert_eq!(state, before);
     }
 
     #[test]

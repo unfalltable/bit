@@ -10,14 +10,15 @@ use bit_emission::{
 };
 use bit_staking::{
     ActivationCapacityRecord, ActivationOutcome, CandidateIndexEntry, CommitVote,
-    ConsensusPowerUpdate, EffectiveValidatorSet, PositionStatus, StakePool, StakePosition,
-    StakingBook, StakingParameters, StakingTotals, Validator, ValidatorPower, ValidatorReward,
-    ValidatorSetTransition, ValidatorUpdate,
+    ConsensusPowerUpdate, EffectiveValidatorSet, ExitAdvanceOutcome, ExitCohort, ExitTicket,
+    PositionStatus, StakePool, StakePosition, StakingBook, StakingParameters, StakingTotals,
+    Validator, ValidatorPower, ValidatorReward, ValidatorSetTransition, ValidatorUpdate,
 };
 use bit_transaction::{
     verify_staking_stateless, verify_transfer_stateless, ActionAuthorizationView,
-    PendingPositionAuthorization, StatelessVerificationContext, VerifiedStakingAction,
-    VerifiedStakingTransaction, VerifiedTransfer,
+    ExitTicketAuthorization, PendingPositionAuthorization, PositionAuthorization,
+    StatelessVerificationContext, VerifiedStakingAction, VerifiedStakingTransaction,
+    VerifiedTransfer,
 };
 use bit_types::{Action, Amount, Envelope, MonetaryPolicy};
 use cnidarium::{Snapshot, StagedWriteBatch, StateDelta, StateRead, StateWrite, Storage};
@@ -35,7 +36,7 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 12;
+const STORAGE_SCHEMA_VERSION: u32 = 13;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -77,6 +78,8 @@ const STAKING_POOL_PREFIX: &str = "staking/pools/";
 const STAKING_POSITION_PREFIX: &str = "staking/positions/";
 const STAKING_CAPACITY_PREFIX: &str = "staking/capacity/";
 const STAKING_CANDIDATE_PREFIX: &str = "staking/candidates/";
+const STAKING_EXIT_COHORT_PREFIX: &str = "staking/exits/cohorts/";
+const STAKING_EXIT_TICKET_PREFIX: &str = "staking/exits/tickets/";
 const STAKING_EFFECTIVE_SCHEDULE: &str = "staking/effective_schedule";
 
 const SUBSTORES: &[&str] = &[
@@ -148,6 +151,8 @@ impl GenesisConfig {
         let staking_totals = self.genesis_staking.totals()?;
         if staking_totals.pooled_assets != self.genesis_allocation.stake
             || staking_totals.pending_assets != self.genesis_allocation.pending_delegation
+            || staking_totals.exit_assets != self.genesis_allocation.exits
+            || staking_totals.commission_assets != self.genesis_allocation.commission
         {
             return Err(Error::InvalidConfig(
                 "genesis staking totals differ from supply allocation",
@@ -256,6 +261,7 @@ pub struct SystemBlockOutcome {
     pub activations: Vec<(Hash32, ActivationOutcome)>,
     pub validator_set: Option<Vec<ValidatorPower>>,
     pub validator_updates: Vec<ConsensusPowerUpdate>,
+    pub exit_advance: ExitAdvanceOutcome,
 }
 
 /// Three-height rolling schedule. At committed height H it stores the exact
@@ -714,6 +720,8 @@ struct StakingTouches {
     pools: BTreeSet<Hash32>,
     positions: BTreeSet<Hash32>,
     capacity_epochs: BTreeSet<u64>,
+    exit_cohorts: BTreeSet<Hash32>,
+    exit_tickets: BTreeSet<Hash32>,
 }
 
 struct StakingAuthorizationSnapshot<'a>(&'a StakingBook);
@@ -740,6 +748,25 @@ impl ActionAuthorizationView for StakingAuthorizationSnapshot<'_> {
             })
         })
     }
+
+    fn active_position(&self, position_id: &Hash32) -> Option<PositionAuthorization> {
+        self.0.position(position_id).and_then(|position| {
+            (position.status == PositionStatus::Active).then_some(PositionAuthorization {
+                owner: position.owner_pubkey,
+                sequence: position.sequence,
+            })
+        })
+    }
+
+    fn exit_ticket(&self, ticket_id: &Hash32) -> Option<ExitTicketAuthorization> {
+        let ticket = self.0.exit_ticket(ticket_id)?;
+        let release = self.0.exit_quote(ticket_id).ok()?;
+        Some(ExitTicketAuthorization {
+            owner: ticket.owner_pubkey,
+            sequence: ticket.sequence,
+            release,
+        })
+    }
 }
 
 impl BlockSession<'_> {
@@ -761,6 +788,8 @@ impl BlockSession<'_> {
             Action::RegisterValidator { .. }
             | Action::Delegate { .. }
             | Action::CancelPending { .. }
+            | Action::Unbond { .. }
+            | Action::ClaimExit { .. }
             | Action::UpdateValidator { .. }
             | Action::UnjailValidator { .. }
             | Action::RotateConsensusKey { .. }
@@ -837,6 +866,16 @@ impl BlockSession<'_> {
             );
         }
 
+        let exit_advance = self
+            .staking
+            .advance_exit_cohorts(self.height, self.block_time_seconds)?;
+        self.staking_touches
+            .exit_cohorts
+            .extend(exit_advance.exposure_recorded.iter().copied());
+        self.staking_touches
+            .exit_cohorts
+            .extend(exit_advance.matured.iter().copied());
+
         let mut reward_settlement = None;
         let mut activations = Vec::new();
         let mut validator_set = None;
@@ -887,6 +926,7 @@ impl BlockSession<'_> {
             activations,
             validator_set,
             validator_updates,
+            exit_advance,
         })
     }
 
@@ -1337,6 +1377,8 @@ impl BlockSession<'_> {
             Action::RegisterValidator { .. }
                 | Action::Delegate { .. }
                 | Action::CancelPending { .. }
+                | Action::Unbond { .. }
+                | Action::ClaimExit { .. }
                 | Action::UpdateValidator { .. }
                 | Action::UnjailValidator { .. }
                 | Action::RotateConsensusKey { .. }
@@ -1484,6 +1526,83 @@ impl BlockSession<'_> {
                 touches.pools.insert(position.validator_id);
                 touches.capacity_epochs.insert(position.activation_epoch);
             }
+            VerifiedStakingAction::Unbond {
+                position_id,
+                expected_sequence,
+                shares,
+                minimum_gross,
+                maximum_fee,
+                fee_source,
+            } => {
+                let position = candidate_staking
+                    .position(position_id)
+                    .ok_or(bit_staking::Error::PositionNotFound)?
+                    .clone();
+                let epoch_blocks = self.owner.config.monetary_policy.epoch_blocks;
+                let current_epoch = self.height.saturating_sub(1) / epoch_blocks;
+                let exposure_end_height = current_epoch
+                    .checked_add(1)
+                    .and_then(|epoch| epoch.checked_mul(epoch_blocks))
+                    .and_then(|height| height.checked_add(2))
+                    .ok_or(bit_staking::Error::Overflow)?;
+                let outcome = candidate_staking.unbond(
+                    position_id,
+                    *expected_sequence,
+                    *shares,
+                    *minimum_gross,
+                    verified.shielded.fee,
+                    *maximum_fee,
+                    *fee_source,
+                    current_epoch,
+                    exposure_end_height,
+                )?;
+                let exit_assets = candidate_supply.open_exit(
+                    &self.owner.config.monetary_policy,
+                    outcome.gross,
+                    verified.shielded.fee,
+                    *fee_source,
+                )?;
+                if exit_assets != outcome.exit_assets {
+                    return Err(Error::CorruptState(
+                        "staking and supply exit quotes differ".to_owned(),
+                    ));
+                }
+                touches.positions.insert(*position_id);
+                touches.pools.insert(position.validator_id);
+                if position.self_bond {
+                    touches.validators.insert(position.validator_id);
+                }
+                touches.exit_cohorts.insert(outcome.cohort_id);
+                touches.exit_tickets.insert(outcome.ticket_id);
+            }
+            VerifiedStakingAction::ClaimExit {
+                ticket_id,
+                expected_sequence,
+                expected_release,
+                fee_source,
+            } => {
+                let ticket = candidate_staking
+                    .exit_ticket(ticket_id)
+                    .ok_or(bit_staking::Error::ExitTicketNotFound)?
+                    .clone();
+                let released = candidate_staking.claim_exit(
+                    ticket_id,
+                    *expected_sequence,
+                    self.height,
+                    self.block_time_seconds,
+                )?;
+                if released != *expected_release {
+                    return Err(bit_transaction::Error::StaleStateQuote("exit release").into());
+                }
+                candidate_supply.release_exit(
+                    &self.owner.config.monetary_policy,
+                    released,
+                    verified.shielded.fee,
+                    *fee_source,
+                )?;
+                touches.exit_cohorts.insert(ticket.cohort_id);
+                touches.exit_tickets.insert(*ticket_id);
+            }
             VerifiedStakingAction::UpdateValidator {
                 validator_id,
                 expected_sequence,
@@ -1581,6 +1700,12 @@ impl BlockSession<'_> {
         self.staking_touches
             .capacity_epochs
             .extend(touches.capacity_epochs);
+        self.staking_touches
+            .exit_cohorts
+            .extend(touches.exit_cohorts);
+        self.staking_touches
+            .exit_tickets
+            .extend(touches.exit_tickets);
         Ok(())
     }
 
@@ -2055,6 +2180,18 @@ fn write_staking_genesis(delta: &mut StateDelta<Snapshot>, staking: &StakingBook
             candidate.encode_persistent(),
         );
     }
+    for cohort in staking.exit_cohorts() {
+        delta.put_raw(
+            staking_exit_cohort_key(&cohort.cohort_id),
+            cohort.encode_persistent()?,
+        );
+    }
+    for ticket in staking.exit_tickets() {
+        delta.put_raw(
+            staking_exit_ticket_key(&ticket.ticket_id),
+            ticket.encode_persistent(),
+        );
+    }
     Ok(())
 }
 
@@ -2096,6 +2233,18 @@ fn write_staking_updates(
         } else {
             delta.delete(key);
         }
+    }
+    for id in &touches.exit_cohorts {
+        let cohort = staking
+            .exit_cohort(id)
+            .ok_or_else(|| Error::CorruptState("touched exit cohort is missing".to_owned()))?;
+        delta.put_raw(staking_exit_cohort_key(id), cohort.encode_persistent()?);
+    }
+    for id in &touches.exit_tickets {
+        let ticket = staking
+            .exit_ticket(id)
+            .ok_or_else(|| Error::CorruptState("touched exit ticket is missing".to_owned()))?;
+        delta.put_raw(staking_exit_ticket_key(id), ticket.encode_persistent());
     }
     Ok(())
 }
@@ -2164,6 +2313,22 @@ async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result
         require_hash_key(&key, STAKING_CANDIDATE_PREFIX, &candidate.validator_id)?;
         candidate_index.push(candidate);
     }
+    let mut exit_cohorts = Vec::new();
+    let mut cohort_stream = snapshot.prefix_raw(STAKING_EXIT_COHORT_PREFIX);
+    while let Some(entry) = cohort_stream.next().await {
+        let (key, value) = entry?;
+        let cohort = ExitCohort::decode_persistent(&value)?;
+        require_hash_key(&key, STAKING_EXIT_COHORT_PREFIX, &cohort.cohort_id)?;
+        exit_cohorts.push(cohort);
+    }
+    let mut exit_tickets = Vec::new();
+    let mut ticket_stream = snapshot.prefix_raw(STAKING_EXIT_TICKET_PREFIX);
+    while let Some(entry) = ticket_stream.next().await {
+        let (key, value) = entry?;
+        let ticket = ExitTicket::decode_persistent(&value)?;
+        require_hash_key(&key, STAKING_EXIT_TICKET_PREFIX, &ticket.ticket_id)?;
+        exit_tickets.push(ticket);
+    }
     Ok(StakingBook::from_records(
         chain_context,
         parameters,
@@ -2172,6 +2337,8 @@ async fn read_staking_book(snapshot: &Snapshot, chain_context: Hash32) -> Result
         positions,
         capacity,
         candidate_index,
+        exit_cohorts,
+        exit_tickets,
     )?)
 }
 
@@ -2190,6 +2357,11 @@ fn validate_staking_supply(staking: &StakingBook, supply: &SupplyState) -> Resul
     if totals.commission_assets != supply.commission_total {
         return Err(Error::CorruptState(
             "validator commissions do not equal the C supply container".to_owned(),
+        ));
+    }
+    if totals.exit_assets != supply.exit_total {
+        return Err(Error::CorruptState(
+            "exit cohorts do not equal the X supply container".to_owned(),
         ));
     }
     Ok(())
@@ -2222,6 +2394,14 @@ pub fn staking_capacity_key(epoch: u64) -> String {
 
 pub fn staking_candidate_key(id: &Hash32) -> String {
     hash_key("staking/candidates", id)
+}
+
+pub fn staking_exit_cohort_key(id: &Hash32) -> String {
+    hash_key("staking/exits/cohorts", id)
+}
+
+pub fn staking_exit_ticket_key(id: &Hash32) -> String {
+    hash_key("staking/exits/tickets", id)
 }
 
 async fn read_fee_policy(snapshot: &Snapshot) -> Result<FeePolicy> {
@@ -2420,8 +2600,8 @@ mod tests {
     use super::*;
     use bit_staking::StakingParameters;
     use bit_types::{
-        chain_context, ed25519_authorization_message, position_id, proof_hash, validator_id,
-        Action, Amount, Authorization, Envelope, Role, TxBody,
+        chain_context, cohort_id, ed25519_authorization_message, position_id, proof_hash,
+        ticket_id, validator_id, Action, Amount, Authorization, Envelope, FeeSource, Role, TxBody,
     };
     use decaf377::Fr;
     use decaf377_rdsa::{Binding, SigningKey};
@@ -2485,6 +2665,8 @@ mod tests {
         Transfer,
         RegisterValidator,
         Delegate,
+        Unbond,
+        ClaimExit,
         UpdateValidator,
         UnjailValidator,
         RotateConsensusKey,
@@ -2587,6 +2769,97 @@ mod tests {
                     0,
                     0,
                 )
+            }
+            RealActionKind::Unbond | RealActionKind::ClaimExit => {
+                let operator = [0x75; 32];
+                let consensus = [0x76; 32];
+                let owner_key = Ed25519SigningKey::from([0x77; 32]);
+                let owner = owner_key.verification_key().to_bytes();
+                let self_owner = [0x78; 32];
+                let target = validator_id(&chain, &operator);
+                let self_position = position_id(&chain, &self_owner);
+                let delegated_position = position_id(&chain, &owner);
+                let self_bond = Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
+                let delegation = Amount::new(bit_staking::TESTNET_MIN_DELEGATION_ATOMIC).unwrap();
+                let mut parameters = StakingParameters::reference_testnet();
+                parameters.evidence_max_age_blocks = 1;
+                parameters.evidence_max_age_seconds = 1;
+                parameters.unbonding_blocks = 2;
+                parameters.unbonding_seconds = 2;
+                genesis_staking = StakingBook::new(chain, parameters).unwrap();
+                genesis_staking
+                    .register_validator(target, operator, consensus, 500)
+                    .unwrap();
+                for (position, position_owner, amount, is_self_bond, receipt) in [
+                    (self_position, self_owner, self_bond, true, 0x79),
+                    (delegated_position, owner, delegation, false, 0x7a),
+                ] {
+                    genesis_staking
+                        .open_pending_delegation(
+                            0,
+                            0,
+                            position,
+                            position_owner,
+                            target,
+                            amount,
+                            Amount::ZERO,
+                            is_self_bond,
+                            vec![receipt; bit_staking::RECOVERY_RECEIPT_BYTES],
+                        )
+                        .unwrap();
+                    genesis_staking.activate_pending(&position, 1).unwrap();
+                }
+                let fee = 1_000_000u128;
+                match kind {
+                    RealActionKind::Unbond => (
+                        Action::Unbond {
+                            position_id: delegated_position,
+                            expected_sequence: 1,
+                            shares: delegation,
+                            min_gross: delegation,
+                            max_fee: Amount::new(fee).unwrap(),
+                            fee_source: FeeSource::ReleasedValue,
+                        },
+                        fee,
+                        0,
+                        fee,
+                        vec![(Role::PositionOwner, owner_key)],
+                        self_bond.value() + delegation.value(),
+                        0,
+                    ),
+                    RealActionKind::ClaimExit => {
+                        let exit = genesis_staking
+                            .unbond(
+                                &delegated_position,
+                                1,
+                                delegation,
+                                delegation,
+                                Amount::ZERO,
+                                Amount::ZERO,
+                                FeeSource::Shielded,
+                                0,
+                                0,
+                            )
+                            .unwrap();
+                        genesis_staking.advance_exit_cohorts(0, 0).unwrap();
+                        genesis_staking.advance_exit_cohorts(3, 3).unwrap();
+                        (
+                            Action::ClaimExit {
+                                ticket_id: exit.ticket_id,
+                                expected_sequence: 0,
+                                expected_release: delegation,
+                                fee_source: FeeSource::ReleasedValue,
+                            },
+                            fee,
+                            0,
+                            delegation.value(),
+                            vec![(Role::PositionOwner, owner_key)],
+                            self_bond.value(),
+                            0,
+                        )
+                    }
+                    _ => unreachable!(),
+                }
             }
             RealActionKind::UpdateValidator => {
                 let operator_key = Ed25519SigningKey::from([0x81; 32]);
@@ -2715,6 +2988,8 @@ mod tests {
                     StakingParameters::reference_testnet(),
                     [validator],
                     [pool],
+                    [],
+                    [],
                     [],
                     [],
                     [],
@@ -2917,10 +3192,13 @@ mod tests {
         }
         .encode_canonical(1, 100)
         .unwrap();
+        let genesis_exits = genesis_staking.totals().unwrap().exit_assets.value();
         let native_asset_id = asset::Id(Fq::from(1u64)).to_bytes();
         let monetary_policy = MonetaryPolicy {
-            genesis_supply: Amount::new(15_000_000_000 + genesis_stake + genesis_commission)
-                .unwrap(),
+            genesis_supply: Amount::new(
+                15_000_000_000 + genesis_stake + genesis_exits + genesis_commission,
+            )
+            .unwrap(),
             epoch_blocks: 720,
             halving_interval_epochs: 35_040,
         };
@@ -2937,7 +3215,7 @@ mod tests {
                     shielded: Amount::new(15_000_000_000).unwrap(),
                     stake: Amount::new(genesis_stake).unwrap(),
                     pending_delegation: Amount::ZERO,
-                    exits: Amount::ZERO,
+                    exits: Amount::new(genesis_exits).unwrap(),
                     commission: Amount::new(genesis_commission).unwrap(),
                     fee_reserve: Amount::ZERO,
                     unclaimed_genesis: Amount::ZERO,
@@ -3563,6 +3841,234 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unbond_and_claim_exit_persist_across_exposure_and_maturity() {
+        let dir = TempDir::new().unwrap();
+        let mut genesis_config = config(16);
+        genesis_config.monetary_policy.epoch_blocks = 2;
+        let mut parameters = StakingParameters::reference_testnet();
+        parameters.evidence_max_age_blocks = 1;
+        parameters.evidence_max_age_seconds = 1;
+        parameters.unbonding_blocks = 2;
+        parameters.unbonding_seconds = 2;
+
+        let chain = genesis_config.chain_context;
+        let operator = [0xd1; 32];
+        let validator = validator_id(&chain, &operator);
+        let consensus_pubkey = [0xd2; 32];
+        let self_owner = [0xd3; 32];
+        let self_position = position_id(&chain, &self_owner);
+        let delegator = [0xd4; 32];
+        let delegated_position = position_id(&chain, &delegator);
+        let self_bond = Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
+        let delegation = Amount::new(bit_staking::TESTNET_MIN_DELEGATION_ATOMIC).unwrap();
+
+        let mut staking = StakingBook::new(chain, parameters).unwrap();
+        staking
+            .register_validator(validator, operator, consensus_pubkey, 500)
+            .unwrap();
+        for (position, owner, amount, is_self_bond, receipt) in [
+            (self_position, self_owner, self_bond, true, 0xd5),
+            (delegated_position, delegator, delegation, false, 0xd6),
+        ] {
+            staking
+                .open_pending_delegation(
+                    0,
+                    0,
+                    position,
+                    owner,
+                    validator,
+                    amount,
+                    Amount::ZERO,
+                    is_self_bond,
+                    vec![receipt; bit_staking::RECOVERY_RECEIPT_BYTES],
+                )
+                .unwrap();
+            staking.activate_pending(&position, 1).unwrap();
+        }
+        staking.apply_validator_set().unwrap();
+        let initial_stake = Amount::new(self_bond.value() + delegation.value()).unwrap();
+        genesis_config.genesis_staking = staking;
+        genesis_config.genesis_allocation = GenesisAllocation {
+            shielded: Amount::ZERO,
+            stake: initial_stake,
+            pending_delegation: Amount::ZERO,
+            exits: Amount::ZERO,
+            commission: Amount::ZERO,
+            fee_reserve: Amount::ZERO,
+            unclaimed_genesis: Amount::new(
+                genesis_config.monetary_policy.genesis_supply.value() - initial_stake.value(),
+            )
+            .unwrap(),
+        };
+
+        let unbond_fee = Amount::new(10).unwrap();
+        let exit_assets = Amount::new(delegation.value() - unbond_fee.value()).unwrap();
+        let expected_ticket = ticket_id(&chain, &delegated_position, 1);
+        let expected_cohort = cohort_id(&chain, &validator, 0);
+        let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+        let first_hash = state.expected_next_validators_hash(1).await.unwrap();
+        let first_summary = state.summary().await.unwrap();
+        let mut first = state
+            .begin_block_at(1, 1, [0xd7; 32], [0xd8; 32])
+            .await
+            .unwrap();
+        first.stage_consensus_system(None, first_hash).unwrap();
+        let mut unbond = empty_verified_staking(
+            0xd9,
+            first_summary.shielded_tree_root,
+            VerifiedStakingAction::Unbond {
+                position_id: delegated_position,
+                expected_sequence: 1,
+                shares: delegation,
+                minimum_gross: delegation,
+                maximum_fee: unbond_fee,
+                fee_source: FeeSource::ReleasedValue,
+            },
+        );
+        unbond.shielded.fee = unbond_fee;
+        first.stage_verified_staking(&unbond).await.unwrap();
+        let first_receipt = state.commit(first.prepare().await.unwrap()).unwrap();
+        assert_eq!(first_receipt.staking.pooled_assets, self_bond);
+        assert_eq!(first_receipt.staking.exit_assets, exit_assets);
+        assert_eq!(first_receipt.supply.stake_total, self_bond);
+        assert_eq!(first_receipt.supply.exit_total, exit_assets);
+        assert_eq!(first_receipt.supply.fee_reserve, unbond_fee);
+        for key in [
+            staking_exit_cohort_key(&expected_cohort),
+            staking_exit_ticket_key(&expected_ticket),
+        ] {
+            let proof = state.query_latest_with_proof(&key).await.unwrap();
+            assert!(proof.value.is_some(), "missing exit key {key}");
+            proof.verify().unwrap();
+        }
+        state.close().await;
+
+        let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+        let reopened = state.staking_book().unwrap();
+        assert_eq!(reopened.exit_quote(&expected_ticket).unwrap(), exit_assets);
+        assert_eq!(
+            reopened.exit_cohort(&expected_cohort).unwrap().status,
+            bit_staking::ExitCohortStatus::PendingExposure
+        );
+
+        for height in 2..=6 {
+            let previous_set = state.effective_validator_set_at(height - 1).await.unwrap();
+            let votes: Vec<_> = previous_set
+                .validators()
+                .iter()
+                .map(|validator| CommitVote {
+                    consensus_address: bit_staking::consensus_address(&validator.consensus_pubkey),
+                    power: validator.power,
+                    signed: true,
+                })
+                .collect();
+            let next_hash = state.expected_next_validators_hash(height).await.unwrap();
+            let summary = state.summary().await.unwrap();
+            let mut block = state
+                .begin_block_at(height, height, [height as u8; 32], [height as u8 + 1; 32])
+                .await
+                .unwrap();
+            let system = block
+                .stage_consensus_system(Some(&votes), next_hash)
+                .unwrap();
+            if height == 4 {
+                assert!(system
+                    .exit_advance
+                    .exposure_recorded
+                    .contains(&expected_cohort));
+            }
+            if height == 6 {
+                assert!(!system.exit_advance.matured.contains(&expected_cohort));
+                let claim = empty_verified_staking(
+                    0xda,
+                    summary.shielded_tree_root,
+                    VerifiedStakingAction::ClaimExit {
+                        ticket_id: expected_ticket,
+                        expected_sequence: 0,
+                        expected_release: exit_assets,
+                        fee_source: FeeSource::ReleasedValue,
+                    },
+                );
+                assert!(matches!(
+                    block.stage_verified_staking(&claim).await,
+                    Err(Error::Staking(bit_staking::Error::ExitNotMature))
+                ));
+            }
+            state.commit(block.prepare().await.unwrap()).unwrap();
+        }
+
+        let previous_set = state.effective_validator_set_at(6).await.unwrap();
+        let votes: Vec<_> = previous_set
+            .validators()
+            .iter()
+            .map(|validator| CommitVote {
+                consensus_address: bit_staking::consensus_address(&validator.consensus_pubkey),
+                power: validator.power,
+                signed: true,
+            })
+            .collect();
+        let next_hash = state.expected_next_validators_hash(7).await.unwrap();
+        let summary = state.summary().await.unwrap();
+        let mut claim_block = state
+            .begin_block_at(7, 7, [0xdb; 32], [0xdc; 32])
+            .await
+            .unwrap();
+        let system = claim_block
+            .stage_consensus_system(Some(&votes), next_hash)
+            .unwrap();
+        assert!(system.exit_advance.matured.contains(&expected_cohort));
+        let claim_fee = Amount::new(1).unwrap();
+        let mut claim = empty_verified_staking(
+            0xdd,
+            summary.shielded_tree_root,
+            VerifiedStakingAction::ClaimExit {
+                ticket_id: expected_ticket,
+                expected_sequence: 0,
+                expected_release: exit_assets,
+                fee_source: FeeSource::ReleasedValue,
+            },
+        );
+        claim.shielded.fee = claim_fee;
+        claim_block.stage_verified_staking(&claim).await.unwrap();
+        let receipt = state.commit(claim_block.prepare().await.unwrap()).unwrap();
+        assert_eq!(receipt.staking.exit_assets, Amount::ZERO);
+        assert_eq!(receipt.supply.exit_total, Amount::ZERO);
+        assert_eq!(
+            receipt.supply.shielded_total,
+            Amount::new(exit_assets.value() - claim_fee.value()).unwrap()
+        );
+        // The earlier unbond fee was distributed at an epoch boundary; only
+        // the claim fee remains in the current reserve.
+        assert_eq!(receipt.supply.fee_reserve, claim_fee);
+        state.close().await;
+
+        let reopened = PersistentState::open(dir.path().to_path_buf(), genesis_config)
+            .await
+            .unwrap();
+        let staking = reopened.staking_book().unwrap();
+        let ticket = staking.exit_ticket(&expected_ticket).unwrap();
+        assert!(ticket.claimed);
+        assert_eq!(ticket.sequence, 1);
+        let cohort = staking.exit_cohort(&expected_cohort).unwrap();
+        assert_eq!(cohort.status, bit_staking::ExitCohortStatus::Mature);
+        assert_eq!(cohort.assets, Amount::ZERO);
+        assert_eq!(cohort.total_units, Amount::ZERO);
+        for key in [
+            staking_exit_cohort_key(&expected_cohort),
+            staking_exit_ticket_key(&expected_ticket),
+        ] {
+            let proof = reopened.query_latest_with_proof(&key).await.unwrap();
+            assert!(proof.value.is_some());
+            proof.verify().unwrap();
+        }
+        reopened.close().await;
+    }
+
+    #[tokio::test]
     async fn epoch_rewards_move_fee_reserve_into_old_pools_and_commission_atomically() {
         let dir = TempDir::new().unwrap();
         let mut genesis_config = config(8);
@@ -3962,6 +4468,7 @@ mod tests {
         for kind in [
             RealActionKind::RegisterValidator,
             RealActionKind::Delegate,
+            RealActionKind::Unbond,
             RealActionKind::UpdateValidator,
             RealActionKind::UnjailValidator,
             RealActionKind::RotateConsensusKey,
@@ -3986,6 +4493,7 @@ mod tests {
                 Action::RegisterValidator { .. } => FeeClass::ValidatorRegistration,
                 Action::Delegate { .. } => FeeClass::NewPosition,
                 Action::UpdateValidator { .. }
+                | Action::Unbond { .. }
                 | Action::UnjailValidator { .. }
                 | Action::RotateConsensusKey { .. }
                 | Action::ClaimCommission { .. } => FeeClass::Standard,
@@ -4074,6 +4582,34 @@ mod tests {
                         staking_position_key(&position_id),
                         staking_pool_key(&validator_id),
                         staking_capacity_key(1),
+                    ] {
+                        let proof = state.query_latest_with_proof(&key).await.unwrap();
+                        assert!(proof.value.is_some());
+                        proof.verify().unwrap();
+                    }
+                }
+                Action::Unbond {
+                    position_id,
+                    shares,
+                    fee_source,
+                    ..
+                } => {
+                    let staking = state.staking_book().unwrap();
+                    let position = staking.position(&position_id).unwrap();
+                    assert_eq!(position.status, PositionStatus::Closed);
+                    assert_eq!(position.sequence, 2);
+                    let expected_exit = Amount::new(shares.value() - body.fee.value()).unwrap();
+                    let expected_ticket = ticket_id(&genesis_config.chain_context, &position_id, 1);
+                    let ticket = staking.exit_ticket(&expected_ticket).unwrap();
+                    assert_eq!(ticket.owner_pubkey, position.owner_pubkey);
+                    assert_eq!(staking.exit_quote(&expected_ticket).unwrap(), expected_exit);
+                    assert_eq!(receipt.supply.exit_total, expected_exit);
+                    assert_eq!(receipt.supply.fee_reserve, body.fee);
+                    assert_eq!(fee_source, FeeSource::ReleasedValue);
+                    for key in [
+                        staking_position_key(&position_id),
+                        staking_exit_cohort_key(&ticket.cohort_id),
+                        staking_exit_ticket_key(&expected_ticket),
                     ] {
                         let proof = state.query_latest_with_proof(&key).await.unwrap();
                         assert!(proof.value.is_some());
@@ -4189,6 +4725,85 @@ mod tests {
             assert!(reopened.transaction_is_applied(&tx_id).await.unwrap());
             reopened.close().await;
         }
+    }
+
+    #[tokio::test]
+    async fn real_claim_exit_envelope_releases_the_persisted_quote() {
+        let (genesis_config, envelope_bytes) = real_action_fixture(RealActionKind::ClaimExit);
+        let decoded = Envelope::decode_canonical(&envelope_bytes, 65_536, 3, 100).unwrap();
+        let body = decoded.validate(3, 100).unwrap();
+        let (ticket_id, expected_release) = match body.action {
+            Action::ClaimExit {
+                ticket_id,
+                expected_release,
+                ..
+            } => (ticket_id, expected_release),
+            _ => unreachable!(),
+        };
+        let dir = TempDir::new().unwrap();
+        let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+        let genesis = state.summary().await.unwrap();
+        assert_eq!(genesis.supply.exit_total, expected_release);
+        let empty_commit: &[CommitVote] = &[];
+        for height in 1..=2 {
+            let next_hash = state.expected_next_validators_hash(height).await.unwrap();
+            let mut block = state
+                .begin_block_at(height, height, [height as u8; 32], [height as u8 + 1; 32])
+                .await
+                .unwrap();
+            block
+                .stage_consensus_system((height > 1).then_some(empty_commit), next_hash)
+                .unwrap();
+            state.commit(block.prepare().await.unwrap()).unwrap();
+        }
+        let next_hash = state.expected_next_validators_hash(3).await.unwrap();
+        let mut block = state
+            .begin_block_at(3, 3, [0xe1; 32], [0xe2; 32])
+            .await
+            .unwrap();
+        block.stage_consensus_system(Some(&[]), next_hash).unwrap();
+        let applied = block
+            .verify_and_stage_transaction(&envelope_bytes)
+            .await
+            .unwrap();
+        let receipt = state.commit(block.prepare().await.unwrap()).unwrap();
+        assert!(state.transaction_is_applied(&applied).await.unwrap());
+        assert_eq!(receipt.supply.exit_total, Amount::ZERO);
+        assert_eq!(
+            receipt.supply.shielded_total.value(),
+            genesis.supply.shielded_total.value() + expected_release.value() - body.fee.value()
+        );
+        assert_eq!(receipt.supply.fee_reserve, body.fee);
+        let ticket = state
+            .staking_book()
+            .unwrap()
+            .exit_ticket(&ticket_id)
+            .unwrap()
+            .clone();
+        assert!(ticket.claimed);
+        assert_eq!(ticket.sequence, 1);
+        state
+            .query_latest_with_proof(&staking_exit_ticket_key(&ticket_id))
+            .await
+            .unwrap()
+            .verify()
+            .unwrap();
+        state.close().await;
+
+        let reopened = PersistentState::open(dir.path().to_path_buf(), genesis_config)
+            .await
+            .unwrap();
+        assert!(
+            reopened
+                .staking_book()
+                .unwrap()
+                .exit_ticket(&ticket_id)
+                .unwrap()
+                .claimed
+        );
+        reopened.close().await;
     }
 
     #[tokio::test]

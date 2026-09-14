@@ -4,7 +4,7 @@
 //! persistent storage, exit cohorts, and slashing are connected by later
 //! layers; no method here treats a caller as authorized.
 
-use bit_types::{position_id, validator_id, Amount};
+use bit_types::{cohort_id, position_id, ticket_id, validator_id, Amount, FeeSource};
 use primitive_types::U256;
 use sha2::{Digest, Sha256};
 use std::{
@@ -101,12 +101,38 @@ pub enum Error {
     PositionSequenceMismatch,
     #[error("position cannot activate before its activation epoch")]
     ActivationTooEarly,
+    #[error("position is not active")]
+    PositionNotActive,
     #[error("stake pool is insolvent and requires a new generation")]
     InsolventPool,
     #[error("stake pool has assets without shares")]
     InconsistentPool,
     #[error("share amount is zero or exceeds the pool")]
     InvalidShares,
+    #[error("unbond quote is below the signed minimum")]
+    GrossBelowMinimum,
+    #[error("transaction fee exceeds the signed maximum")]
+    FeeExceedsMaximum,
+    #[error("released-value fee must be smaller than the unbond amount")]
+    InvalidReleasedValueFee,
+    #[error("active self bond cannot remove the final eligible validator")]
+    LastValidatorBond,
+    #[error("exit cohort not found")]
+    ExitCohortNotFound,
+    #[error("exit ticket not found")]
+    ExitTicketNotFound,
+    #[error("exit ticket identifier already exists")]
+    ExitTicketAlreadyExists,
+    #[error("exit ticket sequence does not match the expected value")]
+    ExitTicketSequenceMismatch,
+    #[error("exit ticket was already claimed")]
+    ExitTicketAlreadyClaimed,
+    #[error("exit cohort is not mature")]
+    ExitNotMature,
+    #[error("exit cohort cannot accept additional value")]
+    ExitCohortClosed,
+    #[error("exit cohort is insolvent")]
+    InsolventExitCohort,
     #[error("voting power exceeds the configured safe bound")]
     VotingPowerExceeded,
     #[error("staking invariant failed: {0}")]
@@ -136,6 +162,10 @@ pub struct StakingParameters {
     pub evidence_max_age_blocks: u64,
     pub downtime_window: u32,
     pub min_signed_bps: u16,
+    pub unbonding_seconds: u64,
+    pub unbonding_blocks: u64,
+    pub byzantine_slash_bps: u16,
+    pub slash_cohorts_per_block: u16,
 }
 
 impl StakingParameters {
@@ -158,6 +188,10 @@ impl StakingParameters {
             evidence_max_age_blocks: 120_960,
             downtime_window: 10_000,
             min_signed_bps: 9_500,
+            unbonding_seconds: 1_209_600,
+            unbonding_blocks: 241_920,
+            byzantine_slash_bps: 500,
+            slash_cohorts_per_block: 128,
         }
     }
 
@@ -207,12 +241,25 @@ impl StakingParameters {
                 "minimum signed ratio must be 1..=10000 bps",
             ));
         }
+        if self.unbonding_seconds <= self.evidence_max_age_seconds
+            || self.unbonding_blocks <= self.evidence_max_age_blocks
+        {
+            return Err(Error::InvalidParameters(
+                "unbonding windows must exceed evidence windows",
+            ));
+        }
+        if self.byzantine_slash_bps == 0
+            || self.byzantine_slash_bps > 10_000
+            || self.slash_cohorts_per_block == 0
+        {
+            return Err(Error::InvalidParameters("invalid slashing parameters"));
+        }
         Ok(())
     }
 
     pub fn encode_persistent(&self) -> Vec<u8> {
         let mut writer = Writer::new();
-        writer.u8(3);
+        writer.u8(4);
         writer.amount(self.min_delegation);
         writer.amount(self.min_self_bond);
         writer.u16(self.max_validators);
@@ -230,12 +277,16 @@ impl StakingParameters {
         writer.u64(self.evidence_max_age_blocks);
         writer.u32(self.downtime_window);
         writer.u16(self.min_signed_bps);
+        writer.u64(self.unbonding_seconds);
+        writer.u64(self.unbonding_blocks);
+        writer.u16(self.byzantine_slash_bps);
+        writer.u16(self.slash_cohorts_per_block);
         writer.finish()
     }
 
     pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
         let mut reader = Reader::new(bytes);
-        reader.version(3)?;
+        reader.version(4)?;
         let parameters = Self {
             min_delegation: reader.amount()?,
             min_self_bond: reader.amount()?,
@@ -254,6 +305,10 @@ impl StakingParameters {
             evidence_max_age_blocks: reader.u64()?,
             downtime_window: reader.u32()?,
             min_signed_bps: reader.u16()?,
+            unbonding_seconds: reader.u64()?,
+            unbonding_blocks: reader.u64()?,
+            byzantine_slash_bps: reader.u16()?,
+            slash_cohorts_per_block: reader.u16()?,
         };
         reader.finish()?;
         parameters.validate()?;
@@ -1056,11 +1111,184 @@ impl CandidateIndexEntry {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExitCohortStatus {
+    PendingExposure,
+    Unbonding,
+    Mature,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExitCohort {
+    pub cohort_id: Hash32,
+    pub validator_id: Hash32,
+    pub exit_epoch: u64,
+    pub assets: Amount,
+    pub total_units: Amount,
+    pub exposure_end_height: u64,
+    pub exposure_end_time_seconds: Option<u64>,
+    pub maturity_height: u64,
+    pub maturity_time_seconds: Option<u64>,
+    pub status: ExitCohortStatus,
+}
+
+impl ExitCohort {
+    fn quote_added_units(&self, assets: Amount) -> Result<Amount> {
+        match (self.assets.value(), self.total_units.value()) {
+            (0, 0) => Ok(assets),
+            (0, _) => Err(Error::InsolventExitCohort),
+            (_, 0) => Err(Error::Invariant("exit cohort has assets without units")),
+            (current_assets, current_units) => {
+                floor_mul_div(assets.value(), current_units, current_assets)
+            }
+        }
+    }
+
+    fn quote_claim(&self, units: Amount) -> Result<Amount> {
+        if units == Amount::ZERO || units > self.total_units {
+            return Err(Error::InvalidShares);
+        }
+        if units == self.total_units {
+            return Ok(self.assets);
+        }
+        floor_mul_div(units.value(), self.assets.value(), self.total_units.value())
+    }
+
+    pub fn encode_persistent(&self) -> Result<Vec<u8>> {
+        let times = match (self.exposure_end_time_seconds, self.maturity_time_seconds) {
+            (Some(exposure), Some(maturity)) => Some((exposure, maturity)),
+            (None, None) => None,
+            _ => {
+                return Err(Error::InvalidEncoding(
+                    "exit cohort time pair is incomplete",
+                ))
+            }
+        };
+        let mut writer = Writer::new();
+        writer.u8(1);
+        writer.hash32(&self.cohort_id);
+        writer.hash32(&self.validator_id);
+        writer.u64(self.exit_epoch);
+        writer.amount(self.assets);
+        writer.amount(self.total_units);
+        writer.u64(self.exposure_end_height);
+        writer.boolean(times.is_some());
+        if let Some((exposure, maturity)) = times {
+            writer.u64(exposure);
+            writer.u64(maturity);
+        }
+        writer.u64(self.maturity_height);
+        writer.u8(match self.status {
+            ExitCohortStatus::PendingExposure => 0,
+            ExitCohortStatus::Unbonding => 1,
+            ExitCohortStatus::Mature => 2,
+        });
+        Ok(writer.finish())
+    }
+
+    pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(bytes);
+        reader.version(1)?;
+        let cohort_id = reader.hash32()?;
+        let validator_id = reader.hash32()?;
+        let exit_epoch = reader.u64()?;
+        let assets = reader.amount()?;
+        let total_units = reader.amount()?;
+        let exposure_end_height = reader.u64()?;
+        let (exposure_end_time_seconds, maturity_time_seconds) = if reader.boolean()? {
+            (Some(reader.u64()?), Some(reader.u64()?))
+        } else {
+            (None, None)
+        };
+        let maturity_height = reader.u64()?;
+        let status = match reader.u8()? {
+            0 => ExitCohortStatus::PendingExposure,
+            1 => ExitCohortStatus::Unbonding,
+            2 => ExitCohortStatus::Mature,
+            _ => return Err(Error::InvalidEncoding("unknown exit cohort status")),
+        };
+        reader.finish()?;
+        Ok(Self {
+            cohort_id,
+            validator_id,
+            exit_epoch,
+            assets,
+            total_units,
+            exposure_end_height,
+            exposure_end_time_seconds,
+            maturity_height,
+            maturity_time_seconds,
+            status,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExitTicket {
+    pub ticket_id: Hash32,
+    pub position_id: Hash32,
+    pub owner_pubkey: PubKey32,
+    pub cohort_id: Hash32,
+    pub units: Amount,
+    pub created_position_sequence: u64,
+    pub sequence: u64,
+    pub claimed: bool,
+}
+
+impl ExitTicket {
+    pub fn encode_persistent(&self) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.u8(1);
+        writer.hash32(&self.ticket_id);
+        writer.hash32(&self.position_id);
+        writer.hash32(&self.owner_pubkey);
+        writer.hash32(&self.cohort_id);
+        writer.amount(self.units);
+        writer.u64(self.created_position_sequence);
+        writer.u64(self.sequence);
+        writer.boolean(self.claimed);
+        writer.finish()
+    }
+
+    pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(bytes);
+        reader.version(1)?;
+        let ticket = Self {
+            ticket_id: reader.hash32()?,
+            position_id: reader.hash32()?,
+            owner_pubkey: reader.hash32()?,
+            cohort_id: reader.hash32()?,
+            units: reader.amount()?,
+            created_position_sequence: reader.u64()?,
+            sequence: reader.u64()?,
+            claimed: reader.boolean()?,
+        };
+        reader.finish()?;
+        Ok(ticket)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UnbondOutcome {
+    pub ticket_id: Hash32,
+    pub cohort_id: Hash32,
+    pub gross: Amount,
+    pub exit_assets: Amount,
+    pub units: Amount,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ExitAdvanceOutcome {
+    pub exposure_recorded: BTreeSet<Hash32>,
+    pub matured: BTreeSet<Hash32>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StakingTotals {
     pub pooled_assets: Amount,
     pub pending_assets: Amount,
     pub commission_assets: Amount,
     pub total_shares: Amount,
+    pub exit_assets: Amount,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1073,6 +1301,8 @@ pub struct StakingBook {
     capacity: BTreeMap<u64, CapacityLedger>,
     candidate_index: BTreeSet<CandidateIndexEntry>,
     candidate_lookup: BTreeMap<Hash32, CandidateIndexEntry>,
+    exit_cohorts: BTreeMap<Hash32, ExitCohort>,
+    exit_tickets: BTreeMap<Hash32, ExitTicket>,
 }
 
 impl StakingBook {
@@ -1100,6 +1330,8 @@ impl StakingBook {
             capacity: BTreeMap::new(),
             candidate_index: BTreeSet::new(),
             candidate_lookup: BTreeMap::new(),
+            exit_cohorts: BTreeMap::new(),
+            exit_tickets: BTreeMap::new(),
         })
     }
 
@@ -1111,6 +1343,7 @@ impl StakingBook {
         &self.parameters
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_records(
         chain_context: Hash32,
         parameters: StakingParameters,
@@ -1119,6 +1352,8 @@ impl StakingBook {
         positions: impl IntoIterator<Item = StakePosition>,
         capacity: impl IntoIterator<Item = ActivationCapacityRecord>,
         candidate_index: impl IntoIterator<Item = CandidateIndexEntry>,
+        exit_cohorts: impl IntoIterator<Item = ExitCohort>,
+        exit_tickets: impl IntoIterator<Item = ExitTicket>,
     ) -> Result<Self> {
         parameters.validate()?;
         let mut book = Self {
@@ -1130,6 +1365,8 @@ impl StakingBook {
             capacity: BTreeMap::new(),
             candidate_index: BTreeSet::new(),
             candidate_lookup: BTreeMap::new(),
+            exit_cohorts: BTreeMap::new(),
+            exit_tickets: BTreeMap::new(),
         };
         for validator in validators {
             let id = validator.validator_id;
@@ -1176,6 +1413,18 @@ impl StakingBook {
                 return Err(Error::InvalidEncoding("duplicate candidate index record"));
             }
         }
+        for cohort in exit_cohorts {
+            let id = cohort.cohort_id;
+            if book.exit_cohorts.insert(id, cohort).is_some() {
+                return Err(Error::InvalidEncoding("duplicate exit cohort record"));
+            }
+        }
+        for ticket in exit_tickets {
+            let id = ticket.ticket_id;
+            if book.exit_tickets.insert(id, ticket).is_some() {
+                return Err(Error::InvalidEncoding("duplicate exit ticket record"));
+            }
+        }
         book.validate()?;
         Ok(book)
     }
@@ -1208,6 +1457,22 @@ impl StakingBook {
 
     pub fn candidate_record(&self, id: &Hash32) -> Option<CandidateIndexEntry> {
         self.candidate_lookup.get(id).copied()
+    }
+
+    pub fn exit_cohorts(&self) -> impl Iterator<Item = &ExitCohort> {
+        self.exit_cohorts.values()
+    }
+
+    pub fn exit_tickets(&self) -> impl Iterator<Item = &ExitTicket> {
+        self.exit_tickets.values()
+    }
+
+    pub fn exit_cohort(&self, id: &Hash32) -> Option<&ExitCohort> {
+        self.exit_cohorts.get(id)
+    }
+
+    pub fn exit_ticket(&self, id: &Hash32) -> Option<&ExitTicket> {
+        self.exit_tickets.get(id)
     }
 
     pub fn validator(&self, id: &Hash32) -> Option<&Validator> {
@@ -2163,6 +2428,240 @@ impl StakingBook {
             .position_value(position.shares)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn unbond(
+        &mut self,
+        id: &Hash32,
+        expected_sequence: u64,
+        shares: Amount,
+        minimum_gross: Amount,
+        fee: Amount,
+        maximum_fee: Amount,
+        fee_source: FeeSource,
+        exit_epoch: u64,
+        exposure_end_height: u64,
+    ) -> Result<UnbondOutcome> {
+        self.transact(|next| {
+            if shares == Amount::ZERO {
+                return Err(Error::InvalidShares);
+            }
+            if fee > maximum_fee {
+                return Err(Error::FeeExceedsMaximum);
+            }
+            let position = next
+                .positions
+                .get(id)
+                .ok_or(Error::PositionNotFound)?
+                .clone();
+            if position.status != PositionStatus::Active {
+                return Err(Error::PositionNotActive);
+            }
+            if position.sequence != expected_sequence {
+                return Err(Error::PositionSequenceMismatch);
+            }
+            if shares > position.shares {
+                return Err(Error::InvalidShares);
+            }
+            let derived_ticket_id = ticket_id(&next.chain_context, id, expected_sequence);
+            if next.exit_tickets.contains_key(&derived_ticket_id) {
+                return Err(Error::ExitTicketAlreadyExists);
+            }
+            let derived_cohort_id =
+                cohort_id(&next.chain_context, &position.validator_id, exit_epoch);
+            let maturity_height = exposure_end_height
+                .checked_add(next.parameters.unbonding_blocks)
+                .ok_or(Error::Overflow)?;
+            let had_candidates = !next.candidate_index.is_empty();
+            let gross = next
+                .pools
+                .get_mut(&position.validator_id)
+                .ok_or(Error::Invariant("validator pool missing"))?
+                .redeem(shares)?;
+            if gross == Amount::ZERO || gross < minimum_gross {
+                return Err(Error::GrossBelowMinimum);
+            }
+            let exit_assets = match fee_source {
+                FeeSource::Shielded => gross,
+                FeeSource::ReleasedValue if fee < gross => {
+                    checked_sub(gross, fee, "released unbond value")?
+                }
+                FeeSource::ReleasedValue => return Err(Error::InvalidReleasedValueFee),
+            };
+            let units = if let Some(cohort) = next.exit_cohorts.get(&derived_cohort_id) {
+                if cohort.validator_id != position.validator_id
+                    || cohort.exit_epoch != exit_epoch
+                    || cohort.exposure_end_height != exposure_end_height
+                    || cohort.maturity_height != maturity_height
+                    || cohort.status != ExitCohortStatus::PendingExposure
+                {
+                    return Err(Error::ExitCohortClosed);
+                }
+                cohort.quote_added_units(exit_assets)?
+            } else {
+                exit_assets
+            };
+            if units == Amount::ZERO {
+                return Err(Error::InvalidShares);
+            }
+
+            let active_position = next.positions.get_mut(id).ok_or(Error::PositionNotFound)?;
+            active_position.shares =
+                checked_sub(active_position.shares, shares, "position shares")?;
+            active_position.sequence = active_position
+                .sequence
+                .checked_add(1)
+                .ok_or(Error::Overflow)?;
+            if active_position.shares == Amount::ZERO {
+                active_position.status = PositionStatus::Closed;
+                if active_position.self_bond {
+                    next.validators
+                        .get_mut(&position.validator_id)
+                        .ok_or(Error::ValidatorNotFound)?
+                        .self_bond_positions
+                        .remove(id);
+                }
+            }
+            next.refresh_candidate_index(&position.validator_id)?;
+            if position.self_bond && had_candidates && next.candidate_index.is_empty() {
+                return Err(Error::LastValidatorBond);
+            }
+
+            let cohort = next
+                .exit_cohorts
+                .entry(derived_cohort_id)
+                .or_insert(ExitCohort {
+                    cohort_id: derived_cohort_id,
+                    validator_id: position.validator_id,
+                    exit_epoch,
+                    assets: Amount::ZERO,
+                    total_units: Amount::ZERO,
+                    exposure_end_height,
+                    exposure_end_time_seconds: None,
+                    maturity_height,
+                    maturity_time_seconds: None,
+                    status: ExitCohortStatus::PendingExposure,
+                });
+            cohort.assets = checked_add(cohort.assets, exit_assets)?;
+            cohort.total_units = checked_add(cohort.total_units, units)?;
+            next.exit_tickets.insert(
+                derived_ticket_id,
+                ExitTicket {
+                    ticket_id: derived_ticket_id,
+                    position_id: *id,
+                    owner_pubkey: position.owner_pubkey,
+                    cohort_id: derived_cohort_id,
+                    units,
+                    created_position_sequence: expected_sequence,
+                    sequence: 0,
+                    claimed: false,
+                },
+            );
+            Ok(UnbondOutcome {
+                ticket_id: derived_ticket_id,
+                cohort_id: derived_cohort_id,
+                gross,
+                exit_assets,
+                units,
+            })
+        })
+    }
+
+    pub fn advance_exit_cohorts(
+        &mut self,
+        current_height: u64,
+        current_time_seconds: u64,
+    ) -> Result<ExitAdvanceOutcome> {
+        self.transact(|next| {
+            let mut outcome = ExitAdvanceOutcome::default();
+            for cohort in next.exit_cohorts.values_mut() {
+                if cohort.status == ExitCohortStatus::PendingExposure
+                    && current_height >= cohort.exposure_end_height
+                {
+                    let maturity_time = current_time_seconds
+                        .checked_add(next.parameters.unbonding_seconds)
+                        .ok_or(Error::Overflow)?;
+                    cohort.exposure_end_time_seconds = Some(current_time_seconds);
+                    cohort.maturity_time_seconds = Some(maturity_time);
+                    cohort.status = ExitCohortStatus::Unbonding;
+                    outcome.exposure_recorded.insert(cohort.cohort_id);
+                }
+                if cohort.status == ExitCohortStatus::Unbonding
+                    && current_height > cohort.maturity_height
+                    && current_time_seconds
+                        > cohort
+                            .maturity_time_seconds
+                            .ok_or(Error::Invariant("exit maturity time is missing"))?
+                {
+                    cohort.status = ExitCohortStatus::Mature;
+                    outcome.matured.insert(cohort.cohort_id);
+                }
+            }
+            Ok(outcome)
+        })
+    }
+
+    pub fn exit_quote(&self, ticket_id: &Hash32) -> Result<Amount> {
+        let ticket = self
+            .exit_tickets
+            .get(ticket_id)
+            .ok_or(Error::ExitTicketNotFound)?;
+        if ticket.claimed {
+            return Err(Error::ExitTicketAlreadyClaimed);
+        }
+        self.exit_cohorts
+            .get(&ticket.cohort_id)
+            .ok_or(Error::ExitCohortNotFound)?
+            .quote_claim(ticket.units)
+    }
+
+    pub fn claim_exit(
+        &mut self,
+        ticket_id: &Hash32,
+        expected_sequence: u64,
+        current_height: u64,
+        current_time_seconds: u64,
+    ) -> Result<Amount> {
+        self.transact(|next| {
+            let ticket = next
+                .exit_tickets
+                .get(ticket_id)
+                .ok_or(Error::ExitTicketNotFound)?
+                .clone();
+            if ticket.claimed {
+                return Err(Error::ExitTicketAlreadyClaimed);
+            }
+            if ticket.sequence != expected_sequence {
+                return Err(Error::ExitTicketSequenceMismatch);
+            }
+            let cohort = next
+                .exit_cohorts
+                .get(&ticket.cohort_id)
+                .ok_or(Error::ExitCohortNotFound)?;
+            let maturity_time = cohort.maturity_time_seconds.ok_or(Error::ExitNotMature)?;
+            if cohort.status != ExitCohortStatus::Mature
+                || current_height <= cohort.maturity_height
+                || current_time_seconds <= maturity_time
+            {
+                return Err(Error::ExitNotMature);
+            }
+            let released = cohort.quote_claim(ticket.units)?;
+            let cohort = next
+                .exit_cohorts
+                .get_mut(&ticket.cohort_id)
+                .ok_or(Error::ExitCohortNotFound)?;
+            cohort.assets = checked_sub(cohort.assets, released, "exit cohort assets")?;
+            cohort.total_units =
+                checked_sub(cohort.total_units, ticket.units, "exit cohort units")?;
+            let ticket = next
+                .exit_tickets
+                .get_mut(ticket_id)
+                .ok_or(Error::ExitTicketNotFound)?;
+            ticket.claimed = true;
+            ticket.sequence = ticket.sequence.checked_add(1).ok_or(Error::Overflow)?;
+            Ok(released)
+        })
+    }
+
     pub fn candidate_set(&self) -> Result<Vec<ValidatorPower>> {
         let mut candidates = Vec::with_capacity(usize::from(self.parameters.max_validators));
         for entry in self
@@ -2257,11 +2756,13 @@ impl StakingBook {
                 .values()
                 .map(|validator| validator.commission_accrued),
         )?;
+        let exit_assets = sum_amounts(self.exit_cohorts.values().map(|cohort| cohort.assets))?;
         Ok(StakingTotals {
             pooled_assets,
             pending_assets,
             commission_assets,
             total_shares,
+            exit_assets,
         })
     }
 
@@ -2503,6 +3004,85 @@ impl StakingBook {
             if queued_by_epoch.get(epoch).copied().unwrap_or(0) > occupied {
                 return Err(Error::Invariant(
                     "pending positions exceed reserved capacity",
+                ));
+            }
+        }
+        let mut open_ticket_units: BTreeMap<Hash32, u128> = BTreeMap::new();
+        for (id, ticket) in &self.exit_tickets {
+            if ticket.ticket_id != *id
+                || ticket_id(
+                    &self.chain_context,
+                    &ticket.position_id,
+                    ticket.created_position_sequence,
+                ) != *id
+            {
+                return Err(Error::Invariant("exit ticket identity mismatch"));
+            }
+            if ticket.units == Amount::ZERO {
+                return Err(Error::Invariant("exit ticket units are zero"));
+            }
+            let position = self
+                .positions
+                .get(&ticket.position_id)
+                .ok_or(Error::Invariant("exit ticket position missing"))?;
+            if ticket.owner_pubkey != position.owner_pubkey {
+                return Err(Error::Invariant("exit ticket owner mismatch"));
+            }
+            if !self.exit_cohorts.contains_key(&ticket.cohort_id) {
+                return Err(Error::Invariant("exit ticket cohort missing"));
+            }
+            match (ticket.claimed, ticket.sequence) {
+                (false, 0) | (true, 1) => {}
+                _ => return Err(Error::Invariant("exit ticket claim state is inconsistent")),
+            }
+            if !ticket.claimed {
+                add_u128(
+                    open_ticket_units.entry(ticket.cohort_id).or_default(),
+                    ticket.units.value(),
+                )?;
+            }
+        }
+        for (id, cohort) in &self.exit_cohorts {
+            if cohort.cohort_id != *id
+                || cohort_id(&self.chain_context, &cohort.validator_id, cohort.exit_epoch) != *id
+            {
+                return Err(Error::Invariant("exit cohort identity mismatch"));
+            }
+            if !self.validators.contains_key(&cohort.validator_id) {
+                return Err(Error::Invariant("exit cohort validator missing"));
+            }
+            if cohort.maturity_height
+                != cohort
+                    .exposure_end_height
+                    .checked_add(self.parameters.unbonding_blocks)
+                    .ok_or(Error::Overflow)?
+            {
+                return Err(Error::Invariant("exit maturity height is inconsistent"));
+            }
+            match (
+                cohort.status,
+                cohort.exposure_end_time_seconds,
+                cohort.maturity_time_seconds,
+            ) {
+                (ExitCohortStatus::PendingExposure, None, None) => {}
+                (
+                    ExitCohortStatus::Unbonding | ExitCohortStatus::Mature,
+                    Some(exposure),
+                    Some(maturity),
+                ) if maturity
+                    == exposure
+                        .checked_add(self.parameters.unbonding_seconds)
+                        .ok_or(Error::Overflow)? => {}
+                _ => return Err(Error::Invariant("exit cohort timing is inconsistent")),
+            }
+            if open_ticket_units.get(id).copied().unwrap_or(0) != cohort.total_units.value() {
+                return Err(Error::Invariant(
+                    "exit ticket units do not equal cohort units",
+                ));
+            }
+            if (cohort.assets == Amount::ZERO) != (cohort.total_units == Amount::ZERO) {
+                return Err(Error::Invariant(
+                    "exit cohort assets and units are inconsistent",
                 ));
             }
         }
@@ -3371,6 +3951,108 @@ mod tests {
     }
 
     #[test]
+    fn unbond_uses_cohort_units_and_claim_requires_both_maturity_bounds() {
+        let (mut book, validator) = book_with_validator();
+        let self_bond = open(
+            &mut book,
+            validator,
+            key(4),
+            TESTNET_MIN_SELF_BOND_ATOMIC,
+            0,
+            true,
+        );
+        book.activate_pending(&self_bond, 1).unwrap();
+        let delegator = open(&mut book, validator, key(5), 10 * ATOMIC_PER_BIT, 0, false);
+        book.activate_pending(&delegator, 1).unwrap();
+        book.apply_validator_set().unwrap();
+
+        let fee = amount(100);
+        let shares = amount(5 * ATOMIC_PER_BIT);
+        let outcome = book
+            .unbond(
+                &delegator,
+                1,
+                shares,
+                shares,
+                fee,
+                fee,
+                FeeSource::ReleasedValue,
+                1,
+                100,
+            )
+            .unwrap();
+        assert_eq!(outcome.gross, shares);
+        assert_eq!(outcome.exit_assets, amount(shares.value() - fee.value()));
+        assert_eq!(book.position(&delegator).unwrap().shares, shares);
+        assert_eq!(
+            book.exit_quote(&outcome.ticket_id).unwrap(),
+            outcome.exit_assets
+        );
+        assert_eq!(book.totals().unwrap().exit_assets, outcome.exit_assets);
+
+        assert!(book
+            .advance_exit_cohorts(99, 999)
+            .unwrap()
+            .exposure_recorded
+            .is_empty());
+        let advanced = book.advance_exit_cohorts(100, 1_000).unwrap();
+        assert!(advanced.exposure_recorded.contains(&outcome.cohort_id));
+        let maturity_height = 100 + book.parameters().unbonding_blocks;
+        let maturity_time = 1_000 + book.parameters().unbonding_seconds;
+        assert_eq!(
+            book.claim_exit(&outcome.ticket_id, 0, maturity_height, maturity_time + 1),
+            Err(Error::ExitNotMature)
+        );
+        assert!(book
+            .advance_exit_cohorts(maturity_height + 1, maturity_time)
+            .unwrap()
+            .matured
+            .is_empty());
+        assert!(book
+            .advance_exit_cohorts(maturity_height + 1, maturity_time + 1)
+            .unwrap()
+            .matured
+            .contains(&outcome.cohort_id));
+        assert_eq!(
+            book.claim_exit(
+                &outcome.ticket_id,
+                0,
+                maturity_height + 1,
+                maturity_time + 1,
+            )
+            .unwrap(),
+            outcome.exit_assets
+        );
+        assert_eq!(book.totals().unwrap().exit_assets, Amount::ZERO);
+        assert_eq!(
+            book.claim_exit(
+                &outcome.ticket_id,
+                1,
+                maturity_height + 2,
+                maturity_time + 2,
+            ),
+            Err(Error::ExitTicketAlreadyClaimed)
+        );
+
+        let before = book.clone();
+        assert_eq!(
+            book.unbond(
+                &self_bond,
+                1,
+                amount(TESTNET_MIN_SELF_BOND_ATOMIC),
+                Amount::ZERO,
+                Amount::ZERO,
+                Amount::ZERO,
+                FeeSource::Shielded,
+                2,
+                200,
+            ),
+            Err(Error::LastValidatorBond)
+        );
+        assert_eq!(book, before);
+    }
+
+    #[test]
     fn persistent_records_roundtrip_and_reject_noncanonical_bytes() {
         let (mut book, validator_id) = book_with_validator();
         let self_bond = open(
@@ -3420,6 +4102,8 @@ mod tests {
             positions,
             capacity,
             candidate_index,
+            [],
+            [],
         )
         .unwrap();
         assert_eq!(rebuilt, book);

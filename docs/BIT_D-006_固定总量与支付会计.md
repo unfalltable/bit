@@ -36,6 +36,8 @@ M = I + K + Future(e)
 | 空合格集合 epoch | `K += quota` | score 总和为零时自动放弃且不追补 |
 | 费用/发行分配 | `F -= reward + commission; ΣP += reward; ΣC += commission` | 已按 score 和 validator commission 接入旧池，余数留 F |
 | 佣金领取 | `ΣC -= released; Q += released - fee; F += fee` | ClaimCommission 已接入真实证明交易 |
+| 解除质押 | `ΣP -= gross; ΣX += gross[-fee]; Q/F 按 fee_source 变化` | Unbond 已接入真实证明交易 |
+| 退出领取 | `ΣX -= released; Q += released-fee; F += fee` | ClaimExit 已接入真实证明交易 |
 | 销毁 | 来源容器减少，`Burn` 等量增加 | 会计函数已实现，业务动作未接入 |
 
 所有转换都先在 `SupplyState` 副本上计算并验证，再整体替换原状态。状态层对 Transfer 采用同样顺序：先验证交易和全部 output commitment，再在 TCT 与供应副本上执行，最后一起写入 `StateDelta`。因此费用不足、证明失败、重复 nullifier 或非法 commitment 都不会留下部分会计状态。
@@ -53,7 +55,7 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 ## 4. 持久化与证明
 
-货币政策、政策哈希、六项费率、供应累计量、七类资产容器、完成 epoch 数和已放弃额度都纳入当前 schema v11 的 JMT（这些字段最初在 v5 引入）。它们与高度、TCT、交易索引、execution 摘要、compact 摘要、质押记录及三高度实际验证者集合在同一个 RocksDB WriteBatch 中提交。每个 validator v5 记录其 `commission_accrued`、签名窗口和 epoch score，重启时要求佣金总和精确等于供应容器 `ΣC`。
+货币政策、政策哈希、六项费率、供应累计量、七类资产容器、完成 epoch 数和已放弃额度都纳入当前 schema v13 的 JMT（这些字段最初在 v5 引入）。它们与高度、TCT、交易索引、execution 摘要、compact 摘要、质押/退出记录及三高度实际验证者集合在同一个 RocksDB WriteBatch 中提交。每个 validator v5 记录其 `commission_accrued`、签名窗口和 epoch score，重启时要求佣金总和精确等于供应容器 `ΣC`；全部 exit cohort 资产之和必须精确等于 `ΣX`。
 
 最新高度可对单项供应键生成并本地验证 ICS23 证明。当前提供强类型 `SupplyAudit` 作为进程内审计视图；SPEC-04 尚未冻结 `supply/audit_snapshot` 的规范字节格式，因此本阶段没有自行定义该网络接口，避免形成第二套共识编码。
 
@@ -78,6 +80,6 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 
 1. 四节点空块向量已验证 H/H+1/H+2 实际集合、last commit power、请求哈希和奖励后投票权；下一步加入真实 Transfer 与费用池变化。
 2. 为钱包和网关提供带证明的费率、在线率、奖励和佣金报价接口。
-3. 接入 GenesisClaim、Unbond、ClaimExit 和 Slash 等剩余容器转换；Delegate 和 ClaimCommission 已接入。
+3. 接入 GenesisClaim 和 Slash 等剩余容器转换；Delegate、Unbond、ClaimExit 和 ClaimCommission 已接入。
 4. 冻结 SPEC-04 后实现 `supply/audit_snapshot` 的规范编码、查询路由、共享测试向量和跨语言读取器。
 5. 完成真实钱包 A 到 B 的构造、扫描、余额变化和重启恢复闭环，并在多节点 CometBFT 环境验证供应状态一致。
