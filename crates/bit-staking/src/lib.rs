@@ -1,8 +1,8 @@
 //! Deterministic native staking state transitions for BIT.
 //!
 //! This crate owns validator, pool, and position rules. Authorization checks,
-//! persistent storage, exit cohorts, slashing, and reward distribution are
-//! connected by later layers; no method here treats a caller as authorized.
+//! persistent storage, exit cohorts, and slashing are connected by later
+//! layers; no method here treats a caller as authorized.
 
 use bit_types::{position_id, validator_id, Amount};
 use primitive_types::U256;
@@ -56,6 +56,10 @@ pub enum Error {
     ValidatorNotActive,
     #[error("new consensus key is unchanged")]
     ConsensusKeyUnchanged,
+    #[error("reward score references an unknown validator")]
+    UnknownRewardValidator,
+    #[error("commission claim must be nonzero and no greater than accrued commission")]
+    InvalidCommissionClaim,
     #[error("position already exists")]
     PositionAlreadyExists,
     #[error("position not found")]
@@ -250,6 +254,7 @@ pub struct Validator {
     pub status: ValidatorStatus,
     pub accepts_delegation: bool,
     pub commission_bps: u16,
+    pub commission_accrued: Amount,
     pub pending_commission: Option<PendingCommissionChange>,
     pub pending_consensus_key: Option<PendingConsensusKey>,
     pub consensus_key_history: Vec<ConsensusKeyRecord>,
@@ -294,6 +299,15 @@ pub struct ValidatorUpdate {
     pub request_disable: Option<bool>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ValidatorReward {
+    pub validator_id: Hash32,
+    pub score: u128,
+    pub gross_reward: Amount,
+    pub stake_reward: Amount,
+    pub commission_reward: Amount,
+}
+
 impl Validator {
     pub fn encode_persistent(&self) -> Result<Vec<u8>> {
         validate_metadata(&self.display_name, &self.website, &self.description)?;
@@ -302,7 +316,7 @@ impl Validator {
         let self_bond_count =
             u32::try_from(self.self_bond_positions.len()).map_err(|_| Error::Overflow)?;
         let mut writer = Writer::new();
-        writer.u8(3);
+        writer.u8(4);
         writer.hash32(&self.validator_id);
         writer.hash32(&self.operator_pubkey);
         writer.hash32(&self.consensus_pubkey);
@@ -318,6 +332,7 @@ impl Validator {
         });
         writer.boolean(self.accepts_delegation);
         writer.u16(self.commission_bps);
+        writer.amount(self.commission_accrued);
         writer.boolean(self.pending_commission.is_some());
         if let Some(pending) = self.pending_commission {
             writer.u16(pending.commission_bps);
@@ -372,7 +387,7 @@ impl Validator {
 
     pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
         let mut reader = Reader::new(bytes);
-        reader.version(3)?;
+        reader.version(4)?;
         let validator_id = reader.hash32()?;
         let operator_pubkey = reader.hash32()?;
         let consensus_pubkey = reader.hash32()?;
@@ -389,6 +404,7 @@ impl Validator {
         };
         let accepts_delegation = reader.boolean()?;
         let commission_bps = reader.u16()?;
+        let commission_accrued = reader.amount()?;
         let pending_commission = if reader.boolean()? {
             Some(PendingCommissionChange {
                 commission_bps: reader.u16()?,
@@ -470,6 +486,7 @@ impl Validator {
             status,
             accepts_delegation,
             commission_bps,
+            commission_accrued,
             pending_commission,
             pending_consensus_key,
             consensus_key_history,
@@ -765,6 +782,7 @@ pub struct ValidatorPower {
 pub struct StakingTotals {
     pub pooled_assets: Amount,
     pub pending_assets: Amount,
+    pub commission_assets: Amount,
     pub total_shares: Amount,
 }
 
@@ -975,6 +993,7 @@ impl StakingBook {
                     status: ValidatorStatus::Candidate,
                     accepts_delegation: true,
                     commission_bps,
+                    commission_accrued: Amount::ZERO,
                     pending_commission: None,
                     pending_consensus_key: None,
                     consensus_key_history: vec![ConsensusKeyRecord {
@@ -1286,6 +1305,108 @@ impl StakingBook {
                 }
             }
             Ok(changed)
+        })
+    }
+
+    /// Split the available fee reserve across validators by their exact epoch
+    /// scores, then split each validator's gross reward between its existing
+    /// stake pool and accrued operator commission. Integer remainders are not
+    /// assigned here and remain in the caller's fee reserve.
+    pub fn distribute_epoch_rewards(
+        &mut self,
+        settled_epoch: u64,
+        available: Amount,
+        scores: &BTreeMap<Hash32, u128>,
+    ) -> Result<Vec<ValidatorReward>> {
+        self.transact(|next| {
+            let total_score = next.reward_score_total(scores)?;
+            let eligible: BTreeMap<Hash32, u128> = scores
+                .iter()
+                .filter_map(|(id, score)| next.reward_eligible(id, *score).then_some((*id, *score)))
+                .collect();
+
+            let mut rewards = Vec::with_capacity(eligible.len());
+            for (id, score) in eligible {
+                let gross_reward = floor_mul_div(available.value(), score, total_score)?;
+                let commission_bps = next
+                    .validators
+                    .get(&id)
+                    .ok_or(Error::ValidatorNotFound)?
+                    .commission_bps;
+                let commission_reward =
+                    floor_mul_div(gross_reward.value(), u128::from(commission_bps), 10_000)?;
+                let stake_reward = checked_sub(gross_reward, commission_reward, "reward split")?;
+                next.pools
+                    .get_mut(&id)
+                    .ok_or(Error::ValidatorNotFound)?
+                    .credit_rewards(stake_reward, settled_epoch)?;
+                let validator = next
+                    .validators
+                    .get_mut(&id)
+                    .ok_or(Error::ValidatorNotFound)?;
+                validator.commission_accrued =
+                    checked_add(validator.commission_accrued, commission_reward)?;
+                rewards.push(ValidatorReward {
+                    validator_id: id,
+                    score,
+                    gross_reward,
+                    stake_reward,
+                    commission_reward,
+                });
+            }
+
+            let rewarded: BTreeSet<_> = rewards.iter().map(|reward| reward.validator_id).collect();
+            for (id, pool) in &mut next.pools {
+                if !rewarded.contains(id) {
+                    pool.credit_rewards(Amount::ZERO, settled_epoch)?;
+                }
+            }
+            Ok(rewards)
+        })
+    }
+
+    pub fn reward_score_total(&self, scores: &BTreeMap<Hash32, u128>) -> Result<u128> {
+        for id in scores.keys() {
+            if !self.validators.contains_key(id) {
+                return Err(Error::UnknownRewardValidator);
+            }
+        }
+        scores.iter().try_fold(0u128, |total, (id, score)| {
+            if self.reward_eligible(id, *score) {
+                total.checked_add(*score).ok_or(Error::Overflow)
+            } else {
+                Ok(total)
+            }
+        })
+    }
+
+    pub fn claim_commission(
+        &mut self,
+        id: &Hash32,
+        expected_sequence: u64,
+        requested_amount: Amount,
+    ) -> Result<Amount> {
+        self.transact(|next| {
+            let validator = next
+                .validators
+                .get_mut(id)
+                .ok_or(Error::ValidatorNotFound)?;
+            if validator.status == ValidatorStatus::Tombstoned {
+                return Err(Error::ValidatorTombstoned);
+            }
+            if validator.sequence != expected_sequence {
+                return Err(Error::ValidatorSequenceMismatch);
+            }
+            if requested_amount == Amount::ZERO || requested_amount > validator.commission_accrued {
+                return Err(Error::InvalidCommissionClaim);
+            }
+            validator.commission_accrued = checked_sub(
+                validator.commission_accrued,
+                requested_amount,
+                "validator commission",
+            )?;
+            validator.sequence = validator.sequence.checked_add(1).ok_or(Error::Overflow)?;
+            Ok(requested_amount)
         })
     }
 
@@ -1661,9 +1782,15 @@ impl StakingBook {
                 .map(|position| position.pending_amount),
         )?;
         let total_shares = sum_amounts(self.pools.values().map(|pool| pool.total_shares))?;
+        let commission_assets = sum_amounts(
+            self.validators
+                .values()
+                .map(|validator| validator.commission_accrued),
+        )?;
         Ok(StakingTotals {
             pooled_assets,
             pending_assets,
+            commission_assets,
             total_shares,
         })
     }
@@ -1674,6 +1801,7 @@ impl StakingBook {
             return Err(Error::Invariant("validator and pool counts differ"));
         }
         let mut consensus_keys = BTreeSet::new();
+        let mut active_power_total = 0u64;
         for (id, validator) in &self.validators {
             if validator.validator_id != *id
                 || validator_id(&self.chain_context, &validator.operator_pubkey) != *id
@@ -1779,17 +1907,21 @@ impl StakingBook {
             }
             match validator.status {
                 ValidatorStatus::Active => {
-                    if validator.voting_power == 0
-                        || validator.voting_power != self.power_for_assets(pool.assets)?
-                    {
+                    if validator.voting_power == 0 {
                         return Err(Error::Invariant("active validator power is inconsistent"));
                     }
+                    active_power_total = active_power_total
+                        .checked_add(validator.voting_power)
+                        .ok_or(Error::VotingPowerExceeded)?;
                 }
                 _ if validator.voting_power != 0 => {
                     return Err(Error::Invariant("inactive validator has voting power"));
                 }
                 _ => {}
             }
+        }
+        if active_power_total > self.parameters.max_total_voting_power {
+            return Err(Error::VotingPowerExceeded);
         }
 
         let mut active_shares: BTreeMap<(Hash32, u64), u128> = BTreeMap::new();
@@ -1929,6 +2061,19 @@ impl StakingBook {
         }
         let self_bond_shares = Amount::new(self_bond_shares).map_err(|_| Error::Overflow)?;
         Ok(pool.position_value(self_bond_shares)? >= self.parameters.min_self_bond)
+    }
+
+    fn reward_eligible(&self, validator_id: &Hash32, score: u128) -> bool {
+        let Some(validator) = self.validators.get(validator_id) else {
+            return false;
+        };
+        let Some(pool) = self.pools.get(validator_id) else {
+            return false;
+        };
+        score > 0
+            && validator.status != ValidatorStatus::Tombstoned
+            && pool.assets != Amount::ZERO
+            && pool.total_shares != Amount::ZERO
     }
 
     fn power_for_assets(&self, assets: Amount) -> Result<u64> {
@@ -2888,6 +3033,66 @@ mod tests {
             Validator::decode_persistent(&encoded).unwrap(),
             *book.validator(&validator_id).unwrap()
         );
+        assert!(book.validate().is_ok());
+    }
+
+    #[test]
+    fn epoch_rewards_split_by_score_and_commission_with_remainder_retained() {
+        let (mut book, first_id) = book_with_validator();
+        let second_operator = key(5);
+        let second_id = validator_id(&book.chain_context(), &second_operator);
+        book.register_validator(second_id, second_operator, key(6), 1_000)
+            .unwrap();
+
+        let first_bond = open(
+            &mut book,
+            first_id,
+            key(4),
+            TESTNET_MIN_SELF_BOND_ATOMIC,
+            0,
+            true,
+        );
+        let second_bond = open(
+            &mut book,
+            second_id,
+            key(7),
+            TESTNET_MIN_SELF_BOND_ATOMIC,
+            0,
+            true,
+        );
+        book.activate_pending(&first_bond, 1).unwrap();
+        book.activate_pending(&second_bond, 1).unwrap();
+
+        let rewards = book
+            .distribute_epoch_rewards(
+                1,
+                amount(101),
+                &BTreeMap::from([(first_id, 1), (second_id, 3)]),
+            )
+            .unwrap();
+        assert_eq!(rewards.len(), 2);
+        assert_eq!(rewards[0].gross_reward, amount(25));
+        assert_eq!(rewards[0].stake_reward, amount(24));
+        assert_eq!(rewards[0].commission_reward, amount(1));
+        assert_eq!(rewards[1].gross_reward, amount(75));
+        assert_eq!(rewards[1].stake_reward, amount(68));
+        assert_eq!(rewards[1].commission_reward, amount(7));
+        assert_eq!(book.totals().unwrap().commission_assets, amount(8));
+        assert_eq!(book.pool(&first_id).unwrap().last_settled_epoch, 1);
+        assert_eq!(book.pool(&second_id).unwrap().last_settled_epoch, 1);
+
+        let before = book.clone();
+        assert_eq!(
+            book.claim_commission(&first_id, 0, amount(2)),
+            Err(Error::InvalidCommissionClaim)
+        );
+        assert_eq!(book, before);
+        assert_eq!(
+            book.claim_commission(&first_id, 0, amount(1)),
+            Ok(amount(1))
+        );
+        assert_eq!(book.validator(&first_id).unwrap().sequence, 1);
+        assert_eq!(book.totals().unwrap().commission_assets, amount(7));
         assert!(book.validate().is_ok());
     }
 }

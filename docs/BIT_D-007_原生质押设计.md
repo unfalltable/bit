@@ -1,6 +1,6 @@
 # BIT D-007 原生质押设计
 
-状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁和共识密钥轮换已经进入统一交易执行链；在线率、奖励分配和 CometBFT ValidatorUpdates 仍在开发，不包含 D-008 的退出与处罚实现。
+状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；池级奖励分配已实现，真实 score、在线率和 CometBFT ValidatorUpdates 仍在开发，不包含 D-008 的退出与处罚实现。
 
 ## 1. 唯一身份与对象
 
@@ -43,9 +43,11 @@ S' = S + minted
 
 ## 5. 本阶段验证
 
-schema v8 为 parameters、validator、pool、position 和 capacity 分别定义版本化、定长整数、大端序的持久化编码；parameters v2 固定 jail、佣金通知和证据窗口的时间/高度双门槛，validator v3 记录完整公开元数据、sequence、待生效佣金、待生效共识键、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、尾随字节、非法 Amount、非法 UTF-8 和不符合定长规则的收据。每个对象使用独立 JMT 键，更新阶段只写本次触及的记录。
+schema v9 为 parameters、validator、pool、position 和 capacity 分别定义版本化、定长整数、大端序的持久化编码；parameters v2 固定 jail、佣金通知和证据窗口的时间/高度双门槛，validator v4 记录完整公开元数据、sequence、累计佣金、待生效佣金、待生效共识键、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、尾随字节、非法 Amount、非法 UTF-8 和不符合定长规则的收据。每个对象使用独立 JMT 键，更新阶段只写本次触及的记录。
 
-交易层现已对 RegisterValidator、Delegate、CancelPending、UpdateValidator、UnjailValidator 和 RotateConsensusKey 验证独立角色域的 Ed25519 签名。注册与轮换的 consensus-pop 域和 operator 域分离，所有既有验证人动作都从当前状态解析 operator 与精确 sequence。六类动作与 Spend/Output 证明、Spend 授权、最低费和公开 lock/release 一起进入同一个 binding equation。应用核心的 CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都通过统一动作调度进入该执行器。
+交易层现已对 RegisterValidator、Delegate、CancelPending、UpdateValidator、UnjailValidator、RotateConsensusKey 和 ClaimCommission 验证独立角色域的 Ed25519 签名。注册与轮换的 consensus-pop 域和 operator 域分离，所有既有验证人动作都从当前状态解析 operator 与精确 sequence。七类动作与 Spend/Output 证明、Spend 授权、最低费和公开 lock/release 一起进入同一个 binding equation。应用核心的 CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都通过统一动作调度进入该执行器。
+
+epoch 结算入口接收按实际权重签名累计的 score 映射。它把全部费用池按 score 向下取整分给各 validator，再按该 validator 当前已生效佣金率拆为旧池奖励与 operator 累计佣金；每层整数余数都留在 F 或对应 gross 内，不按账户数平均。池资产改变不会在 epoch 中途重算投票权。ClaimCommission 从 C 释放指定金额，operator sequence 增加，并支持 ReleasedValue 或额外私密 Spend 支付手续费。
 
 UpdateValidator 立即更新公开资料；佣金降低最早在下个 epoch 生效，佣金上调每次最多 100 bps，并同时满足 604800 链秒和 120960 块的通知期。停用请求在下一次集合选择移出节点，重新启用后回到 Candidate。Unjail 同时要求自 jail 起经过 7200 链秒和 1440 块。RotateConsensusKey 验证新密钥 PoP 后排到下个 epoch，epoch 中途继续使用旧密钥；实际切换时旧密钥记录保留到证据窗口结束，历史和所有待生效密钥全局唯一。
 
@@ -58,6 +60,6 @@ ABCI PrepareProposal、ProcessProposal 和 FinalizeBlock 使用请求中的规�
 ## 6. 完成 D-007 还需要
 
 1. 实现在线率窗口和由实际提交签名生成的 epoch 得分。
-2. 把旧池奖励/佣金分配和增量候选索引接到现有“发行结算→激活→集合选择”原子系统阶段。
+2. 把 score 生产器与现有“发行结算/旧池奖励→激活→集合选择”入口自动连接，并实现增量候选索引。
 3. 从选中集合生成 CometBFT ValidatorUpdates，并做 H/H+1/H+2 真实集合哈希验证。
 4. 落实最后合格验证者保护和 `HALT_NO_SAFE_VALIDATOR_SET`，再进入 D-008 退出 cohort、ticket 与 SlashJob。

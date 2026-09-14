@@ -4,7 +4,7 @@
 //! It deliberately does not define the unresolved `supply/audit_snapshot` wire
 //! encoding from SPEC-04; persistence stores the individual consensus fields.
 
-use bit_types::{Amount, MonetaryPolicy, MAX_SUPPLY_ATOMIC};
+use bit_types::{Amount, FeeSource, MonetaryPolicy, MAX_SUPPLY_ATOMIC};
 use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
@@ -375,7 +375,22 @@ impl SupplyState {
         released: Amount,
         fee: Amount,
     ) -> Result<()> {
-        if fee > released {
+        self.release_pending_delegation_with_fee_source(
+            policy,
+            released,
+            fee,
+            FeeSource::ReleasedValue,
+        )
+    }
+
+    pub fn release_pending_delegation_with_fee_source(
+        &mut self,
+        policy: &MonetaryPolicy,
+        released: Amount,
+        fee: Amount,
+        fee_source: FeeSource,
+    ) -> Result<()> {
+        if fee_source == FeeSource::ReleasedValue && fee > released {
             return Err(Error::Insufficient("released pending delegation"));
         }
         let mut next = self.clone();
@@ -384,10 +399,8 @@ impl SupplyState {
             released,
             "pending delegation total",
         )?;
-        next.shielded_total = amount(add(
-            next.shielded_total.value(),
-            released.value() - fee.value(),
-        )?)?;
+        next.shielded_total = amount(add(next.shielded_total.value(), released.value())?)?;
+        next.shielded_total = subtract(next.shielded_total, fee, "shielded total")?;
         next.fee_reserve = amount(add(next.fee_reserve.value(), fee.value())?)?;
         next.validate(policy)?;
         *self = next;
@@ -401,7 +414,7 @@ impl SupplyState {
         released: Amount,
         fee: Amount,
     ) -> Result<()> {
-        if fee.value() > released.value() {
+        if fee > released {
             return Err(Error::Insufficient("released genesis value"));
         }
         let mut next = self.clone();
@@ -410,10 +423,8 @@ impl SupplyState {
             released,
             "unclaimed genesis total",
         )?;
-        next.shielded_total = amount(add(
-            next.shielded_total.value(),
-            released.value() - fee.value(),
-        )?)?;
+        next.shielded_total = amount(add(next.shielded_total.value(), released.value())?)?;
+        next.shielded_total = subtract(next.shielded_total, fee, "shielded total")?;
         next.fee_reserve = amount(add(next.fee_reserve.value(), fee.value())?)?;
         next.validate(policy)?;
         *self = next;
@@ -458,6 +469,30 @@ impl SupplyState {
             next.commission_total.value(),
             commission_reward.value(),
         )?)?;
+        next.validate(policy)?;
+        *self = next;
+        Ok(())
+    }
+
+    /// Release accrued operator commission into the shielded pool and collect
+    /// the transaction fee. The binding equation determines whether the fee
+    /// was funded by released value or by an additional private Spend; the
+    /// aggregate container transition is identical in both cases.
+    pub fn release_commission(
+        &mut self,
+        policy: &MonetaryPolicy,
+        released: Amount,
+        fee: Amount,
+        fee_source: FeeSource,
+    ) -> Result<()> {
+        if fee_source == FeeSource::ReleasedValue && fee > released {
+            return Err(Error::Insufficient("released commission"));
+        }
+        let mut next = self.clone();
+        next.commission_total = subtract(next.commission_total, released, "commission total")?;
+        next.shielded_total = amount(add(next.shielded_total.value(), released.value())?)?;
+        next.shielded_total = subtract(next.shielded_total, fee, "shielded total")?;
+        next.fee_reserve = amount(add(next.fee_reserve.value(), fee.value())?)?;
         next.validate(policy)?;
         *self = next;
         Ok(())
@@ -723,6 +758,34 @@ mod tests {
             Err(Error::Insufficient("released pending delegation"))
         ));
         assert_eq!(state, before);
+    }
+
+    #[test]
+    fn shielded_fee_can_exceed_released_value_when_private_pool_covers_it() {
+        let policy = policy();
+        let mut state = SupplyState::genesis(
+            &policy,
+            GenesisAllocation::shielded_only(policy.genesis_supply),
+        )
+        .unwrap();
+        let deposit = Amount::new(1).unwrap();
+        state
+            .open_pending_delegation(&policy, deposit, Amount::ZERO)
+            .unwrap();
+        state
+            .release_pending_delegation_with_fee_source(
+                &policy,
+                deposit,
+                Amount::new(2).unwrap(),
+                FeeSource::Shielded,
+            )
+            .unwrap();
+        assert_eq!(state.pending_delegation_total, Amount::ZERO);
+        assert_eq!(state.fee_reserve, Amount::new(2).unwrap());
+        assert_eq!(
+            state.shielded_total.value(),
+            policy.genesis_supply.value() - 2
+        );
     }
 
     #[test]

@@ -169,6 +169,11 @@ impl Action {
                 }
                 Ok(())
             }
+            Self::ClaimCommission {
+                requested_amount, ..
+            } if *requested_amount == Amount::ZERO => {
+                Err(Error::InvalidTransaction("commission claim is zero"))
+            }
             _ => Ok(()),
         }
     }
@@ -780,6 +785,18 @@ mod tests {
         assert_eq!(
             tx.validate_at_height(1, 120),
             Err(Error::InvalidTransaction("validator update is empty"))
+        );
+
+        let mut tx = body();
+        tx.action = Action::ClaimCommission {
+            validator_id: [3; 32],
+            expected_sequence: 0,
+            requested_amount: Amount::ZERO,
+            fee_source: FeeSource::ReleasedValue,
+        };
+        assert_eq!(
+            tx.validate_at_height(1, 120),
+            Err(Error::InvalidTransaction("commission claim is zero"))
         );
     }
 

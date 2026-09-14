@@ -73,6 +73,12 @@ pub enum VerifiedStakingAction {
         expected_sequence: u64,
         new_consensus: Hash32,
     },
+    ClaimCommission {
+        validator_id: Hash32,
+        expected_sequence: u64,
+        requested_amount: Amount,
+        fee_source: FeeSource,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -470,6 +476,37 @@ pub fn verify_staking_stateless<S: ActionAuthorizationView + ?Sized>(
             0,
             0,
         ),
+        Action::ClaimCommission {
+            validator_id,
+            expected_sequence,
+            requested_amount,
+            fee_source,
+        } => {
+            match fee_source {
+                FeeSource::Shielded if body.spends.is_empty() => {
+                    return Err(Error::InvalidFeeSource(
+                        "SHIELDED requires at least one private Spend",
+                    ));
+                }
+                FeeSource::ReleasedValue if *requested_amount <= body.fee => {
+                    return Err(Error::InvalidFeeSource(
+                        "RELEASED_VALUE requires release greater than fee",
+                    ));
+                }
+                _ => {}
+            }
+            (
+                VerifiedStakingAction::ClaimCommission {
+                    validator_id: *validator_id,
+                    expected_sequence: *expected_sequence,
+                    requested_amount: *requested_amount,
+                    fee_source: *fee_source,
+                },
+                FeeClass::Standard,
+                0,
+                requested_amount.value(),
+            )
+        }
         _ => return Err(Error::UnsupportedAction),
     };
 
@@ -552,7 +589,9 @@ pub fn verify_staking_authorizations<S: ActionAuthorizationView + ?Sized>(
             Action::Delegate { self_bond, .. } => 1 + usize::from(*self_bond),
             Action::RegisterValidator { .. } => 2,
             Action::CancelPending { .. } => 1,
-            Action::UpdateValidator { .. } | Action::UnjailValidator { .. } => 1,
+            Action::UpdateValidator { .. }
+            | Action::UnjailValidator { .. }
+            | Action::ClaimCommission { .. } => 1,
             Action::RotateConsensusKey { .. } => 2,
             _ => return Err(Error::UnsupportedAction),
         })
@@ -645,6 +684,11 @@ pub fn verify_staking_authorizations<S: ActionAuthorizationView + ?Sized>(
         | Action::UnjailValidator {
             validator_id,
             expected_sequence,
+        }
+        | Action::ClaimCommission {
+            validator_id,
+            expected_sequence,
+            ..
         } => {
             verify_validator_operator(
                 envelope,
@@ -1275,6 +1319,12 @@ mod tests {
             Action::UnjailValidator {
                 validator_id,
                 expected_sequence: 9,
+            },
+            Action::ClaimCommission {
+                validator_id,
+                expected_sequence: 9,
+                requested_amount: Amount::new(1_000_000).unwrap(),
+                fee_source: FeeSource::ReleasedValue,
             },
         ] {
             let (_, unsigned_body) = staking_envelope(action.clone(), vec![]);

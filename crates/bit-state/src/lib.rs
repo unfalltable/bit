@@ -10,7 +10,8 @@ use bit_emission::{
 };
 use bit_staking::{
     ActivationCapacityRecord, ActivationOutcome, PositionStatus, StakePool, StakePosition,
-    StakingBook, StakingParameters, StakingTotals, Validator, ValidatorPower, ValidatorUpdate,
+    StakingBook, StakingParameters, StakingTotals, Validator, ValidatorPower, ValidatorReward,
+    ValidatorUpdate,
 };
 use bit_transaction::{
     verify_staking_stateless, verify_transfer_stateless, ActionAuthorizationView,
@@ -33,7 +34,7 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 8;
+const STORAGE_SCHEMA_VERSION: u32 = 9;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -222,6 +223,15 @@ pub struct StateSummary {
     pub app_hash: Hash32,
     pub shielded_tree_root: Hash32,
     pub supply: SupplyAudit,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EpochRewardSettlement {
+    pub epoch: u64,
+    pub issuance_quota: Amount,
+    pub distributed: Amount,
+    pub fee_reserve_remainder: Amount,
+    pub validator_rewards: Vec<ValidatorReward>,
 }
 
 pub struct QueryProof {
@@ -537,7 +547,8 @@ impl BlockSession<'_> {
             | Action::CancelPending { .. }
             | Action::UpdateValidator { .. }
             | Action::UnjailValidator { .. }
-            | Action::RotateConsensusKey { .. } => Ok(self
+            | Action::RotateConsensusKey { .. }
+            | Action::ClaimCommission { .. } => Ok(self
                 .verify_and_stage_staking_action(envelope_bytes)
                 .await?
                 .shielded
@@ -578,6 +589,73 @@ impl BlockSession<'_> {
         Ok(self
             .supply
             .settle_next_epoch(&self.owner.config.monetary_policy, has_eligible_stake)?)
+    }
+
+    /// Atomically settle the exact epoch issuance and all accumulated fee
+    /// reserve using scores produced from that epoch's actual validator set.
+    pub fn stage_epoch_reward_settlement(
+        &mut self,
+        scores: &BTreeMap<Hash32, u128>,
+    ) -> Result<EpochRewardSettlement> {
+        let boundary_epoch = self.boundary_epoch()?;
+        let expected = self
+            .supply
+            .completed_epochs
+            .checked_add(1)
+            .ok_or(bit_emission::Error::Overflow)?;
+        if expected != boundary_epoch {
+            return Err(Error::InvalidSystemPhase(
+                "reward settlement is missing or duplicated",
+            ));
+        }
+
+        let mut staking = self.staking.clone();
+        let mut supply = self.supply.clone();
+        let has_eligible_score = staking.reward_score_total(scores)? > 0;
+        let issuance_quota =
+            supply.settle_next_epoch(&self.owner.config.monetary_policy, has_eligible_score)?;
+        let available = supply.fee_reserve;
+        let validator_rewards =
+            staking.distribute_epoch_rewards(boundary_epoch, available, scores)?;
+        let distributed_value = validator_rewards.iter().try_fold(0u128, |total, reward| {
+            total
+                .checked_add(reward.gross_reward.value())
+                .ok_or(bit_emission::Error::Overflow)
+        })?;
+        let stake_reward_value = validator_rewards.iter().try_fold(0u128, |total, reward| {
+            total
+                .checked_add(reward.stake_reward.value())
+                .ok_or(bit_emission::Error::Overflow)
+        })?;
+        let commission_reward_value =
+            validator_rewards.iter().try_fold(0u128, |total, reward| {
+                total
+                    .checked_add(reward.commission_reward.value())
+                    .ok_or(bit_emission::Error::Overflow)
+            })?;
+        let distributed = Amount::new(distributed_value).map_err(bit_emission::Error::from)?;
+        supply.distribute_fee_reserve(
+            &self.owner.config.monetary_policy,
+            Amount::new(stake_reward_value).map_err(bit_emission::Error::from)?,
+            Amount::new(commission_reward_value).map_err(bit_emission::Error::from)?,
+        )?;
+        validate_staking_supply(&staking, &supply)?;
+
+        self.staking_touches
+            .pools
+            .extend(staking.pools().map(|pool| pool.validator_id));
+        self.staking_touches
+            .validators
+            .extend(validator_rewards.iter().map(|reward| reward.validator_id));
+        self.staking = staking;
+        self.supply = supply;
+        Ok(EpochRewardSettlement {
+            epoch: boundary_epoch,
+            issuance_quota,
+            distributed,
+            fee_reserve_remainder: self.supply.fee_reserve,
+            validator_rewards,
+        })
     }
 
     /// Stage a validator registration after the execution layer has verified
@@ -685,6 +763,15 @@ impl BlockSession<'_> {
         if self.supply.completed_epochs != current_epoch {
             return Err(Error::InvalidSystemPhase(
                 "issuance must settle before staking activation",
+            ));
+        }
+        if self
+            .staking
+            .pools()
+            .any(|pool| pool.last_settled_epoch != current_epoch)
+        {
+            return Err(Error::InvalidSystemPhase(
+                "rewards must settle before staking activation",
             ));
         }
         let due: BTreeMap<Hash32, (Amount, Hash32, bool)> = self
@@ -861,8 +948,8 @@ impl BlockSession<'_> {
         Ok(verified)
     }
 
-    /// Verify and atomically stage RegisterValidator, Delegate, or
-    /// CancelPending against the current block overlay and staking snapshot.
+    /// Verify and atomically stage any currently enabled staking action
+    /// against the current block overlay and staking snapshot.
     pub async fn verify_and_stage_staking_action(
         &mut self,
         envelope_bytes: &[u8],
@@ -888,6 +975,7 @@ impl BlockSession<'_> {
                 | Action::UpdateValidator { .. }
                 | Action::UnjailValidator { .. }
                 | Action::RotateConsensusKey { .. }
+                | Action::ClaimCommission { .. }
         ) {
             return Err(bit_transaction::Error::UnsupportedAction.into());
         }
@@ -1011,7 +1099,7 @@ impl BlockSession<'_> {
                 position_id,
                 expected_sequence,
                 expected_release,
-                ..
+                fee_source,
             } => {
                 let position = candidate_staking
                     .position(position_id)
@@ -1021,10 +1109,11 @@ impl BlockSession<'_> {
                 if released != *expected_release {
                     return Err(bit_transaction::Error::StaleStateQuote("pending release").into());
                 }
-                candidate_supply.release_pending_delegation(
+                candidate_supply.release_pending_delegation_with_fee_source(
                     &self.owner.config.monetary_policy,
                     released,
                     verified.shielded.fee,
+                    *fee_source,
                 )?;
                 touches.positions.insert(*position_id);
                 touches.pools.insert(position.validator_id);
@@ -1093,6 +1182,25 @@ impl BlockSession<'_> {
                 candidate_supply.charge_shielded_fee(
                     &self.owner.config.monetary_policy,
                     verified.shielded.fee,
+                )?;
+                touches.validators.insert(*validator_id);
+            }
+            VerifiedStakingAction::ClaimCommission {
+                validator_id,
+                expected_sequence,
+                requested_amount,
+                fee_source,
+            } => {
+                let released = candidate_staking.claim_commission(
+                    validator_id,
+                    *expected_sequence,
+                    *requested_amount,
+                )?;
+                candidate_supply.release_commission(
+                    &self.owner.config.monetary_policy,
+                    released,
+                    verified.shielded.fee,
+                    *fee_source,
                 )?;
                 touches.validators.insert(*validator_id);
             }
@@ -1633,6 +1741,11 @@ fn validate_staking_supply(staking: &StakingBook, supply: &SupplyState) -> Resul
             "staking pending positions do not equal the D supply container".to_owned(),
         ));
     }
+    if totals.commission_assets != supply.commission_total {
+        return Err(Error::CorruptState(
+            "validator commissions do not equal the C supply container".to_owned(),
+        ));
+    }
     Ok(())
 }
 
@@ -1925,6 +2038,7 @@ mod tests {
         UpdateValidator,
         UnjailValidator,
         RotateConsensusKey,
+        ClaimCommission,
     }
 
     fn real_action_fixture(kind: RealActionKind) -> (GenesisConfig, Vec<u8>) {
@@ -1950,8 +2064,16 @@ mod tests {
         let chain = chain_context([0x33; 32]);
         let mut genesis_staking =
             StakingBook::new(chain, StakingParameters::reference_testnet()).unwrap();
-        let (action, fee_atomic, public_lock, role_keys, genesis_stake) = match kind {
-            RealActionKind::Transfer => (Action::Transfer, 1_000_000, 0, Vec::new(), 0),
+        let (
+            action,
+            fee_atomic,
+            public_lock,
+            public_release,
+            role_keys,
+            genesis_stake,
+            genesis_commission,
+        ) = match kind {
+            RealActionKind::Transfer => (Action::Transfer, 1_000_000, 0, 0, Vec::new(), 0, 0),
             RealActionKind::RegisterValidator => {
                 let operator_key = Ed25519SigningKey::from([0x61; 32]);
                 let consensus_key = Ed25519SigningKey::from([0x62; 32]);
@@ -1969,10 +2091,12 @@ mod tests {
                     },
                     101_000_000,
                     0,
+                    0,
                     vec![
                         (Role::Operator, operator_key),
                         (Role::ConsensusPop, consensus_key),
                     ],
+                    0,
                     0,
                 )
             }
@@ -2008,7 +2132,9 @@ mod tests {
                     },
                     1_000_000,
                     bit_staking::TESTNET_MIN_DELEGATION_ATOMIC,
+                    0,
                     vec![(Role::PositionOwner, owner_key)],
+                    0,
                     0,
                 )
             }
@@ -2041,7 +2167,9 @@ mod tests {
                     },
                     1_000_000,
                     0,
+                    0,
                     vec![(Role::Operator, operator_key)],
+                    0,
                     0,
                 )
             }
@@ -2063,10 +2191,12 @@ mod tests {
                     },
                     1_000_000,
                     0,
+                    0,
                     vec![
                         (Role::Operator, operator_key),
                         (Role::ConsensusPop, new_consensus_key),
                     ],
+                    0,
                     0,
                 )
             }
@@ -2111,8 +2241,47 @@ mod tests {
                     },
                     1_000_000,
                     0,
+                    0,
                     vec![(Role::Operator, operator_key)],
                     self_bond,
+                    0,
+                )
+            }
+            RealActionKind::ClaimCommission => {
+                let operator_key = Ed25519SigningKey::from([0x8a; 32]);
+                let consensus_key = Ed25519SigningKey::from([0x8b; 32]);
+                let operator = operator_key.verification_key().to_bytes();
+                let consensus = consensus_key.verification_key().to_bytes();
+                let target = validator_id(&chain, &operator);
+                let accrued = 100_000_000u128;
+                genesis_staking
+                    .register_validator(target, operator, consensus, 500)
+                    .unwrap();
+                let mut validator = genesis_staking.validator(&target).unwrap().clone();
+                validator.commission_accrued = Amount::new(accrued).unwrap();
+                let pool = genesis_staking.pool(&target).unwrap().clone();
+                genesis_staking = StakingBook::from_records(
+                    chain,
+                    StakingParameters::reference_testnet(),
+                    [validator],
+                    [pool],
+                    [],
+                    [],
+                )
+                .unwrap();
+                (
+                    Action::ClaimCommission {
+                        validator_id: target,
+                        expected_sequence: 0,
+                        requested_amount: Amount::new(accrued).unwrap(),
+                        fee_source: bit_types::FeeSource::ReleasedValue,
+                    },
+                    1_000_000,
+                    0,
+                    accrued,
+                    vec![(Role::Operator, operator_key)],
+                    0,
+                    accrued,
                 )
             }
         };
@@ -2200,7 +2369,8 @@ mod tests {
         }
 
         let output_total = 15_000_000_000u128
-            .checked_sub(fee_atomic)
+            .checked_add(public_release)
+            .and_then(|value| value.checked_sub(fee_atomic))
             .and_then(|value| value.checked_sub(public_lock))
             .unwrap();
         for (destination, amount) in [
@@ -2298,7 +2468,8 @@ mod tests {
         .unwrap();
         let native_asset_id = asset::Id(Fq::from(1u64)).to_bytes();
         let monetary_policy = MonetaryPolicy {
-            genesis_supply: Amount::new(15_000_000_000 + genesis_stake).unwrap(),
+            genesis_supply: Amount::new(15_000_000_000 + genesis_stake + genesis_commission)
+                .unwrap(),
             epoch_blocks: 720,
             halving_interval_epochs: 35_040,
         };
@@ -2316,7 +2487,7 @@ mod tests {
                     stake: Amount::new(genesis_stake).unwrap(),
                     pending_delegation: Amount::ZERO,
                     exits: Amount::ZERO,
-                    commission: Amount::ZERO,
+                    commission: Amount::new(genesis_commission).unwrap(),
                     fee_reserve: Amount::ZERO,
                     unclaimed_genesis: Amount::ZERO,
                 },
@@ -2733,7 +2904,10 @@ mod tests {
         let second = state.begin_block(2, [53; 32], [54; 32]).await.unwrap();
         state.commit(second.prepare().await.unwrap()).unwrap();
         let mut boundary = state.begin_block(3, [55; 32], [56; 32]).await.unwrap();
-        boundary.stage_epoch_issuance(false).unwrap();
+        let settlement = boundary
+            .stage_epoch_reward_settlement(&BTreeMap::new())
+            .unwrap();
+        assert_eq!(settlement.distributed, Amount::ZERO);
         let outcomes = boundary.stage_epoch_staking_activation().unwrap();
         assert_eq!(outcomes.len(), 1);
         assert!(matches!(outcomes[0].1, ActivationOutcome::Activated { .. }));
@@ -2800,6 +2974,145 @@ mod tests {
             .err()
             .expect("tampered staking pool must be rejected");
         assert!(error.to_string().contains("P supply container"));
+    }
+
+    #[tokio::test]
+    async fn epoch_rewards_move_fee_reserve_into_old_pools_and_commission_atomically() {
+        let dir = TempDir::new().unwrap();
+        let mut genesis_config = config(8);
+        genesis_config.monetary_policy.epoch_blocks = 2;
+        let chain = genesis_config.chain_context;
+        let operator = [0x71; 32];
+        let validator_id = validator_id(&chain, &operator);
+        let owner = [0x72; 32];
+        let position = position_id(&chain, &owner);
+        let principal = Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
+        let initial_fees = Amount::new(101).unwrap();
+
+        let mut staking = StakingBook::new(chain, StakingParameters::reference_testnet()).unwrap();
+        staking
+            .register_validator(validator_id, operator, [0x73; 32], 500)
+            .unwrap();
+        staking
+            .open_pending_delegation(
+                0,
+                0,
+                position,
+                owner,
+                validator_id,
+                principal,
+                Amount::ZERO,
+                true,
+                vec![0x74; bit_staking::RECOVERY_RECEIPT_BYTES],
+            )
+            .unwrap();
+        staking.activate_pending(&position, 1).unwrap();
+        staking.apply_validator_set().unwrap();
+        genesis_config.genesis_staking = staking;
+        genesis_config.genesis_allocation = GenesisAllocation {
+            shielded: Amount::ZERO,
+            stake: principal,
+            pending_delegation: Amount::ZERO,
+            exits: Amount::ZERO,
+            commission: Amount::ZERO,
+            fee_reserve: initial_fees,
+            unclaimed_genesis: Amount::new(
+                genesis_config.monetary_policy.genesis_supply.value()
+                    - principal.value()
+                    - initial_fees.value(),
+            )
+            .unwrap(),
+        };
+
+        let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+        for height in 1..=2 {
+            let block = state
+                .begin_block(height, [height as u8; 32], [height as u8 + 2; 32])
+                .await
+                .unwrap();
+            state.commit(block.prepare().await.unwrap()).unwrap();
+        }
+        let mut boundary = state.begin_block(3, [3; 32], [5; 32]).await.unwrap();
+        let settlement = boundary
+            .stage_epoch_reward_settlement(&BTreeMap::from([(validator_id, 10u128)]))
+            .unwrap();
+        let available = initial_fees.value() + settlement.issuance_quota.value();
+        let expected_commission = available * 500 / 10_000;
+        assert_eq!(settlement.distributed.value(), available);
+        assert_eq!(settlement.fee_reserve_remainder, Amount::ZERO);
+        assert_eq!(
+            settlement.validator_rewards[0].commission_reward.value(),
+            expected_commission
+        );
+        assert!(boundary
+            .stage_epoch_staking_activation()
+            .unwrap()
+            .is_empty());
+        boundary.stage_validator_set_selection().unwrap();
+        let receipt = state.commit(boundary.prepare().await.unwrap()).unwrap();
+        assert_eq!(receipt.supply.fee_reserve, Amount::ZERO);
+        assert_eq!(receipt.supply.commission_total.value(), expected_commission);
+        assert_eq!(
+            receipt.supply.stake_total.value(),
+            principal.value() + available - expected_commission
+        );
+        assert_eq!(
+            state
+                .staking_book()
+                .unwrap()
+                .validator(&validator_id)
+                .unwrap()
+                .commission_accrued
+                .value(),
+            expected_commission
+        );
+        let h3 = state.summary().await.unwrap();
+        let mut claim_block = state.begin_block(4, [4; 32], [6; 32]).await.unwrap();
+        claim_block
+            .stage_verified_staking(&empty_verified_staking(
+                0x75,
+                h3.shielded_tree_root,
+                VerifiedStakingAction::ClaimCommission {
+                    validator_id,
+                    expected_sequence: 0,
+                    requested_amount: Amount::new(expected_commission).unwrap(),
+                    fee_source: bit_types::FeeSource::ReleasedValue,
+                },
+            ))
+            .await
+            .unwrap();
+        let claim_receipt = state.commit(claim_block.prepare().await.unwrap()).unwrap();
+        assert_eq!(claim_receipt.supply.commission_total, Amount::ZERO);
+        assert_eq!(
+            claim_receipt.supply.shielded_total.value(),
+            expected_commission
+        );
+        assert_eq!(
+            state
+                .staking_book()
+                .unwrap()
+                .validator(&validator_id)
+                .unwrap()
+                .sequence,
+            1
+        );
+        state.close().await;
+
+        let reopened = PersistentState::open(dir.path().to_path_buf(), genesis_config)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened
+                .staking_book()
+                .unwrap()
+                .totals()
+                .unwrap()
+                .commission_assets,
+            Amount::ZERO
+        );
+        reopened.close().await;
     }
 
     #[tokio::test]
@@ -3040,6 +3353,7 @@ mod tests {
             RealActionKind::UpdateValidator,
             RealActionKind::UnjailValidator,
             RealActionKind::RotateConsensusKey,
+            RealActionKind::ClaimCommission,
         ] {
             let (genesis_config, envelope_bytes) = real_action_fixture(kind);
             let decoded = Envelope::decode_canonical(&envelope_bytes, 65_536, 1, 100).unwrap();
@@ -3060,7 +3374,8 @@ mod tests {
                 Action::Delegate { .. } => FeeClass::NewPosition,
                 Action::UpdateValidator { .. }
                 | Action::UnjailValidator { .. }
-                | Action::RotateConsensusKey { .. } => FeeClass::Standard,
+                | Action::RotateConsensusKey { .. }
+                | Action::ClaimCommission { .. } => FeeClass::Standard,
                 _ => unreachable!(),
             };
             assert!(
@@ -3222,6 +3537,33 @@ mod tests {
                         receipt.supply.shielded_total.value(),
                         genesis.supply.shielded_total.value() - body.fee.value()
                     );
+                }
+                Action::ClaimCommission {
+                    validator_id,
+                    requested_amount,
+                    ..
+                } => {
+                    let validator = state
+                        .staking_book()
+                        .unwrap()
+                        .validator(&validator_id)
+                        .unwrap()
+                        .clone();
+                    assert_eq!(validator.sequence, 1);
+                    assert_eq!(validator.commission_accrued, Amount::ZERO);
+                    assert_eq!(receipt.supply.commission_total, Amount::ZERO);
+                    assert_eq!(receipt.supply.fee_reserve, body.fee);
+                    assert_eq!(
+                        receipt.supply.shielded_total.value(),
+                        genesis.supply.shielded_total.value() + requested_amount.value()
+                            - body.fee.value()
+                    );
+                    state
+                        .query_latest_with_proof(&staking_validator_key(&validator_id))
+                        .await
+                        .unwrap()
+                        .verify()
+                        .unwrap();
                 }
                 _ => unreachable!(),
             }
