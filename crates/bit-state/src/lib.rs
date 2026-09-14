@@ -37,7 +37,7 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 14;
+const STORAGE_SCHEMA_VERSION: u32 = 15;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -85,6 +85,7 @@ const STAKING_EXIT_EXPOSURE_QUEUE_PREFIX: &str = "staking/exits/exposure_queue/"
 const STAKING_EXIT_MATURITY_HEIGHT_QUEUE_PREFIX: &str = "staking/exits/maturity_height_queue/";
 const STAKING_EXIT_MATURITY_TIME_QUEUE_PREFIX: &str = "staking/exits/maturity_time_queue/";
 const STAKING_EFFECTIVE_SCHEDULE: &str = "staking/effective_schedule";
+const STAKING_EFFECTIVE_HISTORY_PREFIX: &str = "staking/effective_history/";
 
 const SUBSTORES: &[&str] = &[
     "shielded",
@@ -275,6 +276,69 @@ pub struct SystemBlockOutcome {
 struct EffectiveValidatorSchedule {
     base_height: u64,
     sets: [EffectiveValidatorSet; 3],
+}
+
+/// Exact CometBFT validator set and consensus time committed for one height.
+/// These records are the authoritative responsibility lookup for later
+/// Byzantine evidence; the rolling schedule alone cannot answer old heights.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatorSetHistoryRecord {
+    pub height: u64,
+    pub block_time_seconds: u64,
+    pub validator_set: EffectiveValidatorSet,
+}
+
+impl ValidatorSetHistoryRecord {
+    fn encode_persistent(&self) -> Result<Vec<u8>> {
+        let set = self.validator_set.encode_persistent()?;
+        let set_len = u32::try_from(set.len()).map_err(|_| {
+            Error::CorruptState("historical validator set encoding is too large".to_owned())
+        })?;
+        let mut out = Vec::with_capacity(1 + 8 + 8 + 4 + set.len());
+        out.push(1);
+        out.extend_from_slice(&self.height.to_be_bytes());
+        out.extend_from_slice(&self.block_time_seconds.to_be_bytes());
+        out.extend_from_slice(&set_len.to_be_bytes());
+        out.extend_from_slice(&set);
+        Ok(out)
+    }
+
+    fn decode_persistent(bytes: &[u8]) -> Result<Self> {
+        let mut offset = 0usize;
+        if take_history(bytes, &mut offset, 1)?[0] != 1 {
+            return Err(Error::CorruptState(
+                "unsupported validator history version".to_owned(),
+            ));
+        }
+        let height = u64::from_be_bytes(
+            take_history(bytes, &mut offset, 8)?
+                .try_into()
+                .expect("slice length is checked"),
+        );
+        let block_time_seconds = u64::from_be_bytes(
+            take_history(bytes, &mut offset, 8)?
+                .try_into()
+                .expect("slice length is checked"),
+        );
+        let set_len = usize::try_from(u32::from_be_bytes(
+            take_history(bytes, &mut offset, 4)?
+                .try_into()
+                .expect("slice length is checked"),
+        ))
+        .map_err(|_| Error::CorruptState("validator history length overflow".to_owned()))?;
+        let validator_set =
+            EffectiveValidatorSet::decode_persistent(take_history(bytes, &mut offset, set_len)?)?;
+        if offset != bytes.len() {
+            return Err(Error::CorruptState(
+                "trailing validator history bytes".to_owned(),
+            ));
+        }
+        Ok(Self {
+            height,
+            block_time_seconds,
+            validator_set,
+        })
+    }
 }
 
 impl EffectiveValidatorSchedule {
@@ -613,6 +677,16 @@ impl PersistentState {
             .await?
             .effective_set_at(height)?
             .clone())
+    }
+
+    /// Return the committed validator responsibility record for an exact
+    /// historical height. Unlike the rolling H/H+1/H+2 schedule, this lookup
+    /// remains available for the full evidence window and archive operation.
+    pub async fn historical_validator_set_at(
+        &self,
+        height: u64,
+    ) -> Result<ValidatorSetHistoryRecord> {
+        read_validator_history(&self.storage.latest_snapshot(), height).await
     }
 
     /// Hash CometBFT must place in the height-H request for its H+1 set.
@@ -1834,6 +1908,18 @@ impl BlockSession<'_> {
             STAKING_EFFECTIVE_SCHEDULE.to_owned(),
             self.effective_schedule.encode_persistent()?,
         );
+        let history = ValidatorSetHistoryRecord {
+            height: self.height,
+            block_time_seconds: self.block_time_seconds,
+            validator_set: self
+                .effective_schedule
+                .effective_set_at(self.height)?
+                .clone(),
+        };
+        self.delta.put_raw(
+            staking_effective_history_key(self.height),
+            history.encode_persistent()?,
+        );
 
         if self.height >= self.owner.config.anchor_retention_blocks {
             let prune_height = self.height - self.owner.config.anchor_retention_blocks;
@@ -1960,10 +2046,19 @@ async fn initialize_genesis(storage: &Storage, config: &GenesisConfig) -> Result
     write_fee_policy(&mut delta, config.fee_policy);
     write_supply(&mut delta, &supply);
     write_staking_genesis(&mut delta, &config.genesis_staking)?;
+    let genesis_set = config.genesis_staking.effective_validator_set()?;
     delta.put_raw(
         STAKING_EFFECTIVE_SCHEDULE.to_owned(),
-        EffectiveValidatorSchedule::genesis(config.genesis_staking.effective_validator_set()?)
-            .encode_persistent()?,
+        EffectiveValidatorSchedule::genesis(genesis_set.clone()).encode_persistent()?,
+    );
+    delta.put_raw(
+        staking_effective_history_key(0),
+        ValidatorSetHistoryRecord {
+            height: 0,
+            block_time_seconds: 0,
+            validator_set: genesis_set,
+        }
+        .encode_persistent()?,
     );
     delta.put_raw(TREE_ROOT.to_owned(), tree_root.to_vec());
     delta.put_raw(TREE_FRONTIER.to_owned(), frontier);
@@ -2066,6 +2161,14 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
     if effective_schedule.effective_set_at(logical_height)? != &staking.effective_validator_set()? {
         return Err(Error::CorruptState(
             "logical staking set differs from the H+2 effective set".to_owned(),
+        ));
+    }
+    let history = read_validator_history(&snapshot, height).await?;
+    if history.block_time_seconds != read_u64(&snapshot, META_BLOCK_TIME_SECONDS).await?
+        || history.validator_set != *effective_schedule.effective_set_at(height)?
+    {
+        return Err(Error::CorruptState(
+            "current validator history differs from committed state".to_owned(),
         ));
     }
 
@@ -2309,6 +2412,21 @@ async fn read_effective_schedule(snapshot: &Snapshot) -> Result<EffectiveValidat
     )
 }
 
+async fn read_validator_history(
+    snapshot: &Snapshot,
+    height: u64,
+) -> Result<ValidatorSetHistoryRecord> {
+    let key = staking_effective_history_key(height);
+    let record = ValidatorSetHistoryRecord::decode_persistent(&required(snapshot, &key).await?)?;
+    if record.height != height {
+        return Err(Error::CorruptState(format!(
+            "validator history key {key} contains height {}",
+            record.height
+        )));
+    }
+    Ok(record)
+}
+
 fn take_schedule<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<&'a [u8]> {
     let end = offset
         .checked_add(len)
@@ -2316,6 +2434,17 @@ fn take_schedule<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<
     let value = bytes
         .get(*offset..end)
         .ok_or_else(|| Error::CorruptState("truncated effective validator schedule".to_owned()))?;
+    *offset = end;
+    Ok(value)
+}
+
+fn take_history<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<&'a [u8]> {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| Error::CorruptState("validator history length overflow".to_owned()))?;
+    let value = bytes
+        .get(*offset..end)
+        .ok_or_else(|| Error::CorruptState("truncated validator history".to_owned()))?;
     *offset = end;
     Ok(value)
 }
@@ -2495,6 +2624,10 @@ pub fn staking_exit_cohort_key(id: &Hash32) -> String {
 
 pub fn staking_exit_ticket_key(id: &Hash32) -> String {
     hash_key("staking/exits/tickets", id)
+}
+
+pub fn staking_effective_history_key(height: u64) -> String {
+    format!("{STAKING_EFFECTIVE_HISTORY_PREFIX}{height:016x}")
 }
 
 fn exit_queue_key(prefix: &str, deadline: u64, id: &Hash32) -> String {
@@ -3953,6 +4086,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn historical_validator_sets_are_exact_provable_and_restart_safe() {
+        let dir = TempDir::new().unwrap();
+        let (genesis_config, _, consensus_pubkey, power) =
+            active_validator_config(8, StakingParameters::reference_testnet());
+        let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+
+        let genesis_history = state.historical_validator_set_at(0).await.unwrap();
+        assert_eq!(genesis_history.height, 0);
+        assert_eq!(genesis_history.block_time_seconds, 0);
+        assert_eq!(genesis_history.validator_set.validators().len(), 1);
+
+        for (height, block_time_seconds) in [(1, 10), (2, 25)] {
+            let next_hash = state.expected_next_validators_hash(height).await.unwrap();
+            let votes = if height == 1 {
+                None
+            } else {
+                Some(vec![CommitVote {
+                    consensus_address: bit_staking::consensus_address(&consensus_pubkey),
+                    power,
+                    signed: true,
+                }])
+            };
+            let mut block = state
+                .begin_block_at(
+                    height,
+                    block_time_seconds,
+                    [height as u8; 32],
+                    [height as u8 + 1; 32],
+                )
+                .await
+                .unwrap();
+            block
+                .stage_consensus_system(votes.as_deref(), next_hash)
+                .unwrap();
+            state.commit(block.prepare().await.unwrap()).unwrap();
+        }
+
+        let first = state.historical_validator_set_at(1).await.unwrap();
+        assert_eq!(first.block_time_seconds, 10);
+        assert_eq!(
+            first.validator_set.validators()[0].consensus_pubkey,
+            consensus_pubkey
+        );
+        assert_eq!(first.validator_set.validators()[0].power, power);
+        let second = state.historical_validator_set_at(2).await.unwrap();
+        assert_eq!(second.block_time_seconds, 25);
+        assert_eq!(second.validator_set, first.validator_set);
+        let proof = state
+            .query_latest_with_proof(&staking_effective_history_key(1))
+            .await
+            .unwrap();
+        assert!(proof.value.is_some());
+        proof.verify().unwrap();
+        let mut trailing = first.encode_persistent().unwrap();
+        trailing.push(0);
+        assert!(ValidatorSetHistoryRecord::decode_persistent(&trailing).is_err());
+        state.close().await;
+
+        let reopened = PersistentState::open(dir.path().to_path_buf(), genesis_config)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.historical_validator_set_at(1).await.unwrap(),
+            first
+        );
+        assert_eq!(
+            reopened.historical_validator_set_at(2).await.unwrap(),
+            second
+        );
+        reopened.close().await;
+    }
+
+    #[tokio::test]
     async fn unbond_and_claim_exit_persist_across_exposure_and_maturity() {
         let dir = TempDir::new().unwrap();
         let mut genesis_config = config(16);
@@ -4582,6 +4790,16 @@ mod tests {
         delta.put_raw(
             STAKING_EFFECTIVE_SCHEDULE.to_owned(),
             schedule.encode_persistent().unwrap(),
+        );
+        delta.put_raw(
+            staking_effective_history_key(1),
+            ValidatorSetHistoryRecord {
+                height: 1,
+                block_time_seconds: 0,
+                validator_set: schedule.effective_set_at(1).unwrap().clone(),
+            }
+            .encode_persistent()
+            .unwrap(),
         );
         delta.put_raw(TREE_FRONTIER.to_owned(), vec![0xff]);
         storage.commit(delta).await.unwrap();

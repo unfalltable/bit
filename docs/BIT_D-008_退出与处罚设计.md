@@ -41,13 +41,13 @@ ClaimExit 从当前状态重新计算票据 quote，并要求它精确等于信�
 
 ## 4. 持久化与验证证据
 
-schema v13 新增 `staking/exits/cohorts/<cohort_id>` 和 `staking/exits/tickets/<ticket_id>`；schema v14 增加 exposure、maturity-height 和 maturity-time 三个 ExitQueueEntry 索引。创世、区块触及写入、重启读取、账本校验和 `sum(cohort.assets)=supply/exit_total` 全部已接入；对象及队列均可生成针对最新 app hash 的 ICS23 成员或非成员证明。
+schema v13 新增 `staking/exits/cohorts/<cohort_id>` 和 `staking/exits/tickets/<ticket_id>`；schema v14 增加 exposure、maturity-height 和 maturity-time 三个 ExitQueueEntry 索引；schema v15 增加 `staking/effective_history/<height>`，逐高度保存真实 CometBFT 集合及链时间。创世、区块触及写入、重启读取、账本校验和 `sum(cohort.assets)=supply.exit_total` 全部已接入；退出对象、队列及历史责任集合均可生成针对最新 app hash 的 ICS23 成员或非成员证明。
 
 测试覆盖池份额退出、cohort 份额、最后领取尾差、双条件严格大于边界、未成熟与重复领取拒绝、最后验证者自质押保护、两类费用容器变化、跨七个区块推进、epoch 奖励交错、落盘、重启和 ICS23 证明。真实信封测试使用 Spend/Output Groth16 证明、PositionOwner Ed25519 授权、binding、实时 sequence/quote 和统一正式交易分发入口执行 Unbond 与 ClaimExit。
 
 ## 5. 下一切片
 
-1. 接入 CometBFT Byzantine evidence 的规范校验、历史责任集合和 evidence hash 去重。
+1. 使用已落盘的历史责任集合接入 CometBFT Byzantine evidence 规范校验和 evidence hash 去重。
 2. 实现永久 tombstone、活动池罚没、供应 Burn 及按 `exposure_end_height >= infraction_height` 选择未成熟 cohort。
 3. 将 cohort 扣罚拆成每块最多 128 项的持久化 SlashJob；任务存在时冻结该验证人的激活、Unbond 和 ClaimExit，崩溃重启不得重复扣罚。
 4. 把真实退出和处罚故障恢复加入多节点 CometBFT 场景。

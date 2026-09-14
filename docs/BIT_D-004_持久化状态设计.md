@@ -14,7 +14,7 @@
 
 | 键 | 值 | 约束 |
 |---|---|---|
-| `meta/version` | 4 字节大端 schema 版本 | 当前为 14，未知版本拒绝启动 |
+| `meta/version` | 4 字节大端 schema 版本 | 当前为 15，未知版本拒绝启动 |
 | `meta/height` | 8 字节大端状态高度 | 必须等于 Cnidarium 最新版本 |
 | `meta/block_time_seconds` | 8 字节大端 Unix 秒 | ABCI 区块时间，不允许相对 durable 状态倒退 |
 | `meta/chain_context` | 32 字节 | 创世后不可变 |
@@ -58,6 +58,7 @@
 | `staking/exits/maturity_height_queue/<height>/<cohort_id>` | v1 ExitQueueEntry | 高度严格超过目标后只处理一次 |
 | `staking/exits/maturity_time_queue/<seconds>/<cohort_id>` | v1 ExitQueueEntry | 链时间严格超过目标后只处理一次 |
 | `staking/effective_schedule` | v1 三高度实际集合记录 | 在已提交高度 H 保存 H/H+1/H+2 的规范顺序、power 和 CometBFT 集合哈希 |
+| `staking/effective_history/<height>` | v1 ValidatorSetHistoryRecord | 保存该高度真实集合及经过共识确认的链时间，供处罚责任与成员/总权重核验 |
 | `shielded/tree_root` | 32 字节 TCT 根 | 必须与 frontier 重算结果一致 |
 | `shielded/tree_frontier` | 固定依赖版本的 bincode TCT | 纳入 JMT；解码前限制为 64 MiB |
 | `shielded/anchor/<height>` | 32 字节 TCT 根 | 只保留配置窗口 |
@@ -69,7 +70,7 @@
 
 初始化时按签名创世清单的顺序校验并插入隐私承诺，然后关闭高度零 TCT block；非法字段元素或重复承诺会在写盘前拒绝。清单摘要使用 `BIT-GENESIS-COMMITMENTS-V1 || count_be_u64 || commitments` 的 SHA-256，重启配置必须给出同一有序清单。主网清单仍属于未批准外部输入。
 
-TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11；逐验证人的持久化候选排序记录进入 schema v12；退出参数、cohort 和 ticket 进入 schema v13；退出暴露/成熟队列进入 schema v14。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
+TCT frontier 使用 bincode 是节点内部状态格式，不是网络协议。创世承诺加入不可变状态时 schema 从 1 提升为 2；protocol version 和区块字节上限进入持久化共识配置后提升为 3；供应与发行字段进入同一状态树后提升为 4；最低费参数和交易记录中的实际/最低费进入状态后提升为 5；逐项质押参数、validator、pool、position 和 activation-capacity 记录进入状态后提升为 6；完整验证人元数据进入 schema v7；链时间、佣金/jail 参数、验证人 sequence、待生效佣金和共识键历史进入 schema v8；逐验证人累计佣金及与供应容器 C 的交叉校验进入 schema v9；实际签名滑动窗口与 epoch score 进入 schema v10；三高度实际验证者集合及其 CometBFT 哈希进入 schema v11；逐验证人的持久化候选排序记录进入 schema v12；退出参数、cohort 和 ticket 进入 schema v13；退出暴露/成熟队列进入 schema v14；逐高度真实验证者责任集合进入 schema v15。任何后续依赖或结构升级也必须提升 `meta/version` 并提供确定性迁移，不能在旧数据库上静默换编码。
 
 ## 3. 块生命周期
 
