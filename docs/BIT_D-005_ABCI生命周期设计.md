@@ -1,10 +1,10 @@
 # BIT D-005 ABCI 生命周期设计
 
-状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；验证者更新、可用快照、生产摘要编码器和真实多节点接线仍未完成。
+状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；交易形式的验证人更新已经执行，但 ABCI ValidatorUpdates、可用快照、生产摘要编码器和真实多节点接线仍未完成。
 
 ## 1. 单一执行入口
 
-`crates/bit-app` 位于 ABCI 网络适配与 `bit-state` 之间。CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都调用 `BlockSession::verify_and_stage_transfer`，不各自维护交易规则。只有 Commit 消耗 FinalizeBlock 产生的 `PreparedBlock` 并写入 RocksDB。
+`crates/bit-app` 位于 ABCI 网络适配与 `bit-state` 之间。CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都调用同一个 envelope 验证与动作调度入口，不各自维护 Transfer 或质押规则。只有 Commit 消耗 FinalizeBlock 产生的 `PreparedBlock` 并写入 RocksDB。
 
 应用协议版本和 `max_block_bytes` 已移入 `GenesisConfig`，由状态 schema v3 持久化。节点重启时给出不同值会拒绝打开数据库，避免同一 app hash 下使用不同本地执行限制。
 
@@ -19,6 +19,8 @@
 | `finalize_block` | 按顺序执行交易；每笔返回稳定代码，失败交易不留部分状态；只产生待提交批次 |
 | `commit` | 每次只消费一个待提交批次；无 Finalize 或重复 Commit 均返回错误 |
 | `query_latest_with_proof` | 复用 `bit-state` 最新高度 ICS23 查询 |
+
+PrepareProposal、ProcessProposal 和 FinalizeBlock 都要求合法的 ABCI Timestamp，并把 Unix 秒传给同一块执行器。Finalize 与高度、摘要、供应和质押变更一起持久化链时间；时间相对 durable 状态倒退时停止执行。CheckTx 使用 durable 时间加一的预览值，只用于无副作用策略检查。
 
 FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`。如果底层存储或已提交状态损坏，错误不会伪装成普通交易拒绝；网络适配必须让节点停止参与，而不能返回伪造的成功 app hash。
 

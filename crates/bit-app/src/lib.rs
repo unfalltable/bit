@@ -97,6 +97,7 @@ pub struct PreparedProposal {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlockRequest {
     pub height: u64,
+    pub block_time_seconds: u64,
     pub transactions: Vec<Vec<u8>>,
     /// Digest produced by the deterministic business-action executor.
     pub execution_hash: Hash32,
@@ -149,7 +150,10 @@ impl ApplicationCore {
     /// Check a transaction against the latest committed state without writes.
     pub async fn check_tx(&self, transaction: &[u8]) -> Result<TxResult> {
         let height = next_height(self.state.summary().await?.state_height)?;
-        let mut block = self.state.begin_block(height, [0; 32], [0; 32]).await?;
+        let mut block = self
+            .state
+            .begin_block_preview(height, [0; 32], [0; 32])
+            .await?;
         match block.verify_and_stage_transaction(transaction).await {
             Ok(tx_id) => Ok(TxResult::accepted(tx_id)),
             Err(error) => rejection_or_state_error(error),
@@ -163,8 +167,32 @@ impl ApplicationCore {
         candidates: Vec<Vec<u8>>,
         requested_max_tx_bytes: u64,
     ) -> Result<PreparedProposal> {
+        let summary = self.state.summary().await?;
+        let block_time_seconds = summary
+            .block_time_seconds
+            .checked_add(1)
+            .ok_or(Error::InvalidConfig("block time seconds overflow"))?;
+        self.prepare_proposal_at(
+            height,
+            block_time_seconds,
+            candidates,
+            requested_max_tx_bytes,
+        )
+        .await
+    }
+
+    pub async fn prepare_proposal_at(
+        &self,
+        height: u64,
+        block_time_seconds: u64,
+        candidates: Vec<Vec<u8>>,
+        requested_max_tx_bytes: u64,
+    ) -> Result<PreparedProposal> {
         let limit = requested_max_tx_bytes.min(self.max_block_bytes);
-        let mut block = self.state.begin_block(height, [0; 32], [0; 32]).await?;
+        let mut block = self
+            .state
+            .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
+            .await?;
         let mut transactions = Vec::new();
         let mut rejected = Vec::new();
         let mut total_transaction_bytes = 0u64;
@@ -198,10 +226,28 @@ impl ApplicationCore {
 
     /// Re-execute a proposal in order. Any invalid transaction rejects it.
     pub async fn process_proposal(&self, height: u64, transactions: &[Vec<u8>]) -> Result<bool> {
+        let summary = self.state.summary().await?;
+        let block_time_seconds = summary
+            .block_time_seconds
+            .checked_add(1)
+            .ok_or(Error::InvalidConfig("block time seconds overflow"))?;
+        self.process_proposal_at(height, block_time_seconds, transactions)
+            .await
+    }
+
+    pub async fn process_proposal_at(
+        &self,
+        height: u64,
+        block_time_seconds: u64,
+        transactions: &[Vec<u8>],
+    ) -> Result<bool> {
         if total_bytes(transactions)? > self.max_block_bytes {
             return Ok(false);
         }
-        let mut block = self.state.begin_block(height, [0; 32], [0; 32]).await?;
+        let mut block = self
+            .state
+            .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
+            .await?;
         for transaction in transactions {
             if let Err(error) = block.verify_and_stage_transaction(transaction).await {
                 rejection_or_state_error(error)?;
@@ -230,7 +276,12 @@ impl ApplicationCore {
         }
         let mut block = self
             .state
-            .begin_block(request.height, request.execution_hash, request.compact_hash)
+            .begin_block_at(
+                request.height,
+                request.block_time_seconds,
+                request.execution_hash,
+                request.compact_hash,
+            )
             .await?;
         let mut transaction_results = Vec::with_capacity(request.transactions.len());
         for transaction in &request.transactions {
@@ -392,6 +443,7 @@ mod tests {
         let finalized = app
             .finalize_block(BlockRequest {
                 height: 1,
+                block_time_seconds: 1,
                 transactions: Vec::new(),
                 execution_hash: [4; 32],
                 compact_hash: [5; 32],
@@ -402,6 +454,7 @@ mod tests {
         assert!(matches!(
             app.finalize_block(BlockRequest {
                 height: 1,
+                block_time_seconds: 1,
                 transactions: Vec::new(),
                 execution_hash: [4; 32],
                 compact_hash: [5; 32],
@@ -439,6 +492,7 @@ mod tests {
         assert!(matches!(
             app.finalize_block(BlockRequest {
                 height: 1,
+                block_time_seconds: 1,
                 transactions: vec![vec![1, 2, 3, 4, 5]],
                 execution_hash: [8; 32],
                 compact_hash: [9; 32],
@@ -462,6 +516,7 @@ mod tests {
         let finalized = app
             .finalize_block(BlockRequest {
                 height: 1,
+                block_time_seconds: 1,
                 transactions: vec![vec![0xff]],
                 execution_hash: [6; 32],
                 compact_hash: [7; 32],

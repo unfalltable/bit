@@ -1,6 +1,6 @@
 # BIT D-007 原生质押设计
 
-状态：`IN_PROGRESS`。本文记录已经进入代码和测试的第一阶段，不代表 D-007 已完成，也不包含 D-008 的退出与处罚实现。
+状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁和共识密钥轮换已经进入统一交易执行链；在线率、奖励分配和 CometBFT ValidatorUpdates 仍在开发，不包含 D-008 的退出与处罚实现。
 
 ## 1. 唯一身份与对象
 
@@ -43,9 +43,13 @@ S' = S + minted
 
 ## 5. 本阶段验证
 
-schema v7 为 parameters、validator、pool、position 和 capacity 分别定义版本化、定长整数、大端序的持久化编码；validator v2 记录完整公开元数据并拒绝重复 consensus key，position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、尾随字节、非法 Amount、非法 UTF-8 和不符合定长规则的收据。每个对象使用独立 JMT 键，更新阶段只写本次触及的记录。
+schema v8 为 parameters、validator、pool、position 和 capacity 分别定义版本化、定长整数、大端序的持久化编码；parameters v2 固定 jail、佣金通知和证据窗口的时间/高度双门槛，validator v3 记录完整公开元数据、sequence、待生效佣金、待生效共识键、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、尾随字节、非法 Amount、非法 UTF-8 和不符合定长规则的收据。每个对象使用独立 JMT 键，更新阶段只写本次触及的记录。
 
-交易层现已对 RegisterValidator、Delegate 和 CancelPending 验证独立角色域的 Ed25519 签名。注册的 consensus-pop 域与 operator 域分离，自质押的 operator key 从当前状态解析。三类动作与 Spend/Output 证明、Spend 授权、最低费和公开 lock/release 一起进入同一个 binding equation。应用核心的 CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都通过统一动作调度进入该执行器。
+交易层现已对 RegisterValidator、Delegate、CancelPending、UpdateValidator、UnjailValidator 和 RotateConsensusKey 验证独立角色域的 Ed25519 签名。注册与轮换的 consensus-pop 域和 operator 域分离，所有既有验证人动作都从当前状态解析 operator 与精确 sequence。六类动作与 Spend/Output 证明、Spend 授权、最低费和公开 lock/release 一起进入同一个 binding equation。应用核心的 CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都通过统一动作调度进入该执行器。
+
+UpdateValidator 立即更新公开资料；佣金降低最早在下个 epoch 生效，佣金上调每次最多 100 bps，并同时满足 604800 链秒和 120960 块的通知期。停用请求在下一次集合选择移出节点，重新启用后回到 Candidate。Unjail 同时要求自 jail 起经过 7200 链秒和 1440 块。RotateConsensusKey 验证新密钥 PoP 后排到下个 epoch，epoch 中途继续使用旧密钥；实际切换时旧密钥记录保留到证据窗口结束，历史和所有待生效密钥全局唯一。
+
+ABCI PrepareProposal、ProcessProposal 和 FinalizeBlock 使用请求中的规范时间戳；状态层把 Unix 秒与区块状态同批提交并拒绝倒退，因此佣金和 jail 时间门槛不依赖本机时钟。
 
 状态层在同一候选副本中验证 commitment tree、nullifier/tx_id、供应容器和质押账本，任一检查失败都不修改区块 overlay。Prepare 同时验证 `sum(pool.P)=供应容器 P` 与全部 pending/refundable 本金之和等于供应容器 D。持久内存镜像仅在 RocksDB batch 成功提交后替换，重启从逐项记录重建并重跑全部不变量。
 
@@ -53,8 +57,7 @@ schema v7 为 parameters、validator、pool、position 和 capacity 分别定义
 
 ## 6. 完成 D-007 还需要
 
-1. 已完成 RegisterValidator、Delegate、CancelPending；继续完成 UpdateValidator、Unjail 和 RotateConsensusKey 的状态转换与角色签名/PoP 校验。
-2. 实现佣金延迟变更、共识键历史、在线率窗口、jail 双重等待条件和 operator sequence。
-3. 把真实 epoch 签名得分、旧池奖励分配和增量候选索引接到现有“发行结算→激活→集合选择”原子系统阶段。
-4. 从选中集合生成 CometBFT ValidatorUpdates，并做 H/H+1/H+2 真实集合哈希验证。
-5. 落实最后合格验证者保护和 `HALT_NO_SAFE_VALIDATOR_SET`，再进入 D-008 退出 cohort、ticket 与 SlashJob。
+1. 实现在线率窗口和由实际提交签名生成的 epoch 得分。
+2. 把旧池奖励/佣金分配和增量候选索引接到现有“发行结算→激活→集合选择”原子系统阶段。
+3. 从选中集合生成 CometBFT ValidatorUpdates，并做 H/H+1/H+2 真实集合哈希验证。
+4. 落实最后合格验证者保护和 `HALT_NO_SAFE_VALIDATOR_SET`，再进入 D-008 退出 cohort、ticket 与 SlashJob。

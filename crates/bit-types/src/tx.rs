@@ -144,8 +144,17 @@ impl Action {
                 website,
                 description,
                 commission_bps,
+                request_disable,
                 ..
             } => {
+                if display_name.is_none()
+                    && website.is_none()
+                    && description.is_none()
+                    && commission_bps.is_none()
+                    && request_disable.is_none()
+                {
+                    return Err(Error::InvalidTransaction("validator update is empty"));
+                }
                 if let Some(value) = display_name {
                     valid_text(value, 1, 64, "display name")?;
                 }
@@ -757,6 +766,21 @@ mod tests {
         assert!(tx.encode_canonical().is_err());
         assert!(body().validate_at_height(11, 120).is_err());
         assert!(body().validate_at_height(1, 8).is_err());
+
+        let mut tx = body();
+        tx.action = Action::UpdateValidator {
+            validator_id: [3; 32],
+            expected_sequence: 0,
+            display_name: None,
+            website: None,
+            description: None,
+            commission_bps: None,
+            request_disable: None,
+        };
+        assert_eq!(
+            tx.validate_at_height(1, 120),
+            Err(Error::InvalidTransaction("validator update is empty"))
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@ use bit_emission::{
 };
 use bit_staking::{
     ActivationCapacityRecord, ActivationOutcome, PositionStatus, StakePool, StakePosition,
-    StakingBook, StakingParameters, StakingTotals, Validator, ValidatorPower,
+    StakingBook, StakingParameters, StakingTotals, Validator, ValidatorPower, ValidatorUpdate,
 };
 use bit_transaction::{
     verify_staking_stateless, verify_transfer_stateless, ActionAuthorizationView,
@@ -33,10 +33,11 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 7;
+const STORAGE_SCHEMA_VERSION: u32 = 8;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
+const META_BLOCK_TIME_SECONDS: &str = "meta/block_time_seconds";
 const META_CHAIN_CONTEXT: &str = "meta/chain_context";
 const META_NATIVE_ASSET_ID: &str = "meta/native_asset_id";
 const META_PROTOCOL_VERSION: &str = "meta/protocol_version";
@@ -192,6 +193,8 @@ pub enum Error {
     CorruptState(String),
     #[error("expected next state height {expected}, got {actual}")]
     HeightMismatch { expected: u64, actual: u64 },
+    #[error("block time regressed from {previous} to {actual}")]
+    BlockTimeRegression { previous: u64, actual: u64 },
     #[error("transaction anchor is not retained")]
     UnknownAnchor,
     #[error("transaction is already applied")]
@@ -214,6 +217,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct StateSummary {
     pub storage_schema_version: u32,
     pub state_height: u64,
+    pub block_time_seconds: u64,
     pub storage_version: u64,
     pub app_hash: Hash32,
     pub shielded_tree_root: Hash32,
@@ -299,6 +303,32 @@ impl PersistentState {
         execution_hash: Hash32,
         compact_hash: Hash32,
     ) -> Result<BlockSession<'_>> {
+        self.begin_block_preview(height, execution_hash, compact_hash)
+            .await
+    }
+
+    pub async fn begin_block_preview(
+        &self,
+        height: u64,
+        execution_hash: Hash32,
+        compact_hash: Hash32,
+    ) -> Result<BlockSession<'_>> {
+        let current_time =
+            read_u64(&self.storage.latest_snapshot(), META_BLOCK_TIME_SECONDS).await?;
+        let preview_time = current_time
+            .checked_add(1)
+            .ok_or_else(|| Error::CorruptState("block time seconds overflow".to_owned()))?;
+        self.begin_block_at(height, preview_time, execution_hash, compact_hash)
+            .await
+    }
+
+    pub async fn begin_block_at(
+        &self,
+        height: u64,
+        block_time_seconds: u64,
+        execution_hash: Hash32,
+        compact_hash: Hash32,
+    ) -> Result<BlockSession<'_>> {
         let snapshot = self.storage.latest_snapshot();
         let current_height = read_u64(&snapshot, META_HEIGHT).await?;
         let expected = current_height
@@ -308,6 +338,13 @@ impl PersistentState {
             return Err(Error::HeightMismatch {
                 expected,
                 actual: height,
+            });
+        }
+        let previous_time = read_u64(&snapshot, META_BLOCK_TIME_SECONDS).await?;
+        if block_time_seconds < previous_time {
+            return Err(Error::BlockTimeRegression {
+                previous: previous_time,
+                actual: block_time_seconds,
             });
         }
 
@@ -332,6 +369,7 @@ impl PersistentState {
             delta: StateDelta::new(snapshot),
             tree,
             height,
+            block_time_seconds,
             execution_hash,
             compact_hash,
             supply,
@@ -415,6 +453,7 @@ impl PersistentState {
             prepared.staking;
         Ok(CommitReceipt {
             state_height: prepared.state_height,
+            block_time_seconds: prepared.block_time_seconds,
             storage_version: prepared.storage_version,
             app_hash: committed_root,
             shielded_tree_root: prepared.shielded_tree_root,
@@ -434,6 +473,7 @@ pub struct BlockSession<'a> {
     delta: StateDelta<Snapshot>,
     tree: Tree,
     height: u64,
+    block_time_seconds: u64,
     execution_hash: Hash32,
     compact_hash: Hash32,
     supply: SupplyState,
@@ -457,6 +497,12 @@ impl ActionAuthorizationView for StakingAuthorizationSnapshot<'_> {
         self.0
             .validator(validator_id)
             .map(|validator| validator.operator_pubkey)
+    }
+
+    fn validator_sequence(&self, validator_id: &Hash32) -> Option<u64> {
+        self.0
+            .validator(validator_id)
+            .map(|validator| validator.sequence)
     }
 
     fn pending_position(&self, position_id: &Hash32) -> Option<PendingPositionAuthorization> {
@@ -488,7 +534,10 @@ impl BlockSession<'_> {
             Action::Transfer => Ok(self.verify_and_stage_transfer(envelope_bytes).await?.tx_id),
             Action::RegisterValidator { .. }
             | Action::Delegate { .. }
-            | Action::CancelPending { .. } => Ok(self
+            | Action::CancelPending { .. }
+            | Action::UpdateValidator { .. }
+            | Action::UnjailValidator { .. }
+            | Action::RotateConsensusKey { .. } => Ok(self
                 .verify_and_stage_staking_action(envelope_bytes)
                 .await?
                 .shielded
@@ -567,7 +616,7 @@ impl BlockSession<'_> {
     ) -> Result<()> {
         let mut staking = self.staking.clone();
         let mut supply = self.supply.clone();
-        staking.register_validator_with_metadata(
+        staking.register_validator_with_metadata_at(
             validator_id,
             operator_pubkey,
             consensus_pubkey,
@@ -575,6 +624,8 @@ impl BlockSession<'_> {
             display_name,
             website,
             description,
+            self.height,
+            self.block_time_seconds,
         )?;
         supply.charge_shielded_fee(&self.owner.config.monetary_policy, fee)?;
         validate_staking_supply(&staking, &supply)?;
@@ -732,6 +783,12 @@ impl BlockSession<'_> {
             })
             .collect();
         let mut staking = self.staking.clone();
+        let current_epoch = self.boundary_epoch()?;
+        let scheduled = staking.apply_scheduled_validator_changes(
+            current_epoch,
+            self.height,
+            self.block_time_seconds,
+        )?;
         let selected = staking.apply_validator_set()?;
         for validator in staking.validators() {
             if previous.get(&validator.validator_id)
@@ -742,6 +799,7 @@ impl BlockSession<'_> {
                     .insert(validator.validator_id);
             }
         }
+        self.staking_touches.validators.extend(scheduled);
         self.staking = staking;
         Ok(selected)
     }
@@ -827,6 +885,9 @@ impl BlockSession<'_> {
             Action::RegisterValidator { .. }
                 | Action::Delegate { .. }
                 | Action::CancelPending { .. }
+                | Action::UpdateValidator { .. }
+                | Action::UnjailValidator { .. }
+                | Action::RotateConsensusKey { .. }
         ) {
             return Err(bit_transaction::Error::UnsupportedAction.into());
         }
@@ -893,7 +954,7 @@ impl BlockSession<'_> {
                 website,
                 description,
             } => {
-                candidate_staking.register_validator_with_metadata(
+                candidate_staking.register_validator_with_metadata_at(
                     *validator_id,
                     *operator,
                     *consensus,
@@ -901,6 +962,8 @@ impl BlockSession<'_> {
                     display_name.clone(),
                     website.clone(),
                     description.clone(),
+                    self.height,
+                    self.block_time_seconds,
                 )?;
                 candidate_supply.charge_shielded_fee(
                     &self.owner.config.monetary_policy,
@@ -966,6 +1029,72 @@ impl BlockSession<'_> {
                 touches.positions.insert(*position_id);
                 touches.pools.insert(position.validator_id);
                 touches.capacity_epochs.insert(position.activation_epoch);
+            }
+            VerifiedStakingAction::UpdateValidator {
+                validator_id,
+                expected_sequence,
+                display_name,
+                website,
+                description,
+                commission_bps,
+                request_disable,
+            } => {
+                let current_epoch =
+                    self.height.saturating_sub(1) / self.owner.config.monetary_policy.epoch_blocks;
+                candidate_staking.update_validator(
+                    validator_id,
+                    *expected_sequence,
+                    current_epoch,
+                    self.height,
+                    self.block_time_seconds,
+                    ValidatorUpdate {
+                        display_name: display_name.clone(),
+                        website: website.clone(),
+                        description: description.clone(),
+                        commission_bps: *commission_bps,
+                        request_disable: *request_disable,
+                    },
+                )?;
+                candidate_supply.charge_shielded_fee(
+                    &self.owner.config.monetary_policy,
+                    verified.shielded.fee,
+                )?;
+                touches.validators.insert(*validator_id);
+            }
+            VerifiedStakingAction::UnjailValidator {
+                validator_id,
+                expected_sequence,
+            } => {
+                candidate_staking.unjail_validator(
+                    validator_id,
+                    *expected_sequence,
+                    self.height,
+                    self.block_time_seconds,
+                )?;
+                candidate_supply.charge_shielded_fee(
+                    &self.owner.config.monetary_policy,
+                    verified.shielded.fee,
+                )?;
+                touches.validators.insert(*validator_id);
+            }
+            VerifiedStakingAction::RotateConsensusKey {
+                validator_id,
+                expected_sequence,
+                new_consensus,
+            } => {
+                let current_epoch =
+                    self.height.saturating_sub(1) / self.owner.config.monetary_policy.epoch_blocks;
+                candidate_staking.rotate_consensus_key(
+                    validator_id,
+                    *expected_sequence,
+                    *new_consensus,
+                    current_epoch,
+                )?;
+                candidate_supply.charge_shielded_fee(
+                    &self.owner.config.monetary_policy,
+                    verified.shielded.fee,
+                )?;
+                touches.validators.insert(*validator_id);
             }
         }
         validate_staking_supply(&candidate_staking, &candidate_supply)?;
@@ -1064,6 +1193,10 @@ impl BlockSession<'_> {
 
         self.delta
             .put_raw(META_HEIGHT.to_owned(), u64_bytes(self.height));
+        self.delta.put_raw(
+            META_BLOCK_TIME_SECONDS.to_owned(),
+            u64_bytes(self.block_time_seconds),
+        );
         self.delta
             .put_raw(TREE_ROOT.to_owned(), shielded_tree_root.to_vec());
         self.delta.put_raw(TREE_FRONTIER.to_owned(), frontier);
@@ -1105,6 +1238,7 @@ impl BlockSession<'_> {
         Ok(PreparedBlock {
             batch,
             state_height: self.height,
+            block_time_seconds: self.block_time_seconds,
             storage_version,
             app_hash,
             shielded_tree_root,
@@ -1119,6 +1253,7 @@ impl BlockSession<'_> {
 pub struct PreparedBlock {
     batch: StagedWriteBatch,
     pub state_height: u64,
+    pub block_time_seconds: u64,
     pub storage_version: u64,
     pub app_hash: Hash32,
     pub shielded_tree_root: Hash32,
@@ -1131,6 +1266,7 @@ pub struct PreparedBlock {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitReceipt {
     pub state_height: u64,
+    pub block_time_seconds: u64,
     pub storage_version: u64,
     pub app_hash: Hash32,
     pub shielded_tree_root: Hash32,
@@ -1158,6 +1294,7 @@ async fn initialize_genesis(storage: &Storage, config: &GenesisConfig) -> Result
         STORAGE_SCHEMA_VERSION.to_be_bytes().to_vec(),
     );
     delta.put_raw(META_HEIGHT.to_owned(), u64_bytes(0));
+    delta.put_raw(META_BLOCK_TIME_SECONDS.to_owned(), u64_bytes(0));
     delta.put_raw(META_CHAIN_CONTEXT.to_owned(), config.chain_context.to_vec());
     delta.put_raw(
         META_NATIVE_ASSET_ID.to_owned(),
@@ -1225,6 +1362,7 @@ async fn validate_storage(storage: &Storage, config: &GenesisConfig) -> Result<(
         )));
     }
     let height = read_u64(&snapshot, META_HEIGHT).await?;
+    read_u64(&snapshot, META_BLOCK_TIME_SECONDS).await?;
     if snapshot.version() != height {
         return Err(Error::CorruptState(format!(
             "storage version {} differs from state height {height}",
@@ -1318,10 +1456,12 @@ async fn summary_from_snapshot(
     monetary_policy: &MonetaryPolicy,
 ) -> Result<StateSummary> {
     let state_height = read_u64(&snapshot, META_HEIGHT).await?;
+    let block_time_seconds = read_u64(&snapshot, META_BLOCK_TIME_SECONDS).await?;
     let supply = read_supply(&snapshot).await?;
     Ok(StateSummary {
         storage_schema_version: read_u32(&snapshot, META_VERSION).await?,
         state_height,
+        block_time_seconds,
         storage_version: snapshot.version(),
         app_hash: snapshot.root_hash().await?.0,
         shielded_tree_root: read_hash32(&snapshot, TREE_ROOT).await?,
@@ -1782,6 +1922,9 @@ mod tests {
         Transfer,
         RegisterValidator,
         Delegate,
+        UpdateValidator,
+        UnjailValidator,
+        RotateConsensusKey,
     }
 
     fn real_action_fixture(kind: RealActionKind) -> (GenesisConfig, Vec<u8>) {
@@ -1807,8 +1950,8 @@ mod tests {
         let chain = chain_context([0x33; 32]);
         let mut genesis_staking =
             StakingBook::new(chain, StakingParameters::reference_testnet()).unwrap();
-        let (action, fee_atomic, public_lock, role_keys) = match kind {
-            RealActionKind::Transfer => (Action::Transfer, 1_000_000, 0, Vec::new()),
+        let (action, fee_atomic, public_lock, role_keys, genesis_stake) = match kind {
+            RealActionKind::Transfer => (Action::Transfer, 1_000_000, 0, Vec::new(), 0),
             RealActionKind::RegisterValidator => {
                 let operator_key = Ed25519SigningKey::from([0x61; 32]);
                 let consensus_key = Ed25519SigningKey::from([0x62; 32]);
@@ -1830,6 +1973,7 @@ mod tests {
                         (Role::Operator, operator_key),
                         (Role::ConsensusPop, consensus_key),
                     ],
+                    0,
                 )
             }
             RealActionKind::Delegate => {
@@ -1865,6 +2009,110 @@ mod tests {
                     1_000_000,
                     bit_staking::TESTNET_MIN_DELEGATION_ATOMIC,
                     vec![(Role::PositionOwner, owner_key)],
+                    0,
+                )
+            }
+            RealActionKind::UpdateValidator => {
+                let operator_key = Ed25519SigningKey::from([0x81; 32]);
+                let consensus_key = Ed25519SigningKey::from([0x82; 32]);
+                let operator = operator_key.verification_key().to_bytes();
+                let consensus = consensus_key.verification_key().to_bytes();
+                let target = validator_id(&chain, &operator);
+                genesis_staking
+                    .register_validator_with_metadata(
+                        target,
+                        operator,
+                        consensus,
+                        500,
+                        "before update".to_owned(),
+                        String::new(),
+                        String::new(),
+                    )
+                    .unwrap();
+                (
+                    Action::UpdateValidator {
+                        validator_id: target,
+                        expected_sequence: 0,
+                        display_name: Some("after update".to_owned()),
+                        website: Some("https://updated.invalid".to_owned()),
+                        description: Some("scheduled commission decrease".to_owned()),
+                        commission_bps: Some(400),
+                        request_disable: None,
+                    },
+                    1_000_000,
+                    0,
+                    vec![(Role::Operator, operator_key)],
+                    0,
+                )
+            }
+            RealActionKind::RotateConsensusKey => {
+                let operator_key = Ed25519SigningKey::from([0x83; 32]);
+                let consensus_key = Ed25519SigningKey::from([0x84; 32]);
+                let new_consensus_key = Ed25519SigningKey::from([0x85; 32]);
+                let operator = operator_key.verification_key().to_bytes();
+                let consensus = consensus_key.verification_key().to_bytes();
+                let target = validator_id(&chain, &operator);
+                genesis_staking
+                    .register_validator(target, operator, consensus, 500)
+                    .unwrap();
+                (
+                    Action::RotateConsensusKey {
+                        validator_id: target,
+                        expected_sequence: 0,
+                        new_consensus: new_consensus_key.verification_key().to_bytes(),
+                    },
+                    1_000_000,
+                    0,
+                    vec![
+                        (Role::Operator, operator_key),
+                        (Role::ConsensusPop, new_consensus_key),
+                    ],
+                    0,
+                )
+            }
+            RealActionKind::UnjailValidator => {
+                let operator_key = Ed25519SigningKey::from([0x86; 32]);
+                let consensus_key = Ed25519SigningKey::from([0x87; 32]);
+                let owner = [0x88; 32];
+                let operator = operator_key.verification_key().to_bytes();
+                let consensus = consensus_key.verification_key().to_bytes();
+                let target = validator_id(&chain, &operator);
+                let self_bond = bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC;
+                let mut parameters = StakingParameters::reference_testnet();
+                parameters.jail_blocks = 1;
+                parameters.jail_seconds = 1;
+                genesis_staking = StakingBook::new(chain, parameters).unwrap();
+                genesis_staking
+                    .register_validator(target, operator, consensus, 500)
+                    .unwrap();
+                let position = position_id(&chain, &owner);
+                genesis_staking
+                    .open_pending_delegation(
+                        0,
+                        0,
+                        position,
+                        owner,
+                        target,
+                        Amount::new(self_bond).unwrap(),
+                        Amount::ZERO,
+                        true,
+                        vec![0x89; bit_staking::RECOVERY_RECEIPT_BYTES],
+                    )
+                    .unwrap();
+                genesis_staking.activate_pending(&position, 1).unwrap();
+                genesis_staking.apply_validator_set().unwrap();
+                genesis_staking
+                    .jail_validator_for_downtime(&target, 0, 0)
+                    .unwrap();
+                (
+                    Action::UnjailValidator {
+                        validator_id: target,
+                        expected_sequence: 0,
+                    },
+                    1_000_000,
+                    0,
+                    vec![(Role::Operator, operator_key)],
+                    self_bond,
                 )
             }
         };
@@ -2050,7 +2298,7 @@ mod tests {
         .unwrap();
         let native_asset_id = asset::Id(Fq::from(1u64)).to_bytes();
         let monetary_policy = MonetaryPolicy {
-            genesis_supply: Amount::new(15_000_000_000).unwrap(),
+            genesis_supply: Amount::new(15_000_000_000 + genesis_stake).unwrap(),
             epoch_blocks: 720,
             halving_interval_epochs: 35_040,
         };
@@ -2063,9 +2311,15 @@ mod tests {
                 max_tx_lifetime_blocks: 100,
                 max_envelope_bytes: 65_536,
                 anchor_retention_blocks: 8,
-                genesis_allocation: GenesisAllocation::shielded_only(
-                    monetary_policy.genesis_supply,
-                ),
+                genesis_allocation: GenesisAllocation {
+                    shielded: Amount::new(15_000_000_000).unwrap(),
+                    stake: Amount::new(genesis_stake).unwrap(),
+                    pending_delegation: Amount::ZERO,
+                    exits: Amount::ZERO,
+                    commission: Amount::ZERO,
+                    fee_reserve: Amount::ZERO,
+                    unclaimed_genesis: Amount::ZERO,
+                },
                 fee_policy: FeePolicy::reference_testnet(),
                 monetary_policy,
                 genesis_staking,
@@ -2292,6 +2546,25 @@ mod tests {
             output_commitments: vec![Fq::from(commitment).to_bytes()],
             fee: Amount::ZERO,
             minimum_fee: Amount::ZERO,
+        }
+    }
+
+    fn empty_verified_staking(
+        tx: u8,
+        anchor: Hash32,
+        action: VerifiedStakingAction,
+    ) -> VerifiedStakingTransaction {
+        VerifiedStakingTransaction {
+            shielded: VerifiedTransfer {
+                tx_id: [tx; 32],
+                effect_hash: [tx; 64],
+                anchor,
+                nullifiers: Vec::new(),
+                output_commitments: Vec::new(),
+                fee: Amount::ZERO,
+                minimum_fee: Amount::ZERO,
+            },
+            action,
         }
     }
 
@@ -2760,8 +3033,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn real_register_and_delegate_envelopes_persist_atomically() {
-        for kind in [RealActionKind::RegisterValidator, RealActionKind::Delegate] {
+    async fn real_enabled_staking_envelopes_persist_atomically() {
+        for kind in [
+            RealActionKind::RegisterValidator,
+            RealActionKind::Delegate,
+            RealActionKind::UpdateValidator,
+            RealActionKind::UnjailValidator,
+            RealActionKind::RotateConsensusKey,
+        ] {
             let (genesis_config, envelope_bytes) = real_action_fixture(kind);
             let decoded = Envelope::decode_canonical(&envelope_bytes, 65_536, 1, 100).unwrap();
             let body = decoded.validate(1, 100).unwrap();
@@ -2779,6 +3058,9 @@ mod tests {
             let fee_class = match &action {
                 Action::RegisterValidator { .. } => FeeClass::ValidatorRegistration,
                 Action::Delegate { .. } => FeeClass::NewPosition,
+                Action::UpdateValidator { .. }
+                | Action::UnjailValidator { .. }
+                | Action::RotateConsensusKey { .. } => FeeClass::Standard,
                 _ => unreachable!(),
             };
             assert!(
@@ -2869,6 +3151,77 @@ mod tests {
                         assert!(proof.value.is_some());
                         proof.verify().unwrap();
                     }
+                }
+                Action::UpdateValidator {
+                    validator_id,
+                    display_name,
+                    website,
+                    description,
+                    commission_bps,
+                    ..
+                } => {
+                    let validator = state
+                        .staking_book()
+                        .unwrap()
+                        .validator(&validator_id)
+                        .unwrap()
+                        .clone();
+                    assert_eq!(validator.display_name, display_name.unwrap());
+                    assert_eq!(validator.website, website.unwrap());
+                    assert_eq!(validator.description, description.unwrap());
+                    assert_eq!(validator.sequence, 1);
+                    assert_eq!(
+                        validator.pending_commission.unwrap().commission_bps,
+                        commission_bps.unwrap()
+                    );
+                    assert_eq!(
+                        receipt.supply.shielded_total.value(),
+                        genesis.supply.shielded_total.value() - body.fee.value()
+                    );
+                    state
+                        .query_latest_with_proof(&staking_validator_key(&validator_id))
+                        .await
+                        .unwrap()
+                        .verify()
+                        .unwrap();
+                }
+                Action::UnjailValidator { validator_id, .. } => {
+                    let validator = state
+                        .staking_book()
+                        .unwrap()
+                        .validator(&validator_id)
+                        .unwrap()
+                        .clone();
+                    assert_eq!(validator.status, bit_staking::ValidatorStatus::Candidate);
+                    assert_eq!(validator.sequence, 1);
+                    assert_eq!(validator.jailed_at_height, None);
+                    assert_eq!(
+                        receipt.supply.shielded_total.value(),
+                        genesis.supply.shielded_total.value() - body.fee.value()
+                    );
+                }
+                Action::RotateConsensusKey {
+                    validator_id,
+                    new_consensus,
+                    ..
+                } => {
+                    let validator = state
+                        .staking_book()
+                        .unwrap()
+                        .validator(&validator_id)
+                        .unwrap()
+                        .clone();
+                    assert_ne!(validator.consensus_pubkey, new_consensus);
+                    assert_eq!(validator.sequence, 1);
+                    assert_eq!(validator.consensus_key_history.len(), 1);
+                    assert_eq!(
+                        validator.pending_consensus_key.unwrap().consensus_pubkey,
+                        new_consensus
+                    );
+                    assert_eq!(
+                        receipt.supply.shielded_total.value(),
+                        genesis.supply.shielded_total.value() - body.fee.value()
+                    );
                 }
                 _ => unreachable!(),
             }
@@ -3121,5 +3474,159 @@ mod tests {
             .err()
             .expect("tampered supply accounting must be rejected");
         assert!(error.to_string().contains("asset containers"));
+    }
+
+    #[tokio::test]
+    async fn validator_mutations_stage_atomically_and_survive_restart() {
+        let mut genesis_config = config(8);
+        let chain = genesis_config.chain_context;
+        let operator = [0x41; 32];
+        let validator_id = validator_id(&chain, &operator);
+        let self_bond_owner = [0x42; 32];
+        let self_bond_id = position_id(&chain, &self_bond_owner);
+        let self_bond = Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
+        let mut parameters = StakingParameters::reference_testnet();
+        parameters.jail_blocks = 1;
+        parameters.jail_seconds = 1;
+        let mut staking = StakingBook::new(chain, parameters).unwrap();
+        staking
+            .register_validator_with_metadata_at(
+                validator_id,
+                operator,
+                [0x43; 32],
+                500,
+                "genesis validator".to_owned(),
+                String::new(),
+                String::new(),
+                0,
+                0,
+            )
+            .unwrap();
+        staking
+            .open_pending_delegation(
+                0,
+                0,
+                self_bond_id,
+                self_bond_owner,
+                validator_id,
+                self_bond,
+                Amount::ZERO,
+                true,
+                vec![0x44; bit_staking::RECOVERY_RECEIPT_BYTES],
+            )
+            .unwrap();
+        staking.activate_pending(&self_bond_id, 1).unwrap();
+        staking.apply_validator_set().unwrap();
+        staking
+            .jail_validator_for_downtime(&validator_id, 0, 0)
+            .unwrap();
+        genesis_config.genesis_staking = staking;
+        genesis_config.genesis_allocation = GenesisAllocation {
+            shielded: Amount::ZERO,
+            stake: self_bond,
+            pending_delegation: Amount::ZERO,
+            exits: Amount::ZERO,
+            commission: Amount::ZERO,
+            fee_reserve: Amount::ZERO,
+            unclaimed_genesis: Amount::new(
+                genesis_config.monetary_policy.genesis_supply.value() - self_bond.value(),
+            )
+            .unwrap(),
+        };
+
+        let dir = TempDir::new().unwrap();
+        let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
+            .await
+            .unwrap();
+        let genesis = state.summary().await.unwrap();
+        let mut block = state
+            .begin_block_at(1, 1, [0xc1; 32], [0xc2; 32])
+            .await
+            .unwrap();
+        block
+            .stage_verified_staking(&empty_verified_staking(
+                0xd1,
+                genesis.shielded_tree_root,
+                VerifiedStakingAction::UpdateValidator {
+                    validator_id,
+                    expected_sequence: 0,
+                    display_name: Some("updated validator".to_owned()),
+                    website: Some("https://validator.invalid".to_owned()),
+                    description: None,
+                    commission_bps: Some(400),
+                    request_disable: None,
+                },
+            ))
+            .await
+            .unwrap();
+        block
+            .stage_verified_staking(&empty_verified_staking(
+                0xd2,
+                genesis.shielded_tree_root,
+                VerifiedStakingAction::RotateConsensusKey {
+                    validator_id,
+                    expected_sequence: 1,
+                    new_consensus: [0x45; 32],
+                },
+            ))
+            .await
+            .unwrap();
+        block
+            .stage_verified_staking(&empty_verified_staking(
+                0xd3,
+                genesis.shielded_tree_root,
+                VerifiedStakingAction::UnjailValidator {
+                    validator_id,
+                    expected_sequence: 2,
+                },
+            ))
+            .await
+            .unwrap();
+        let receipt = state.commit(block.prepare().await.unwrap()).unwrap();
+        assert_eq!(receipt.transaction_count, 3);
+        assert_eq!(receipt.block_time_seconds, 1);
+        assert_eq!(receipt.supply, genesis.supply);
+        let validator = state
+            .staking_book()
+            .unwrap()
+            .validator(&validator_id)
+            .unwrap()
+            .clone();
+        assert_eq!(validator.sequence, 3);
+        assert_eq!(validator.status, bit_staking::ValidatorStatus::Candidate);
+        assert_eq!(validator.display_name, "updated validator");
+        assert_ne!(validator.consensus_pubkey, [0x45; 32]);
+        assert_eq!(validator.consensus_key_history.len(), 1);
+        assert_eq!(
+            validator.pending_consensus_key.unwrap().consensus_pubkey,
+            [0x45; 32]
+        );
+        assert_eq!(validator.pending_commission.unwrap().commission_bps, 400);
+        assert!(matches!(
+            state.begin_block_at(2, 0, [1; 32], [2; 32]).await,
+            Err(Error::BlockTimeRegression {
+                previous: 1,
+                actual: 0
+            })
+        ));
+        state.close().await;
+
+        let reopened = PersistentState::open(dir.path().to_path_buf(), genesis_config)
+            .await
+            .unwrap();
+        assert_eq!(reopened.summary().await.unwrap().block_time_seconds, 1);
+        let validator = reopened
+            .staking_book()
+            .unwrap()
+            .validator(&validator_id)
+            .unwrap()
+            .clone();
+        assert_eq!(validator.sequence, 3);
+        assert_eq!(validator.consensus_key_history.len(), 1);
+        assert_eq!(
+            validator.pending_consensus_key.unwrap().consensus_pubkey,
+            [0x45; 32]
+        );
+        reopened.close().await;
     }
 }

@@ -55,6 +55,24 @@ pub enum VerifiedStakingAction {
         expected_release: Amount,
         fee_source: FeeSource,
     },
+    UpdateValidator {
+        validator_id: Hash32,
+        expected_sequence: u64,
+        display_name: Option<String>,
+        website: Option<String>,
+        description: Option<String>,
+        commission_bps: Option<u16>,
+        request_disable: Option<bool>,
+    },
+    UnjailValidator {
+        validator_id: Hash32,
+        expected_sequence: u64,
+    },
+    RotateConsensusKey {
+        validator_id: Hash32,
+        expected_sequence: u64,
+        new_consensus: Hash32,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -68,6 +86,10 @@ pub struct VerifiedStakingTransaction {
 /// are verified without consulting this view.
 pub trait ActionAuthorizationView {
     fn validator_operator(&self, validator_id: &Hash32) -> Option<Hash32>;
+
+    fn validator_sequence(&self, _validator_id: &Hash32) -> Option<u64> {
+        None
+    }
 
     fn pending_position(&self, _position_id: &Hash32) -> Option<PendingPositionAuthorization> {
         None
@@ -400,6 +422,54 @@ pub fn verify_staking_stateless<S: ActionAuthorizationView + ?Sized>(
                 expected_release.value(),
             )
         }
+        Action::UpdateValidator {
+            validator_id,
+            expected_sequence,
+            display_name,
+            website,
+            description,
+            commission_bps,
+            request_disable,
+        } => (
+            VerifiedStakingAction::UpdateValidator {
+                validator_id: *validator_id,
+                expected_sequence: *expected_sequence,
+                display_name: display_name.clone(),
+                website: website.clone(),
+                description: description.clone(),
+                commission_bps: *commission_bps,
+                request_disable: *request_disable,
+            },
+            FeeClass::Standard,
+            0,
+            0,
+        ),
+        Action::UnjailValidator {
+            validator_id,
+            expected_sequence,
+        } => (
+            VerifiedStakingAction::UnjailValidator {
+                validator_id: *validator_id,
+                expected_sequence: *expected_sequence,
+            },
+            FeeClass::Standard,
+            0,
+            0,
+        ),
+        Action::RotateConsensusKey {
+            validator_id,
+            expected_sequence,
+            new_consensus,
+        } => (
+            VerifiedStakingAction::RotateConsensusKey {
+                validator_id: *validator_id,
+                expected_sequence: *expected_sequence,
+                new_consensus: *new_consensus,
+            },
+            FeeClass::Standard,
+            0,
+            0,
+        ),
         _ => return Err(Error::UnsupportedAction),
     };
 
@@ -482,6 +552,8 @@ pub fn verify_staking_authorizations<S: ActionAuthorizationView + ?Sized>(
             Action::Delegate { self_bond, .. } => 1 + usize::from(*self_bond),
             Action::RegisterValidator { .. } => 2,
             Action::CancelPending { .. } => 1,
+            Action::UpdateValidator { .. } | Action::UnjailValidator { .. } => 1,
+            Action::RotateConsensusKey { .. } => 2,
             _ => return Err(Error::UnsupportedAction),
         })
         .ok_or(Error::UnsupportedAction)?;
@@ -565,9 +637,72 @@ pub fn verify_staking_authorizations<S: ActionAuthorizationView + ?Sized>(
                 effect_hash,
             )?;
         }
+        Action::UpdateValidator {
+            validator_id,
+            expected_sequence,
+            ..
+        }
+        | Action::UnjailValidator {
+            validator_id,
+            expected_sequence,
+        } => {
+            verify_validator_operator(
+                envelope,
+                first,
+                validator_id,
+                *expected_sequence,
+                effect_hash,
+                authorization_view,
+            )?;
+        }
+        Action::RotateConsensusKey {
+            validator_id,
+            expected_sequence,
+            new_consensus,
+        } => {
+            verify_validator_operator(
+                envelope,
+                first,
+                validator_id,
+                *expected_sequence,
+                effect_hash,
+                authorization_view,
+            )?;
+            verify_ed25519(
+                &envelope.authorizations[first + 1],
+                Role::ConsensusPop,
+                new_consensus,
+                effect_hash,
+            )?;
+        }
         _ => return Err(Error::UnsupportedAction),
     }
     Ok(())
+}
+
+fn verify_validator_operator<S: ActionAuthorizationView + ?Sized>(
+    envelope: &Envelope,
+    authorization_index: usize,
+    validator_id: &Hash32,
+    expected_sequence: u64,
+    effect_hash: &[u8; 64],
+    authorization_view: &S,
+) -> Result<()> {
+    let operator = authorization_view.validator_operator(validator_id).ok_or(
+        Error::AuthorizationKeyNotFound {
+            role: Role::Operator,
+            id: *validator_id,
+        },
+    )?;
+    if authorization_view.validator_sequence(validator_id) != Some(expected_sequence) {
+        return Err(Error::StaleStateQuote("validator sequence"));
+    }
+    verify_ed25519(
+        &envelope.authorizations[authorization_index],
+        Role::Operator,
+        &operator,
+        effect_hash,
+    )
 }
 
 fn verify_ed25519(
@@ -761,6 +896,22 @@ mod tests {
     impl ActionAuthorizationView for OperatorView {
         fn validator_operator(&self, validator_id: &Hash32) -> Option<Hash32> {
             (*validator_id == self.validator_id).then_some(self.operator)
+        }
+    }
+
+    struct ValidatorView {
+        validator_id: Hash32,
+        operator: Hash32,
+        sequence: u64,
+    }
+
+    impl ActionAuthorizationView for ValidatorView {
+        fn validator_operator(&self, validator_id: &Hash32) -> Option<Hash32> {
+            (*validator_id == self.validator_id).then_some(self.operator)
+        }
+
+        fn validator_sequence(&self, validator_id: &Hash32) -> Option<u64> {
+            (*validator_id == self.validator_id).then_some(self.sequence)
         }
     }
 
@@ -1095,6 +1246,107 @@ mod tests {
         assert!(matches!(
             verify_staking_authorizations(&envelope, &stale, &body.chain_context, &effect, &view),
             Err(Error::StaleStateQuote("position sequence"))
+        ));
+    }
+
+    #[test]
+    fn validator_mutations_bind_current_operator_sequence_and_new_key_pop() {
+        let chain = chain_context([0x55; 32]);
+        let operator_key = Ed25519SigningKey::from([6; 32]);
+        let new_consensus_key = Ed25519SigningKey::from([7; 32]);
+        let operator = operator_key.verification_key().to_bytes();
+        let validator_id = validator_id(&chain, &operator);
+        let view = ValidatorView {
+            validator_id,
+            operator,
+            sequence: 9,
+        };
+
+        for action in [
+            Action::UpdateValidator {
+                validator_id,
+                expected_sequence: 9,
+                display_name: Some("updated".to_owned()),
+                website: None,
+                description: None,
+                commission_bps: None,
+                request_disable: None,
+            },
+            Action::UnjailValidator {
+                validator_id,
+                expected_sequence: 9,
+            },
+        ] {
+            let (_, unsigned_body) = staking_envelope(action.clone(), vec![]);
+            let effect = unsigned_body.effect_hash().unwrap();
+            let (envelope, body) = staking_envelope(
+                action.clone(),
+                vec![ed25519_authorization(
+                    Role::Operator,
+                    &operator_key,
+                    &effect,
+                )],
+            );
+            verify_staking_authorizations(&envelope, &action, &body.chain_context, &effect, &view)
+                .unwrap();
+        }
+
+        let stale = Action::UnjailValidator {
+            validator_id,
+            expected_sequence: 10,
+        };
+        let (_, stale_body) = staking_envelope(stale.clone(), vec![]);
+        let stale_effect = stale_body.effect_hash().unwrap();
+        let (stale_envelope, _) = staking_envelope(
+            stale.clone(),
+            vec![ed25519_authorization(
+                Role::Operator,
+                &operator_key,
+                &stale_effect,
+            )],
+        );
+        assert!(matches!(
+            verify_staking_authorizations(
+                &stale_envelope,
+                &stale,
+                &stale_body.chain_context,
+                &stale_effect,
+                &view
+            ),
+            Err(Error::StaleStateQuote("validator sequence"))
+        ));
+
+        let new_consensus = new_consensus_key.verification_key().to_bytes();
+        let rotate = Action::RotateConsensusKey {
+            validator_id,
+            expected_sequence: 9,
+            new_consensus,
+        };
+        let (_, unsigned_body) = staking_envelope(rotate.clone(), vec![]);
+        let effect = unsigned_body.effect_hash().unwrap();
+        let (envelope, body) = staking_envelope(
+            rotate.clone(),
+            vec![
+                ed25519_authorization(Role::Operator, &operator_key, &effect),
+                ed25519_authorization(Role::ConsensusPop, &new_consensus_key, &effect),
+            ],
+        );
+        verify_staking_authorizations(&envelope, &rotate, &body.chain_context, &effect, &view)
+            .unwrap();
+
+        let (wrong_pop, _) = staking_envelope(
+            rotate.clone(),
+            vec![
+                ed25519_authorization(Role::Operator, &operator_key, &effect),
+                ed25519_authorization(Role::ConsensusPop, &operator_key, &effect),
+            ],
+        );
+        assert!(matches!(
+            verify_staking_authorizations(&wrong_pop, &rotate, &body.chain_context, &effect, &view),
+            Err(Error::InvalidAuthorization {
+                role: Role::ConsensusPop,
+                ..
+            })
         ));
     }
 }

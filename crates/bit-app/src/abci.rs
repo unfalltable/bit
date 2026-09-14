@@ -547,16 +547,20 @@ impl Application for AbciApplication {
         let Ok(max_tx_bytes) = u64::try_from(request.max_tx_bytes) else {
             return ResponsePrepareProposal { txs: Vec::new() };
         };
+        let Ok(block_time_seconds) = block_time_seconds(request.time.as_ref()) else {
+            return ResponsePrepareProposal { txs: Vec::new() };
+        };
         let transactions = request.txs.into_iter().map(Vec::from).collect();
         let _guard = self.execution_guard();
         match self
             .inner
             .runtime
-            .block_on(
-                self.inner
-                    .core
-                    .prepare_proposal(height, transactions, max_tx_bytes),
-            ) {
+            .block_on(self.inner.core.prepare_proposal_at(
+                height,
+                block_time_seconds,
+                transactions,
+                max_tx_bytes,
+            )) {
             Ok(proposal) => ResponsePrepareProposal {
                 txs: proposal.transactions.into_iter().map(Into::into).collect(),
             },
@@ -575,13 +579,19 @@ impl Application for AbciApplication {
         let Ok(height) = u64::try_from(request.height) else {
             return reject();
         };
+        let Ok(block_time_seconds) = block_time_seconds(request.time.as_ref()) else {
+            return reject();
+        };
         let transactions: Vec<Vec<u8>> = request.txs.into_iter().map(Vec::from).collect();
         let _guard = self.execution_guard();
         match self
             .inner
             .runtime
-            .block_on(self.inner.core.process_proposal(height, &transactions))
-        {
+            .block_on(self.inner.core.process_proposal_at(
+                height,
+                block_time_seconds,
+                &transactions,
+            )) {
             Ok(true) => ResponseProcessProposal {
                 status: response_process_proposal::ProposalStatus::Accept as i32,
             },
@@ -619,6 +629,8 @@ impl Application for AbciApplication {
         if height == 0 || request.hash.len() != 32 {
             self.halt("FinalizeBlock height or block hash is invalid");
         }
+        let block_time_seconds =
+            block_time_seconds(request.time.as_ref()).unwrap_or_else(|error| self.halt(error));
         let _guard = self.execution_guard();
         let digests = self
             .inner
@@ -627,6 +639,7 @@ impl Application for AbciApplication {
             .unwrap_or_else(|error| self.halt(format!("block digest production failed: {error}")));
         let block = BlockRequest {
             height,
+            block_time_seconds,
             transactions: request.txs.into_iter().map(Vec::from).collect(),
             execution_hash: digests.execution_hash,
             compact_hash: digests.compact_hash,
@@ -684,6 +697,16 @@ impl Application for AbciApplication {
             reject_senders: Vec::new(),
         }
     }
+}
+
+fn block_time_seconds(
+    timestamp: Option<&tendermint_proto::google::protobuf::Timestamp>,
+) -> std::result::Result<u64, String> {
+    let timestamp = timestamp.ok_or_else(|| "block time is missing".to_owned())?;
+    if timestamp.seconds < 0 || !(0..1_000_000_000).contains(&timestamp.nanos) {
+        return Err("block time is invalid".to_owned());
+    }
+    u64::try_from(timestamp.seconds).map_err(|_| "block time does not fit u64".to_owned())
 }
 
 #[cfg(test)]
@@ -873,6 +896,10 @@ mod tests {
                 height: 1,
                 max_tx_bytes: 1_000_000,
                 txs: vec![vec![0xff].into()],
+                time: Some(Timestamp {
+                    seconds: 1_800_000_001,
+                    nanos: 0,
+                }),
                 ..Default::default()
             },
         );
@@ -882,6 +909,10 @@ mod tests {
             RequestProcessProposal {
                 height: 1,
                 txs: vec![vec![0xff].into()],
+                time: Some(Timestamp {
+                    seconds: 1_800_000_001,
+                    nanos: 0,
+                }),
                 ..Default::default()
             },
         );
@@ -895,12 +926,25 @@ mod tests {
             RequestFinalizeBlock {
                 hash: vec![9; 32].into(),
                 height: 1,
+                time: Some(Timestamp {
+                    seconds: 1_800_000_001,
+                    nanos: 0,
+                }),
                 ..Default::default()
             },
         );
         assert_eq!(finalized.app_hash.len(), 32);
         assert!(finalized.tx_results.is_empty());
         assert_eq!(Application::commit(&app).retain_height, 0);
+
+        assert_eq!(
+            app.inner
+                .runtime
+                .block_on(app.inner.core.state_summary())
+                .unwrap()
+                .block_time_seconds,
+            1_800_000_001
+        );
 
         let query = Application::query(
             &app,
@@ -947,6 +991,35 @@ mod tests {
         assert_eq!(
             Application::apply_snapshot_chunk(&app, RequestApplySnapshotChunk::default()).result,
             response_apply_snapshot_chunk::Result::Abort as i32
+        );
+    }
+
+    #[test]
+    fn block_timestamp_validation_rejects_missing_and_malformed_values() {
+        assert_eq!(
+            block_time_seconds(None),
+            Err("block time is missing".to_owned())
+        );
+        assert_eq!(
+            block_time_seconds(Some(&Timestamp {
+                seconds: -1,
+                nanos: 0,
+            })),
+            Err("block time is invalid".to_owned())
+        );
+        assert_eq!(
+            block_time_seconds(Some(&Timestamp {
+                seconds: 1,
+                nanos: 1_000_000_000,
+            })),
+            Err("block time is invalid".to_owned())
+        );
+        assert_eq!(
+            block_time_seconds(Some(&Timestamp {
+                seconds: 42,
+                nanos: 999_999_999,
+            })),
+            Ok(42)
         );
     }
 
@@ -1011,6 +1084,10 @@ mod tests {
                 .finalize_block(RequestFinalizeBlock {
                     hash: vec![9; 32].into(),
                     height: 1,
+                    time: Some(Timestamp {
+                        seconds: 1_800_000_001,
+                        nanos: 0,
+                    }),
                     ..Default::default()
                 })
                 .unwrap()
