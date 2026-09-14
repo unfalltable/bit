@@ -5,7 +5,11 @@
 //! on a private Tokio runtime. Consensus-critical failures set a shared halted
 //! flag before terminating the current ABCI request.
 
-use crate::{ApplicationCore, BlockRequest, Error as CoreError, FinalizeOutcome, Hash32, TxResult};
+use crate::{
+    ApplicationCore, BlockRequest, Error as CoreError, FinalizeOutcome, Hash32, LastCommit,
+    TxResult,
+};
+use bit_staking::{CommitVote, ValidatorStatus, COMETBFT_ADDRESS_BYTES};
 use bit_state::GenesisConfig;
 use ics23::commitment_proof::Proof;
 use prost::Message;
@@ -24,16 +28,18 @@ use tendermint_abci::{Application, Server, ServerBuilder};
 use tendermint_proto::v0_38::{
     abci::{
         response_apply_snapshot_chunk, response_offer_snapshot, response_process_proposal,
-        response_verify_vote_extension, ExecTxResult, RequestApplySnapshotChunk, RequestCheckTx,
-        RequestExtendVote, RequestFinalizeBlock, RequestInfo, RequestInitChain,
-        RequestLoadSnapshotChunk, RequestOfferSnapshot, RequestPrepareProposal,
-        RequestProcessProposal, RequestQuery, RequestVerifyVoteExtension,
+        response_verify_vote_extension, CommitInfo, ExecTxResult, ExtendedCommitInfo,
+        RequestApplySnapshotChunk, RequestCheckTx, RequestExtendVote, RequestFinalizeBlock,
+        RequestInfo, RequestInitChain, RequestLoadSnapshotChunk, RequestOfferSnapshot,
+        RequestPrepareProposal, RequestProcessProposal, RequestQuery, RequestVerifyVoteExtension,
         ResponseApplySnapshotChunk, ResponseCheckTx, ResponseCommit, ResponseExtendVote,
         ResponseFinalizeBlock, ResponseInfo, ResponseInitChain, ResponseListSnapshots,
         ResponseLoadSnapshotChunk, ResponseOfferSnapshot, ResponsePrepareProposal,
         ResponseProcessProposal, ResponseQuery, ResponseVerifyVoteExtension,
+        ValidatorUpdate as ProtoValidatorUpdate,
     },
     crypto::{public_key, ProofOp, ProofOps},
+    types::BlockIdFlag,
 };
 
 pub const STATE_QUERY_PATH: &str = "/bit/state/key";
@@ -190,6 +196,42 @@ impl AbciConfig {
         if total_power == 0 {
             return Err(CoreError::InvalidConfig(
                 "genesis validator power total must be positive",
+            ));
+        }
+        let staking_validators: BTreeSet<(Vec<u8>, i64)> = genesis
+            .genesis_staking
+            .validators()
+            .filter(|validator| validator.status == ValidatorStatus::Active)
+            .map(|validator| {
+                Ok((
+                    validator.consensus_pubkey.to_vec(),
+                    i64::try_from(validator.voting_power).map_err(|_| {
+                        CoreError::InvalidConfig("staking validator power exceeds i64")
+                    })?,
+                ))
+            })
+            .collect::<crate::Result<_>>()?;
+        let request_validators: BTreeSet<(Vec<u8>, i64)> = request
+            .validators
+            .iter()
+            .map(|validator| {
+                let key = validator
+                    .pub_key
+                    .as_ref()
+                    .and_then(|key| key.sum.as_ref())
+                    .and_then(|sum| match sum {
+                        public_key::Sum::Ed25519(key) => Some(key.clone()),
+                        _ => None,
+                    })
+                    .ok_or(CoreError::InvalidConfig(
+                        "genesis validator public key is invalid",
+                    ))?;
+                Ok((key, validator.power))
+            })
+            .collect::<crate::Result<_>>()?;
+        if staking_validators != request_validators {
+            return Err(CoreError::InvalidConfig(
+                "InitChain validators differ from genesis staking set",
             ));
         }
 
@@ -392,12 +434,24 @@ impl AbciApplication {
         }
     }
 
-    fn map_finalize(outcome: FinalizeOutcome) -> ResponseFinalizeBlock {
+    fn map_finalize(&self, outcome: FinalizeOutcome) -> ResponseFinalizeBlock {
         ResponseFinalizeBlock {
             tx_results: outcome
                 .transaction_results
                 .into_iter()
                 .map(Self::map_tx_result)
+                .collect(),
+            validator_updates: outcome
+                .validator_updates
+                .into_iter()
+                .map(|update| ProtoValidatorUpdate {
+                    pub_key: Some(tendermint_proto::v0_38::crypto::PublicKey {
+                        sum: Some(public_key::Sum::Ed25519(update.consensus_pubkey.to_vec())),
+                    }),
+                    power: i64::try_from(update.power).unwrap_or_else(|_| {
+                        self.halt("validator power does not fit CometBFT int64")
+                    }),
+                })
                 .collect(),
             app_hash: outcome.app_hash.to_vec().into(),
             ..Default::default()
@@ -550,16 +604,21 @@ impl Application for AbciApplication {
         let Ok(block_time_seconds) = block_time_seconds(request.time.as_ref()) else {
             return ResponsePrepareProposal { txs: Vec::new() };
         };
+        let Ok(last_commit) = extended_last_commit(height, request.local_last_commit.as_ref())
+        else {
+            return ResponsePrepareProposal { txs: Vec::new() };
+        };
         let transactions = request.txs.into_iter().map(Vec::from).collect();
         let _guard = self.execution_guard();
         match self
             .inner
             .runtime
-            .block_on(self.inner.core.prepare_proposal_at(
+            .block_on(self.inner.core.prepare_proposal_at_with_commit(
                 height,
                 block_time_seconds,
                 transactions,
                 max_tx_bytes,
+                last_commit.as_ref(),
             )) {
             Ok(proposal) => ResponsePrepareProposal {
                 txs: proposal.transactions.into_iter().map(Into::into).collect(),
@@ -582,15 +641,20 @@ impl Application for AbciApplication {
         let Ok(block_time_seconds) = block_time_seconds(request.time.as_ref()) else {
             return reject();
         };
+        let Ok(last_commit) = decided_last_commit(height, request.proposed_last_commit.as_ref())
+        else {
+            return reject();
+        };
         let transactions: Vec<Vec<u8>> = request.txs.into_iter().map(Vec::from).collect();
         let _guard = self.execution_guard();
         match self
             .inner
             .runtime
-            .block_on(self.inner.core.process_proposal_at(
+            .block_on(self.inner.core.process_proposal_at_with_commit(
                 height,
                 block_time_seconds,
                 &transactions,
+                last_commit.as_ref(),
             )) {
             Ok(true) => ResponseProcessProposal {
                 status: response_process_proposal::ProposalStatus::Accept as i32,
@@ -631,6 +695,8 @@ impl Application for AbciApplication {
         }
         let block_time_seconds =
             block_time_seconds(request.time.as_ref()).unwrap_or_else(|error| self.halt(error));
+        let last_commit = decided_last_commit(height, request.decided_last_commit.as_ref())
+            .unwrap_or_else(|error| self.halt(error));
         let _guard = self.execution_guard();
         let digests = self
             .inner
@@ -643,13 +709,14 @@ impl Application for AbciApplication {
             transactions: request.txs.into_iter().map(Vec::from).collect(),
             execution_hash: digests.execution_hash,
             compact_hash: digests.compact_hash,
+            last_commit,
         };
         match self
             .inner
             .runtime
             .block_on(self.inner.core.finalize_block(block))
         {
-            Ok(outcome) => Self::map_finalize(outcome),
+            Ok(outcome) => self.map_finalize(outcome),
             Err(error) => self.halt(format!("FinalizeBlock failed: {error}")),
         }
     }
@@ -709,12 +776,109 @@ fn block_time_seconds(
     u64::try_from(timestamp.seconds).map_err(|_| "block time does not fit u64".to_owned())
 }
 
+fn decided_last_commit(
+    height: u64,
+    commit: Option<&CommitInfo>,
+) -> std::result::Result<Option<LastCommit>, String> {
+    let Some(commit) = commit else {
+        return if height == 1 {
+            Ok(None)
+        } else {
+            Err("previous commit is missing after height one".to_owned())
+        };
+    };
+    if commit.round < 0 {
+        return Err("previous commit round is negative".to_owned());
+    }
+    let votes = commit
+        .votes
+        .iter()
+        .map(|vote| {
+            let validator = vote
+                .validator
+                .as_ref()
+                .ok_or_else(|| "previous commit vote has no validator".to_owned())?;
+            commit_vote(&validator.address, validator.power, vote.block_id_flag)
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    last_commit_for_height(height, votes)
+}
+
+fn extended_last_commit(
+    height: u64,
+    commit: Option<&ExtendedCommitInfo>,
+) -> std::result::Result<Option<LastCommit>, String> {
+    let Some(commit) = commit else {
+        return if height == 1 {
+            Ok(None)
+        } else {
+            Err("previous commit is missing after height one".to_owned())
+        };
+    };
+    if commit.round < 0 {
+        return Err("previous commit round is negative".to_owned());
+    }
+    let votes = commit
+        .votes
+        .iter()
+        .map(|vote| {
+            let validator = vote
+                .validator
+                .as_ref()
+                .ok_or_else(|| "previous commit vote has no validator".to_owned())?;
+            commit_vote(&validator.address, validator.power, vote.block_id_flag)
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    last_commit_for_height(height, votes)
+}
+
+fn commit_vote(address: &[u8], power: i64, flag: i32) -> std::result::Result<CommitVote, String> {
+    let consensus_address: [u8; COMETBFT_ADDRESS_BYTES] = address
+        .try_into()
+        .map_err(|_| "validator address must contain exactly 20 bytes".to_owned())?;
+    let power = u64::try_from(power)
+        .ok()
+        .filter(|power| *power != 0)
+        .ok_or_else(|| "validator power must be positive".to_owned())?;
+    let flag = BlockIdFlag::try_from(flag)
+        .map_err(|_| "previous commit contains an unknown block-id flag".to_owned())?;
+    let signed = match flag {
+        BlockIdFlag::Commit => true,
+        BlockIdFlag::Absent | BlockIdFlag::Nil => false,
+        BlockIdFlag::Unknown => {
+            return Err("previous commit contains an unknown block-id flag".to_owned())
+        }
+    };
+    Ok(CommitVote {
+        consensus_address,
+        power,
+        signed,
+    })
+}
+
+fn last_commit_for_height(
+    height: u64,
+    votes: Vec<CommitVote>,
+) -> std::result::Result<Option<LastCommit>, String> {
+    if height == 1 {
+        if votes.is_empty() {
+            Ok(None)
+        } else {
+            Err("height one cannot contain previous commit votes".to_owned())
+        }
+    } else {
+        Ok(Some(LastCommit { votes }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use bit_emission::{FeePolicy, GenesisAllocation};
-    use bit_staking::{StakingBook, StakingParameters};
-    use bit_types::MonetaryPolicy;
+    use bit_staking::{
+        StakingBook, StakingParameters, RECOVERY_RECEIPT_BYTES, TESTNET_MIN_SELF_BOND_ATOMIC,
+    };
+    use bit_types::{position_id, validator_id, Amount, MonetaryPolicy};
     use decaf377::Fq;
     use std::{
         io::{Read, Write},
@@ -726,11 +890,14 @@ mod tests {
     use tendermint_proto::{
         google::protobuf::{Duration, Timestamp},
         v0_38::{
-            abci::{request, response, Request, Response, ValidatorUpdate},
+            abci::{
+                request, response, CommitInfo, Request, Response, Validator, ValidatorUpdate,
+                VoteInfo,
+            },
             crypto::PublicKey,
             types::{
-                AbciParams, BlockParams, ConsensusParams, EvidenceParams, ValidatorParams,
-                VersionParams,
+                AbciParams, BlockIdFlag, BlockParams, ConsensusParams, EvidenceParams,
+                ValidatorParams, VersionParams,
             },
         },
     };
@@ -739,19 +906,59 @@ mod tests {
         let mut native_asset_id = [0; 32];
         native_asset_id.copy_from_slice(&Fq::from(1u64).to_bytes());
         let monetary_policy = MonetaryPolicy::reference_testnet();
+        let chain_context = [1; 32];
+        let operator = [6; 32];
+        let validator_id = validator_id(&chain_context, &operator);
+        let consensus_pubkey = [7; 32];
+        let owner = [8; 32];
+        let position_id = position_id(&chain_context, &owner);
+        let principal = Amount::new(TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
+        let mut genesis_staking =
+            StakingBook::new(chain_context, StakingParameters::reference_testnet()).unwrap();
+        genesis_staking
+            .register_validator(validator_id, operator, consensus_pubkey, 500)
+            .unwrap();
+        genesis_staking
+            .open_pending_delegation(
+                0,
+                0,
+                position_id,
+                owner,
+                validator_id,
+                principal,
+                Amount::ZERO,
+                true,
+                vec![9; RECOVERY_RECEIPT_BYTES],
+            )
+            .unwrap();
+        genesis_staking.activate_pending(&position_id, 1).unwrap();
+        assert_eq!(
+            genesis_staking.apply_validator_set().unwrap()[0].power,
+            1_000
+        );
         GenesisConfig {
-            chain_context: [1; 32],
+            chain_context,
             native_asset_id,
             protocol_version: 1,
             max_block_bytes,
             max_tx_lifetime_blocks: 20,
             max_envelope_bytes: 65_536,
             anchor_retention_blocks: 8,
-            genesis_allocation: GenesisAllocation::unclaimed_only(monetary_policy.genesis_supply),
+            genesis_allocation: GenesisAllocation {
+                shielded: Amount::ZERO,
+                stake: principal,
+                pending_delegation: Amount::ZERO,
+                exits: Amount::ZERO,
+                commission: Amount::ZERO,
+                fee_reserve: Amount::ZERO,
+                unclaimed_genesis: Amount::new(
+                    monetary_policy.genesis_supply.value() - principal.value(),
+                )
+                .unwrap(),
+            },
             fee_policy: FeePolicy::reference_testnet(),
             monetary_policy,
-            genesis_staking: StakingBook::new([1; 32], StakingParameters::reference_testnet())
-                .unwrap(),
+            genesis_staking,
             genesis_commitments: Vec::new(),
             genesis_execution_hash: [2; 32],
             genesis_compact_hash: [3; 32],
@@ -790,7 +997,7 @@ mod tests {
                 pub_key: Some(PublicKey {
                     sum: Some(public_key::Sum::Ed25519(vec![7; 32])),
                 }),
-                power: 10,
+                power: 1_000,
             }],
             app_state_bytes: vec![0xa1, 0x00, 0x01].into(),
             initial_height: 1,
@@ -839,6 +1046,30 @@ mod tests {
         assert!(matches!(
             app.bind("0.0.0.0:0", 1024),
             Err(BindError::NonLoopback(_))
+        ));
+
+        let mismatch_dir = TempDir::new().unwrap();
+        let mut mismatched_init = init_chain(1_000_000);
+        mismatched_init.validators[0].power += 1;
+        let provider = |_: &RequestFinalizeBlock| {
+            Ok(FinalizeDigests {
+                execution_hash: [0; 32],
+                compact_hash: [0; 32],
+            })
+        };
+        assert!(matches!(
+            AbciApplication::open(
+                mismatch_dir.path().to_path_buf(),
+                genesis(1_000_000),
+                AbciConfig {
+                    application_name: "bit-app".to_owned(),
+                    application_version: "0.1.0".to_owned(),
+                    expected_init_chain: mismatched_init,
+                    retain_height: 0,
+                },
+                Arc::new(provider),
+            ),
+            Err(CoreError::InvalidConfig(_))
         ));
 
         let bad_dir = TempDir::new().unwrap();
@@ -1021,6 +1252,47 @@ mod tests {
             })),
             Ok(42)
         );
+    }
+
+    #[test]
+    fn decided_commit_decoding_is_strict_and_preserves_commit_flags() {
+        assert!(decided_last_commit(1, None).unwrap().is_none());
+        assert!(decided_last_commit(2, None).is_err());
+
+        let valid = CommitInfo {
+            round: 0,
+            votes: vec![
+                VoteInfo {
+                    validator: Some(Validator {
+                        address: vec![7; COMETBFT_ADDRESS_BYTES].into(),
+                        power: 11,
+                    }),
+                    block_id_flag: BlockIdFlag::Commit as i32,
+                },
+                VoteInfo {
+                    validator: Some(Validator {
+                        address: vec![8; COMETBFT_ADDRESS_BYTES].into(),
+                        power: 13,
+                    }),
+                    block_id_flag: BlockIdFlag::Nil as i32,
+                },
+            ],
+        };
+        let decoded = decided_last_commit(2, Some(&valid)).unwrap().unwrap();
+        assert_eq!(decoded.votes.len(), 2);
+        assert!(decoded.votes[0].signed);
+        assert!(!decoded.votes[1].signed);
+        assert_eq!(decoded.votes[0].power, 11);
+
+        let mut malformed = valid.clone();
+        malformed.votes[0].validator.as_mut().unwrap().address = vec![0; 19].into();
+        assert!(decided_last_commit(2, Some(&malformed)).is_err());
+        malformed = valid.clone();
+        malformed.votes[0].validator.as_mut().unwrap().power = 0;
+        assert!(decided_last_commit(2, Some(&malformed)).is_err());
+        malformed = valid;
+        malformed.votes[0].block_id_flag = BlockIdFlag::Unknown as i32;
+        assert!(decided_last_commit(2, Some(&malformed)).is_err());
     }
 
     #[test]

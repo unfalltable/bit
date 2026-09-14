@@ -1,6 +1,6 @@
 # BIT D-005 ABCI 生命周期设计
 
-状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；交易形式的验证人更新已经执行，但 ABCI ValidatorUpdates、可用快照、生产摘要编码器和真实多节点接线仍未完成。
+状态：`IN_PROGRESS`。确定性应用核心和 CometBFT 0.38 protobuf 适配已实现并通过本机 socket 往返测试；实际 last commit 已驱动在线计分、自动 epoch 结算和 ABCI ValidatorUpdates。可用快照、生产摘要编码器、H+2 集合核验和真实多节点接线仍未完成。
 
 ## 1. 单一执行入口
 
@@ -14,13 +14,13 @@
 |---|---|
 | `info` | 返回持久化高度、app hash 和创世锁定的协议版本 |
 | `check_tx` | 针对最新已提交状态的下一高度验证一笔交易，丢弃临时状态 |
-| `prepare_proposal` | 保持候选输入顺序，在 Comet 请求上限与链上硬上限的较小值内筛选可执行交易；同块冲突会被过滤 |
-| `process_proposal` | 在单个临时块视图中按顺序重执行；超字节预算或任何无效交易都拒绝提案 |
-| `finalize_block` | 按顺序执行交易；每笔返回稳定代码，失败交易不留部分状态；只产生待提交批次 |
+| `prepare_proposal` | 先从 local last commit 执行系统阶段，再保持候选输入顺序筛选可执行交易；同块冲突会被过滤 |
+| `process_proposal` | 从 proposed last commit 重放同一系统阶段和交易；超字节预算或任何无效输入都拒绝提案 |
+| `finalize_block` | 从 decided last commit 执行签名计分和边界结算，再按顺序执行交易；只产生待提交批次和 ValidatorUpdates |
 | `commit` | 每次只消费一个待提交批次；无 Finalize 或重复 Commit 均返回错误 |
 | `query_latest_with_proof` | 复用 `bit-state` 最新高度 ICS23 查询 |
 
-PrepareProposal、ProcessProposal 和 FinalizeBlock 都要求合法的 ABCI Timestamp，并把 Unix 秒传给同一块执行器。Finalize 与高度、摘要、供应和质押变更一起持久化链时间；时间相对 durable 状态倒退时停止执行。CheckTx 使用 durable 时间加一的预览值，只用于无副作用策略检查。
+PrepareProposal、ProcessProposal 和 FinalizeBlock 都要求合法的 ABCI Timestamp，并把 Unix 秒传给同一块执行器。高度 1 不接受历史投票；之后每块必须提供 last commit。地址严格为 CometBFT Ed25519 地址的 20 字节，power 必须为正，未知 flag、未知共识地址、重复地址和总 power 越界均拒绝。只有 `BLOCK_ID_FLAG_COMMIT` 增加 score，Nil/Absent 只记录未签机会。Finalize 与高度、摘要、供应、在线窗口和质押变更一起持久化；时间倒退时停止执行。
 
 FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`。如果底层存储或已提交状态损坏，错误不会伪装成普通交易拒绝；网络适配必须让节点停止参与，而不能返回伪造的成功 app hash。
 
@@ -28,7 +28,7 @@ FinalizeBlock 已防御性处理无效交易，不因共识输入调用 `panic`�
 
 `abci::AbciApplication` 固定使用 `tendermint-abci` 与 `tendermint-proto` 0.40.4 的 `v0_38` 方言。同步 ABCI 连接通过一个共享执行锁进入私有 Tokio runtime，保证不同 socket 线程不会并发推进 Finalize/Commit。共识关键错误会设置共享 halted 标志；后续所有连接均停止处理。公开的 bind 入口拒绝非 loopback 地址及零长度读缓冲区，保持 ABCI 为节点内部接口。
 
-`InitChain` 只在高度零接受，并与启动时配置的完整 `RequestInitChain` 逐字段相等。启动配置还检查 chain ID、创世时间、初始高度、Ed25519 验证者及投票权、区块和证据限制、应用版本，并要求 vote extension 启用高度为零。供给、分配和密码学清单的语义校验仍依赖 D-006 与最终创世编码，当前不能据此宣称主网创世已验收。
+`InitChain` 只在高度零接受，并与启动时配置的完整 `RequestInitChain` 逐字段相等。启动配置还检查 chain ID、创世时间、初始高度、Ed25519 验证者及投票权、区块和证据限制、应用版本，并要求 vote extension 启用高度为零；InitChain 的 key/power 集合还必须精确等于 genesis staking 的 Active 集合。供给、分配和密码学清单的语义校验仍依赖 D-006 与最终创世编码，当前不能据此宣称主网创世已验收。
 
 查询路径固定为 `/bit/state/key`。当前只服务最新已提交高度；`height=0` 表示最新高度。`prove=true` 时，应用先在本地验证 Cnidarium 生成的 ICS23 证明，再把每层 commitment proof 编码为 `jmt:v` ProofOp。历史高度查询随 D-004 历史快照实现补入。
 
@@ -48,6 +48,6 @@ ABCI 适配通过 `FinalizeDigestProvider` 强制注入两个摘要来源；没�
 
 ## 6. 当前验证与下一切片
 
-当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。
+当前测试覆盖 v0.38 Info、InitChain、CheckTx、PrepareProposal、ProcessProposal、FinalizeBlock、Commit、Query、vote extension 和快照响应，并通过真实 TCP socket 完成 Info → InitChain → CheckTx → FinalizeBlock → Commit → ICS23 Query 往返。另有缩短 epoch 的应用测试以真实 commit power 自动结算奖励并检查返回的 Ed25519 key/power 更新，严格解码测试覆盖缺失 commit、错误地址、非正 power 和未知 block-id flag。
 
 下一步实现版本化 execution/compact 编码器及创世语义校验，然后把真实 Transfer 放进 CometBFT 四节点重放与崩溃恢复实验。D-004 同步补快照导入导出和历史高度证明；D-007 接入唯一的验证者集合生效函数与 H+2 测试。

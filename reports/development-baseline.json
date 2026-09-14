@@ -1,13 +1,13 @@
 ﻿{
     "status":  "PASS",
     "scope":  "BIT active baseline only; not a complete chain or product acceptance",
-    "completed_at":  "2026-09-14T07:33:15.5596830+00:00",
+    "completed_at":  "2026-09-14T08:10:45.4738706+00:00",
     "toolchain":  "rustc 1.98.1 (48a229cea 2026-09-01)",
     "checks":  [
                    {
                        "name":  "fmt-check",
                        "command":  "cargo fmt --all -- --check",
-                       "started_at":  "2026-09-14T07:27:46.2521905+00:00",
+                       "started_at":  "2026-09-14T08:04:38.3002379+00:00",
                        "exit_code":  0,
                        "log":  "reports/fmt-check.log",
                        "log_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -15,30 +15,30 @@
                    {
                        "name":  "clippy",
                        "command":  "cargo clippy --workspace --all-targets --locked -- -D warnings",
-                       "started_at":  "2026-09-14T07:27:49.8405951+00:00",
+                       "started_at":  "2026-09-14T08:04:41.3385915+00:00",
                        "exit_code":  0,
                        "log":  "reports/clippy.log",
-                       "log_sha256":  "f06dd3d60e6dad8217665b17439d21bd3084a5e4000104e7f2630f89e1ea695a"
+                       "log_sha256":  "6e845d1519385b77346951708c603b8d183e871a1a0c340af83a88f61b1b9a13"
                    },
                    {
                        "name":  "rust-unit",
                        "command":  "cargo test --workspace --locked",
-                       "started_at":  "2026-09-14T07:27:52.7186892+00:00",
+                       "started_at":  "2026-09-14T08:04:56.9912149+00:00",
                        "exit_code":  0,
                        "log":  "reports/rust-unit.log",
-                       "log_sha256":  "d077fedfc53678815e7e61496a91789f551f5de6b84e2aa72e67c8c01f7fcb60"
+                       "log_sha256":  "5c0ae7de3ad19e8ff4f3703b4ab840d95c0a2e1e155637113043512665e6cbfd"
                    },
                    {
                        "name":  "python-oracle",
                        "command":  "py -B -m unittest discover -s reference -p test_*.py -v",
-                       "started_at":  "2026-09-14T07:33:15.1457150+00:00",
+                       "started_at":  "2026-09-14T08:10:45.0538575+00:00",
                        "exit_code":  0,
                        "log":  "reports/python-oracle.log",
-                       "log_sha256":  "6f625ff961f7daf6a389120535d0034d500e13e97e96207a721d384f83c43145"
+                       "log_sha256":  "24d7b2a4c8c6d2b327bfcbfe681fcffe5bed2b3495e699d08214e06e8f45805f"
                    }
                ],
     "counts":  {
-                   "rust_tests":  70,
+                   "rust_tests":  73,
                    "python_oracle_tests":  4
                },
     "rayon_threads":  4,
@@ -48,7 +48,7 @@
     "inputs":  [
                    {
                        "path":  "Cargo.lock",
-                       "sha256":  "353bdd60c88ac5531d49292aa293140d86dff3e43403c479e23c85ca00998020"
+                       "sha256":  "3a62af015345daa7440bc5f8aec4640ec2e34fef3b9096c9d0907155ecf7b097"
                    },
                    {
                        "path":  "tests/vectors/emission-vectors.json",
@@ -100,11 +100,11 @@
                    },
                    {
                        "path":  "crates/bit-staking/Cargo.toml",
-                       "sha256":  "e219558cbee780e7a26770adb3a6229ec38151b6903a8c0496e08d7bc3ddd453"
+                       "sha256":  "2e6b13ceb8f00df16ab6b5ac7efdc99e0c30e635360ac6a3a931de8d966ba112"
                    },
                    {
                        "path":  "crates/bit-staking/src/lib.rs",
-                       "sha256":  "1ccf80db475c335c559082ff01f3305f3ce1f7374a29534edba31833a02f43a7"
+                       "sha256":  "82971efb87724c42bfb2a28bb373ed95250479ebc18a7abbdad73e06bfcd3b91"
                    },
                    {
                        "path":  "crates/bit-state/Cargo.toml",
@@ -112,19 +112,19 @@
                    },
                    {
                        "path":  "crates/bit-state/src/lib.rs",
-                       "sha256":  "955d8a69ca7e74e5fcf1a362ce2453050faf6b4e6df6455b32dcd1dd11090411"
+                       "sha256":  "fe3dc30383cf8224adc9b9bff841f884953269166571b82e9c69349cc5a7756d"
                    },
                    {
                        "path":  "crates/bit-app/Cargo.toml",
-                       "sha256":  "6fb6b19297caf556f0b53383b83c1886172b0c57cf122c7593dd852610fe5b96"
+                       "sha256":  "5b10704a8525758ddcbe8a36705479fd3cf6571ef57a87805d6e72e2d003358e"
                    },
                    {
                        "path":  "crates/bit-app/src/lib.rs",
-                       "sha256":  "08f0a2f6123357fea976d1c123411e2c67191a812252b179081585a8c9fef84f"
+                       "sha256":  "22df38d52902517bd494b834487d3acd0a343cfc8ce2577ba3726ceb4afd9368"
                    },
                    {
                        "path":  "crates/bit-app/src/abci.rs",
-                       "sha256":  "ecbc6d7becdc242d0f7121a4eb33eff870a688ea95beb1c73f75aea4a8711bd0"
+                       "sha256":  "72b3a3830c92879cb26948363023dd18784f82fd794530ef894e0fb55b392b0f"
                    },
                    {
                        "path":  "feasibility/scripts/rust_env.ps1",

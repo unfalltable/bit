@@ -6,6 +6,7 @@
 
 pub mod abci;
 
+use bit_staking::{CommitVote, ConsensusPowerUpdate};
 use bit_state::{
     CommitReceipt, GenesisConfig, PersistentState, PreparedBlock, QueryProof, StateSummary,
 };
@@ -103,6 +104,13 @@ pub struct BlockRequest {
     pub execution_hash: Hash32,
     /// Digest produced by the versioned compact-block encoder.
     pub compact_hash: Hash32,
+    /// Actual votes for height `height - 1`; absent only at height one.
+    pub last_commit: Option<LastCommit>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LastCommit {
+    pub votes: Vec<CommitVote>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -112,6 +120,7 @@ pub struct FinalizeOutcome {
     pub shielded_tree_root: Hash32,
     pub transaction_results: Vec<TxResult>,
     pub accepted_transactions: usize,
+    pub validator_updates: Vec<ConsensusPowerUpdate>,
 }
 
 pub struct ApplicationCore {
@@ -188,11 +197,30 @@ impl ApplicationCore {
         candidates: Vec<Vec<u8>>,
         requested_max_tx_bytes: u64,
     ) -> Result<PreparedProposal> {
+        self.prepare_proposal_at_with_commit(
+            height,
+            block_time_seconds,
+            candidates,
+            requested_max_tx_bytes,
+            None,
+        )
+        .await
+    }
+
+    pub async fn prepare_proposal_at_with_commit(
+        &self,
+        height: u64,
+        block_time_seconds: u64,
+        candidates: Vec<Vec<u8>>,
+        requested_max_tx_bytes: u64,
+        last_commit: Option<&LastCommit>,
+    ) -> Result<PreparedProposal> {
         let limit = requested_max_tx_bytes.min(self.max_block_bytes);
         let mut block = self
             .state
             .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
             .await?;
+        block.stage_consensus_system(last_commit.map(|commit| commit.votes.as_slice()))?;
         let mut transactions = Vec::new();
         let mut rejected = Vec::new();
         let mut total_transaction_bytes = 0u64;
@@ -241,6 +269,17 @@ impl ApplicationCore {
         block_time_seconds: u64,
         transactions: &[Vec<u8>],
     ) -> Result<bool> {
+        self.process_proposal_at_with_commit(height, block_time_seconds, transactions, None)
+            .await
+    }
+
+    pub async fn process_proposal_at_with_commit(
+        &self,
+        height: u64,
+        block_time_seconds: u64,
+        transactions: &[Vec<u8>],
+        last_commit: Option<&LastCommit>,
+    ) -> Result<bool> {
         if total_bytes(transactions)? > self.max_block_bytes {
             return Ok(false);
         }
@@ -248,6 +287,7 @@ impl ApplicationCore {
             .state
             .begin_block_at(height, block_time_seconds, [0; 32], [0; 32])
             .await?;
+        block.stage_consensus_system(last_commit.map(|commit| commit.votes.as_slice()))?;
         for transaction in transactions {
             if let Err(error) = block.verify_and_stage_transaction(transaction).await {
                 rejection_or_state_error(error)?;
@@ -283,6 +323,12 @@ impl ApplicationCore {
                 request.compact_hash,
             )
             .await?;
+        let system = block.stage_consensus_system(
+            request
+                .last_commit
+                .as_ref()
+                .map(|commit| commit.votes.as_slice()),
+        )?;
         let mut transaction_results = Vec::with_capacity(request.transactions.len());
         for transaction in &request.transactions {
             let result = match block.verify_and_stage_transaction(transaction).await {
@@ -298,6 +344,7 @@ impl ApplicationCore {
             shielded_tree_root: prepared.shielded_tree_root,
             accepted_transactions: prepared.transaction_count,
             transaction_results,
+            validator_updates: system.validator_updates,
         };
         *pending = Some(prepared);
         Ok(outcome)
@@ -402,8 +449,11 @@ fn rejection_or_state_error(error: bit_state::Error) -> Result<TxResult> {
 mod tests {
     use super::*;
     use bit_emission::{FeePolicy, GenesisAllocation};
-    use bit_staking::{StakingBook, StakingParameters};
-    use bit_types::MonetaryPolicy;
+    use bit_staking::{
+        consensus_address, StakingBook, StakingParameters, RECOVERY_RECEIPT_BYTES,
+        TESTNET_MIN_SELF_BOND_ATOMIC,
+    };
+    use bit_types::{position_id, validator_id, Amount, MonetaryPolicy};
     use decaf377::Fq;
     use tempfile::TempDir;
 
@@ -430,6 +480,51 @@ mod tests {
         }
     }
 
+    fn genesis_with_active_validator() -> (GenesisConfig, Hash32, Hash32, u64) {
+        let mut genesis = genesis(1_000_000);
+        genesis.monetary_policy.epoch_blocks = 2;
+        let chain = genesis.chain_context;
+        let operator = [21; 32];
+        let validator_id = validator_id(&chain, &operator);
+        let consensus_pubkey = [22; 32];
+        let owner = [23; 32];
+        let position_id = position_id(&chain, &owner);
+        let principal = Amount::new(TESTNET_MIN_SELF_BOND_ATOMIC).unwrap();
+        let mut staking = StakingBook::new(chain, StakingParameters::reference_testnet()).unwrap();
+        staking
+            .register_validator(validator_id, operator, consensus_pubkey, 500)
+            .unwrap();
+        staking
+            .open_pending_delegation(
+                0,
+                0,
+                position_id,
+                owner,
+                validator_id,
+                principal,
+                Amount::ZERO,
+                true,
+                vec![24; RECOVERY_RECEIPT_BYTES],
+            )
+            .unwrap();
+        staking.activate_pending(&position_id, 1).unwrap();
+        let power = staking.apply_validator_set().unwrap()[0].power;
+        genesis.genesis_staking = staking;
+        genesis.genesis_allocation = GenesisAllocation {
+            shielded: Amount::ZERO,
+            stake: principal,
+            pending_delegation: Amount::ZERO,
+            exits: Amount::ZERO,
+            commission: Amount::ZERO,
+            fee_reserve: Amount::ZERO,
+            unclaimed_genesis: Amount::new(
+                genesis.monetary_policy.genesis_supply.value() - principal.value(),
+            )
+            .unwrap(),
+        };
+        (genesis, validator_id, consensus_pubkey, power)
+    }
+
     #[tokio::test]
     async fn empty_finalize_is_invisible_until_commit() {
         let dir = TempDir::new().unwrap();
@@ -447,6 +542,7 @@ mod tests {
                 transactions: Vec::new(),
                 execution_hash: [4; 32],
                 compact_hash: [5; 32],
+                last_commit: None,
             })
             .await
             .unwrap();
@@ -458,6 +554,7 @@ mod tests {
                 transactions: Vec::new(),
                 execution_hash: [4; 32],
                 compact_hash: [5; 32],
+                last_commit: None,
             })
             .await,
             Err(Error::PendingBlockExists)
@@ -496,6 +593,7 @@ mod tests {
                 transactions: vec![vec![1, 2, 3, 4, 5]],
                 execution_hash: [8; 32],
                 compact_hash: [9; 32],
+                last_commit: None,
             })
             .await,
             Err(Error::FinalizedBlockTooLarge {
@@ -520,6 +618,7 @@ mod tests {
                 transactions: vec![vec![0xff]],
                 execution_hash: [6; 32],
                 compact_hash: [7; 32],
+                last_commit: None,
             })
             .await
             .unwrap();
@@ -533,5 +632,82 @@ mod tests {
         assert_eq!(receipt.transaction_count, 0);
         assert_eq!(receipt.state_height, 1);
         app.close().await;
+    }
+
+    #[tokio::test]
+    async fn actual_commits_automatically_settle_epoch_and_emit_power_update() {
+        let dir = TempDir::new().unwrap();
+        let (genesis, validator_id, consensus_pubkey, power) = genesis_with_active_validator();
+        let app = ApplicationCore::open(dir.path().to_path_buf(), genesis.clone())
+            .await
+            .unwrap();
+        let vote = CommitVote {
+            consensus_address: consensus_address(&consensus_pubkey),
+            power,
+            signed: true,
+        };
+        for height in 1..=2 {
+            let outcome = app
+                .finalize_block(BlockRequest {
+                    height,
+                    block_time_seconds: height,
+                    transactions: Vec::new(),
+                    execution_hash: [height as u8; 32],
+                    compact_hash: [height as u8 + 10; 32],
+                    last_commit: (height > 1).then(|| LastCommit { votes: vec![vote] }),
+                })
+                .await
+                .unwrap();
+            assert!(outcome.validator_updates.is_empty());
+            app.commit().await.unwrap();
+        }
+
+        let boundary = app
+            .finalize_block(BlockRequest {
+                height: 3,
+                block_time_seconds: 3,
+                transactions: Vec::new(),
+                execution_hash: [3; 32],
+                compact_hash: [13; 32],
+                last_commit: Some(LastCommit { votes: vec![vote] }),
+            })
+            .await
+            .unwrap();
+        assert_eq!(boundary.validator_updates.len(), 1);
+        assert_eq!(
+            boundary.validator_updates[0].consensus_pubkey,
+            consensus_pubkey
+        );
+        assert!(boundary.validator_updates[0].power > power);
+        app.commit().await.unwrap();
+        assert_eq!(
+            app.state_summary().await.unwrap().supply.completed_epochs,
+            1
+        );
+        let validator = app
+            .state
+            .staking_book()
+            .unwrap()
+            .validator(&validator_id)
+            .unwrap()
+            .clone();
+        assert_eq!(validator.signing_window.len(), 2);
+        assert_eq!(validator.signed_window_count, 2);
+        assert_eq!(validator.epoch_score, 0);
+        app.close().await;
+
+        let reopened = ApplicationCore::open(dir.path().to_path_buf(), genesis)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened
+                .state
+                .staking_book()
+                .unwrap()
+                .validator(&validator_id)
+                .unwrap(),
+            &validator
+        );
+        reopened.close().await;
     }
 }

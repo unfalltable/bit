@@ -9,9 +9,9 @@ use bit_emission::{
     completed_epochs_after_height, FeeClass, FeePolicy, GenesisAllocation, SupplyAudit, SupplyState,
 };
 use bit_staking::{
-    ActivationCapacityRecord, ActivationOutcome, PositionStatus, StakePool, StakePosition,
-    StakingBook, StakingParameters, StakingTotals, Validator, ValidatorPower, ValidatorReward,
-    ValidatorUpdate,
+    ActivationCapacityRecord, ActivationOutcome, CommitVote, ConsensusPowerUpdate, PositionStatus,
+    StakePool, StakePosition, StakingBook, StakingParameters, StakingTotals, Validator,
+    ValidatorPower, ValidatorReward, ValidatorSetTransition, ValidatorUpdate,
 };
 use bit_transaction::{
     verify_staking_stateless, verify_transfer_stateless, ActionAuthorizationView,
@@ -34,7 +34,7 @@ use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
 
-const STORAGE_SCHEMA_VERSION: u32 = 9;
+const STORAGE_SCHEMA_VERSION: u32 = 10;
 const MAX_FRONTIER_BYTES: usize = 64 * 1024 * 1024;
 const META_VERSION: &str = "meta/version";
 const META_HEIGHT: &str = "meta/height";
@@ -234,6 +234,15 @@ pub struct EpochRewardSettlement {
     pub validator_rewards: Vec<ValidatorReward>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SystemBlockOutcome {
+    pub last_commit_height: Option<u64>,
+    pub reward_settlement: Option<EpochRewardSettlement>,
+    pub activations: Vec<(Hash32, ActivationOutcome)>,
+    pub validator_set: Option<Vec<ValidatorPower>>,
+    pub validator_updates: Vec<ConsensusPowerUpdate>,
+}
+
 pub struct QueryProof {
     pub key: String,
     pub value: Option<Vec<u8>>,
@@ -385,6 +394,7 @@ impl PersistentState {
             supply,
             staking,
             staking_touches: StakingTouches::default(),
+            system_phases_staged: false,
             transaction_count: 0,
         })
     }
@@ -489,6 +499,7 @@ pub struct BlockSession<'a> {
     supply: SupplyState,
     staking: StakingBook,
     staking_touches: StakingTouches,
+    system_phases_staged: bool,
     transaction_count: usize,
 }
 
@@ -555,6 +566,93 @@ impl BlockSession<'_> {
                 .tx_id),
             _ => Err(bit_transaction::Error::UnsupportedAction.into()),
         }
+    }
+
+    /// Execute the deterministic pre-transaction consensus phases for this
+    /// block. At height greater than one the supplied votes are CometBFT's
+    /// actual validator set for the previous height.
+    pub fn stage_consensus_system(
+        &mut self,
+        last_commit: Option<&[CommitVote]>,
+    ) -> Result<SystemBlockOutcome> {
+        if self.system_phases_staged {
+            return Err(Error::InvalidSystemPhase(
+                "consensus system phases are already staged",
+            ));
+        }
+        if self.height == 1 {
+            if last_commit.is_some_and(|votes| !votes.is_empty()) {
+                return Err(Error::InvalidSystemPhase(
+                    "height one cannot contain a previous commit",
+                ));
+            }
+            self.system_phases_staged = true;
+            return Ok(SystemBlockOutcome {
+                last_commit_height: None,
+                reward_settlement: None,
+                activations: Vec::new(),
+                validator_set: None,
+                validator_updates: Vec::new(),
+            });
+        }
+
+        let votes = last_commit.ok_or(Error::InvalidSystemPhase(
+            "previous commit is required after height one",
+        ))?;
+        let last_commit_height = self.height - 1;
+        let score_epoch = (last_commit_height - 1) / self.owner.config.monetary_policy.epoch_blocks;
+        let commit_outcome = self.staking.record_last_commit(
+            score_epoch,
+            self.height,
+            self.block_time_seconds,
+            votes,
+        )?;
+        self.staking_touches
+            .validators
+            .extend(commit_outcome.observed_validators);
+        let mut updates: BTreeMap<[u8; 32], u64> = commit_outcome
+            .validator_updates
+            .into_iter()
+            .map(|update| (update.consensus_pubkey, update.power))
+            .collect();
+
+        let mut reward_settlement = None;
+        let mut activations = Vec::new();
+        let mut validator_set = None;
+        if self.height > 1
+            && (self.height - 1) % self.owner.config.monetary_policy.epoch_blocks == 0
+        {
+            let boundary_epoch = (self.height - 1) / self.owner.config.monetary_policy.epoch_blocks;
+            let settled_epoch = boundary_epoch
+                .checked_sub(1)
+                .ok_or(Error::InvalidSystemPhase("reward epoch underflow"))?;
+            let scores = self.staking.take_epoch_scores(settled_epoch)?;
+            self.staking_touches
+                .validators
+                .extend(scores.keys().copied());
+            reward_settlement = Some(self.stage_epoch_reward_settlement(&scores)?);
+            activations = self.stage_epoch_staking_activation()?;
+            let transition = self.stage_validator_set_transition()?;
+            for update in &transition.updates {
+                updates.insert(update.consensus_pubkey, update.power);
+            }
+            validator_set = Some(transition.selected);
+        }
+        self.system_phases_staged = true;
+
+        Ok(SystemBlockOutcome {
+            last_commit_height: Some(last_commit_height),
+            reward_settlement,
+            activations,
+            validator_set,
+            validator_updates: updates
+                .into_iter()
+                .map(|(consensus_pubkey, power)| ConsensusPowerUpdate {
+                    consensus_pubkey,
+                    power,
+                })
+                .collect(),
+        })
     }
 
     fn boundary_epoch(&self) -> Result<u64> {
@@ -859,7 +957,13 @@ impl BlockSession<'_> {
     }
 
     pub fn stage_validator_set_selection(&mut self) -> Result<Vec<ValidatorPower>> {
-        let previous: BTreeMap<Hash32, (bit_staking::ValidatorStatus, u64)> = self
+        Ok(self.stage_validator_set_transition()?.selected)
+    }
+
+    /// Apply scheduled validator changes and return the exact key/power delta
+    /// required by CometBFT. Removed or rotated-out keys receive power zero.
+    pub fn stage_validator_set_transition(&mut self) -> Result<ValidatorSetTransition> {
+        let previous_records: BTreeMap<Hash32, (bit_staking::ValidatorStatus, u64)> = self
             .staking
             .validators()
             .map(|validator| {
@@ -869,6 +973,12 @@ impl BlockSession<'_> {
                 )
             })
             .collect();
+        let previous_set: BTreeMap<[u8; 32], u64> = self
+            .staking
+            .validators()
+            .filter(|validator| validator.voting_power != 0)
+            .map(|validator| (validator.consensus_pubkey, validator.voting_power))
+            .collect();
         let mut staking = self.staking.clone();
         let current_epoch = self.boundary_epoch()?;
         let scheduled = staking.apply_scheduled_validator_changes(
@@ -877,8 +987,28 @@ impl BlockSession<'_> {
             self.block_time_seconds,
         )?;
         let selected = staking.apply_validator_set()?;
+        let next_set: BTreeMap<[u8; 32], u64> = selected
+            .iter()
+            .map(|validator| (validator.consensus_pubkey, validator.power))
+            .collect();
+        let keys: BTreeSet<[u8; 32]> = previous_set
+            .keys()
+            .chain(next_set.keys())
+            .copied()
+            .collect();
+        let updates = keys
+            .into_iter()
+            .filter_map(|consensus_pubkey| {
+                let previous = previous_set.get(&consensus_pubkey).copied().unwrap_or(0);
+                let next = next_set.get(&consensus_pubkey).copied().unwrap_or(0);
+                (previous != next).then_some(ConsensusPowerUpdate {
+                    consensus_pubkey,
+                    power: next,
+                })
+            })
+            .collect();
         for validator in staking.validators() {
-            if previous.get(&validator.validator_id)
+            if previous_records.get(&validator.validator_id)
                 != Some(&(validator.status, validator.voting_power))
             {
                 self.staking_touches
@@ -888,7 +1018,7 @@ impl BlockSession<'_> {
         }
         self.staking_touches.validators.extend(scheduled);
         self.staking = staking;
-        Ok(selected)
+        Ok(ValidatorSetTransition { selected, updates })
     }
 
     /// Verify and stage a canonical Transfer against the current block overlay.
@@ -2990,8 +3120,9 @@ mod tests {
         let initial_fees = Amount::new(101).unwrap();
 
         let mut staking = StakingBook::new(chain, StakingParameters::reference_testnet()).unwrap();
+        let consensus_pubkey = [0x73; 32];
         staking
-            .register_validator(validator_id, operator, [0x73; 32], 500)
+            .register_validator(validator_id, operator, consensus_pubkey, 500)
             .unwrap();
         staking
             .open_pending_delegation(
@@ -3007,7 +3138,7 @@ mod tests {
             )
             .unwrap();
         staking.activate_pending(&position, 1).unwrap();
-        staking.apply_validator_set().unwrap();
+        let power = staking.apply_validator_set().unwrap()[0].power;
         genesis_config.genesis_staking = staking;
         genesis_config.genesis_allocation = GenesisAllocation {
             shielded: Amount::ZERO,
@@ -3027,17 +3158,22 @@ mod tests {
         let state = PersistentState::open(dir.path().to_path_buf(), genesis_config.clone())
             .await
             .unwrap();
-        for height in 1..=2 {
-            let block = state
-                .begin_block(height, [height as u8; 32], [height as u8 + 2; 32])
-                .await
-                .unwrap();
-            state.commit(block.prepare().await.unwrap()).unwrap();
-        }
+        let mut first = state.begin_block(1, [1; 32], [3; 32]).await.unwrap();
+        first.stage_consensus_system(None).unwrap();
+        state.commit(first.prepare().await.unwrap()).unwrap();
+        let commit_vote = CommitVote {
+            consensus_address: bit_staking::consensus_address(&consensus_pubkey),
+            power,
+            signed: true,
+        };
+        let mut second = state.begin_block(2, [2; 32], [4; 32]).await.unwrap();
+        second.stage_consensus_system(Some(&[commit_vote])).unwrap();
+        state.commit(second.prepare().await.unwrap()).unwrap();
         let mut boundary = state.begin_block(3, [3; 32], [5; 32]).await.unwrap();
-        let settlement = boundary
-            .stage_epoch_reward_settlement(&BTreeMap::from([(validator_id, 10u128)]))
+        let system = boundary
+            .stage_consensus_system(Some(&[commit_vote]))
             .unwrap();
+        let settlement = system.reward_settlement.unwrap();
         let available = initial_fees.value() + settlement.issuance_quota.value();
         let expected_commission = available * 500 / 10_000;
         assert_eq!(settlement.distributed.value(), available);
@@ -3046,11 +3182,10 @@ mod tests {
             settlement.validator_rewards[0].commission_reward.value(),
             expected_commission
         );
-        assert!(boundary
-            .stage_epoch_staking_activation()
-            .unwrap()
-            .is_empty());
-        boundary.stage_validator_set_selection().unwrap();
+        assert_eq!(settlement.validator_rewards[0].score, u128::from(power) * 2);
+        assert!(system.activations.is_empty());
+        assert_eq!(system.validator_set.unwrap()[0].validator_id, validator_id);
+        assert_eq!(system.validator_updates.len(), 1);
         let receipt = state.commit(boundary.prepare().await.unwrap()).unwrap();
         assert_eq!(receipt.supply.fee_reserve, Amount::ZERO);
         assert_eq!(receipt.supply.commission_total.value(), expected_commission);
@@ -3070,6 +3205,9 @@ mod tests {
         );
         let h3 = state.summary().await.unwrap();
         let mut claim_block = state.begin_block(4, [4; 32], [6; 32]).await.unwrap();
+        claim_block
+            .stage_consensus_system(Some(&[commit_vote]))
+            .unwrap();
         claim_block
             .stage_verified_staking(&empty_verified_staking(
                 0x75,

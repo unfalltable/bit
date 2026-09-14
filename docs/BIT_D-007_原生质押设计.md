@@ -1,6 +1,6 @@
 # BIT D-007 原生质押设计
 
-状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；池级奖励分配已实现，真实 score、在线率和 CometBFT ValidatorUpdates 仍在开发，不包含 D-008 的退出与处罚实现。
+状态：`IN_PROGRESS`。验证人注册、委托、pending 取消、资料/佣金/停用更新、解禁、共识密钥轮换和佣金领取已经进入统一交易执行链；实际签名 score、在线率窗口、自动奖励和 CometBFT ValidatorUpdates 已实现。H+2 实际集合核验仍在开发，不包含 D-008 的退出与处罚实现。
 
 ## 1. 唯一身份与对象
 
@@ -43,11 +43,13 @@ S' = S + minted
 
 ## 5. 本阶段验证
 
-schema v9 为 parameters、validator、pool、position 和 capacity 分别定义版本化、定长整数、大端序的持久化编码；parameters v2 固定 jail、佣金通知和证据窗口的时间/高度双门槛，validator v4 记录完整公开元数据、sequence、累计佣金、待生效佣金、待生效共识键、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、尾随字节、非法 Amount、非法 UTF-8 和不符合定长规则的收据。每个对象使用独立 JMT 键，更新阶段只写本次触及的记录。
+schema v10 为 parameters、validator、pool、position 和 capacity 分别定义版本化、定长整数、大端序的持久化编码；parameters v3 固定在线率、jail、佣金通知和证据窗口参数，validator v5 记录完整公开元数据、sequence、累计佣金、压缩签名窗口、当前 epoch score、待生效变更、jail 时间点和共识键责任历史。position 的恢复收据严格为 512 字节。解码拒绝未知枚举、非规范布尔、重复索引、截断、非零 bit padding、签名计数不符、尾随字节、非法 Amount、非法 UTF-8 和不符合定长规则的收据。
 
 交易层现已对 RegisterValidator、Delegate、CancelPending、UpdateValidator、UnjailValidator、RotateConsensusKey 和 ClaimCommission 验证独立角色域的 Ed25519 签名。注册与轮换的 consensus-pop 域和 operator 域分离，所有既有验证人动作都从当前状态解析 operator 与精确 sequence。七类动作与 Spend/Output 证明、Spend 授权、最低费和公开 lock/release 一起进入同一个 binding equation。应用核心的 CheckTx、PrepareProposal、ProcessProposal 和 FinalizeBlock 都通过统一动作调度进入该执行器。
 
 epoch 结算入口接收按实际权重签名累计的 score 映射。它把全部费用池按 score 向下取整分给各 validator，再按该 validator 当前已生效佣金率拆为旧池奖励与 operator 累计佣金；每层整数余数都留在 F 或对应 gross 内，不按账户数平均。池资产改变不会在 epoch 中途重算投票权。ClaimCommission 从 C 释放指定金额，operator sequence 增加，并支持 ReleasedValue 或额外私密 Spend 支付手续费。
+
+ABCI 高度 `h>1` 必须提供 `h-1` 的 last commit。系统按共识公钥的 `SHA256(pubkey)[0..20]` 映射 CometBFT 地址，只把 Commit flag 的实际 power 加入 epoch score；Nil/Absent 计入未签机会。每个 validator 保留最多 10000 次机会的 bit 窗口和签名计数，完整窗口低于 9500 bps 时原子切换为 Jailed、记录链高度/时间并返回 power=0 更新；普通 downtime 不扣本金。边界块先记录最后一次机会，再消费 score、结算奖励、激活 pending、应用计划变更并选择集合。
 
 UpdateValidator 立即更新公开资料；佣金降低最早在下个 epoch 生效，佣金上调每次最多 100 bps，并同时满足 604800 链秒和 120960 块的通知期。停用请求在下一次集合选择移出节点，重新启用后回到 Candidate。Unjail 同时要求自 jail 起经过 7200 链秒和 1440 块。RotateConsensusKey 验证新密钥 PoP 后排到下个 epoch，epoch 中途继续使用旧密钥；实际切换时旧密钥记录保留到证据窗口结束，历史和所有待生效密钥全局唯一。
 
@@ -55,11 +57,11 @@ ABCI PrepareProposal、ProcessProposal 和 FinalizeBlock 使用请求中的规�
 
 状态层在同一候选副本中验证 commitment tree、nullifier/tx_id、供应容器和质押账本，任一检查失败都不修改区块 overlay。Prepare 同时验证 `sum(pool.P)=供应容器 P` 与全部 pending/refundable 本金之和等于供应容器 D。持久内存镜像仅在 RocksDB batch 成功提交后替换，重启从逐项记录重建并重跑全部不变量。
 
-测试覆盖 ID 不匹配、最低委托和自质押、延后激活、旧周期奖励后的份额报价、U256 大数乘除、最低份额滑点、零份额、验证者失去资格、资不抵债池、容量耗尽与取消释放、确定性批量顺序、候选排序、投票权上限、最后份额清空残余、编码严格性、账本篡改与失败原子性。供应测试覆盖 `Q/D/P/F` 的完整往返和余额不足回滚；RocksDB 集成测试覆盖 self-bond 从 pending 到 Active、四类 ICS23 证明、重启恢复及 pool/P 交叉篡改拒绝。
+测试覆盖 ID、委托/自质押、延后激活、奖励份额、U256 大数、滑点、资不抵债池、容量、候选排序、投票权上限、签名窗口边界、downtime jail、epoch score 消费、严格编码、账本篡改与失败原子性。缩短 epoch 的状态和应用集成测试以连续真实 commit power 自动完成发行/奖励/集合选择，验证 ValidatorUpdates、Commit 和重启恢复；ABCI 测试拒绝缺失 commit、错误地址、非正 power 和未知 flag。
 
 ## 6. 完成 D-007 还需要
 
-1. 实现在线率窗口和由实际提交签名生成的 epoch 得分。
-2. 把 score 生产器与现有“发行结算/旧池奖励→激活→集合选择”入口自动连接，并实现增量候选索引。
-3. 从选中集合生成 CometBFT ValidatorUpdates，并做 H/H+1/H+2 真实集合哈希验证。
-4. 落实最后合格验证者保护和 `HALT_NO_SAFE_VALIDATOR_SET`，再进入 D-008 退出 cohort、ticket 与 SlashJob。
+1. 持久化唯一 `effective_set_at(height)`，对 H/H+1/H+2 的 last commit、`next_validators_hash` 和返回更新做真实进程核验。
+2. 实现增量候选索引，避免边界扫描全部历史验证人。
+3. 落实最后合格验证者保护和 `HALT_NO_SAFE_VALIDATOR_SET`。
+4. 进入 D-008 退出 cohort、ticket、证据去重与 SlashJob。

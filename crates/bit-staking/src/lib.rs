@@ -6,7 +6,8 @@
 
 use bit_types::{position_id, validator_id, Amount};
 use primitive_types::U256;
-use std::collections::{BTreeMap, BTreeSet};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use thiserror::Error;
 
 pub type Hash32 = [u8; 32];
@@ -16,7 +17,10 @@ pub const ATOMIC_PER_BIT: u128 = 100_000_000;
 pub const TESTNET_MIN_DELEGATION_ATOMIC: u128 = ATOMIC_PER_BIT;
 pub const TESTNET_MIN_SELF_BOND_ATOMIC: u128 = 1_000 * ATOMIC_PER_BIT;
 pub const COMETBFT_SAFE_TOTAL_POWER: u64 = (1u64 << 60) - 1;
+pub const COMETBFT_ADDRESS_BYTES: usize = 20;
 pub const RECOVERY_RECEIPT_BYTES: usize = 512;
+
+pub type ConsensusAddress = [u8; COMETBFT_ADDRESS_BYTES];
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum Error {
@@ -58,6 +62,14 @@ pub enum Error {
     ConsensusKeyUnchanged,
     #[error("reward score references an unknown validator")]
     UnknownRewardValidator,
+    #[error("last commit references an unknown consensus address")]
+    UnknownCommitValidator,
+    #[error("last commit repeats a consensus address")]
+    DuplicateCommitValidator,
+    #[error("last commit voting power is zero or exceeds the safe bound")]
+    InvalidCommitVotingPower,
+    #[error("validator epoch score is stale or out of order")]
+    InvalidScoreEpoch,
     #[error("commission claim must be nonzero and no greater than accrued commission")]
     InvalidCommissionClaim,
     #[error("position already exists")]
@@ -115,6 +127,8 @@ pub struct StakingParameters {
     pub commission_notice_blocks: u64,
     pub evidence_max_age_seconds: u64,
     pub evidence_max_age_blocks: u64,
+    pub downtime_window: u32,
+    pub min_signed_bps: u16,
 }
 
 impl StakingParameters {
@@ -135,6 +149,8 @@ impl StakingParameters {
             commission_notice_blocks: 120_960,
             evidence_max_age_seconds: 604_800,
             evidence_max_age_blocks: 120_960,
+            downtime_window: 10_000,
+            min_signed_bps: 9_500,
         }
     }
 
@@ -173,9 +189,15 @@ impl StakingParameters {
             || self.commission_notice_blocks == 0
             || self.evidence_max_age_seconds == 0
             || self.evidence_max_age_blocks == 0
+            || self.downtime_window == 0
         {
             return Err(Error::InvalidParameters(
                 "staking time windows must be nonzero",
+            ));
+        }
+        if self.min_signed_bps == 0 || self.min_signed_bps > 10_000 {
+            return Err(Error::InvalidParameters(
+                "minimum signed ratio must be 1..=10000 bps",
             ));
         }
         Ok(())
@@ -183,7 +205,7 @@ impl StakingParameters {
 
     pub fn encode_persistent(&self) -> Vec<u8> {
         let mut writer = Writer::new();
-        writer.u8(2);
+        writer.u8(3);
         writer.amount(self.min_delegation);
         writer.amount(self.min_self_bond);
         writer.u16(self.max_validators);
@@ -199,12 +221,14 @@ impl StakingParameters {
         writer.u64(self.commission_notice_blocks);
         writer.u64(self.evidence_max_age_seconds);
         writer.u64(self.evidence_max_age_blocks);
+        writer.u32(self.downtime_window);
+        writer.u16(self.min_signed_bps);
         writer.finish()
     }
 
     pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
         let mut reader = Reader::new(bytes);
-        reader.version(2)?;
+        reader.version(3)?;
         let parameters = Self {
             min_delegation: reader.amount()?,
             min_self_bond: reader.amount()?,
@@ -221,6 +245,8 @@ impl StakingParameters {
             commission_notice_blocks: reader.u64()?,
             evidence_max_age_seconds: reader.u64()?,
             evidence_max_age_blocks: reader.u64()?,
+            downtime_window: reader.u32()?,
+            min_signed_bps: reader.u16()?,
         };
         reader.finish()?;
         parameters.validate()?;
@@ -263,6 +289,12 @@ pub struct Validator {
     pub self_bond_positions: BTreeSet<Hash32>,
     pub voting_power: u64,
     pub sequence: u64,
+    /// Oldest-to-newest signing opportunities from the actual CometBFT set.
+    pub signing_window: VecDeque<bool>,
+    pub signed_window_count: u32,
+    /// Zero-based epoch currently accumulating actual signed voting power.
+    pub score_epoch: u64,
+    pub epoch_score: u128,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -308,7 +340,41 @@ pub struct ValidatorReward {
     pub commission_reward: Amount,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CommitVote {
+    pub consensus_address: ConsensusAddress,
+    pub power: u64,
+    pub signed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ConsensusPowerUpdate {
+    pub consensus_pubkey: PubKey32,
+    pub power: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LastCommitOutcome {
+    pub observed_validators: BTreeSet<Hash32>,
+    pub validator_updates: Vec<ConsensusPowerUpdate>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatorSetTransition {
+    pub selected: Vec<ValidatorPower>,
+    pub updates: Vec<ConsensusPowerUpdate>,
+}
+
 impl Validator {
+    pub fn signed_bps(&self) -> u16 {
+        if self.signing_window.is_empty() {
+            return 0;
+        }
+        let numerator = u128::from(self.signed_window_count) * 10_000;
+        let denominator = self.signing_window.len() as u128;
+        u16::try_from(numerator / denominator).unwrap_or(10_000)
+    }
+
     pub fn encode_persistent(&self) -> Result<Vec<u8>> {
         validate_metadata(&self.display_name, &self.website, &self.description)?;
         let history_count =
@@ -316,7 +382,7 @@ impl Validator {
         let self_bond_count =
             u32::try_from(self.self_bond_positions.len()).map_err(|_| Error::Overflow)?;
         let mut writer = Writer::new();
-        writer.u8(4);
+        writer.u8(5);
         writer.hash32(&self.validator_id);
         writer.hash32(&self.operator_pubkey);
         writer.hash32(&self.consensus_pubkey);
@@ -382,12 +448,25 @@ impl Validator {
         }
         writer.u64(self.voting_power);
         writer.u64(self.sequence);
+        let signing_window_len =
+            u32::try_from(self.signing_window.len()).map_err(|_| Error::Overflow)?;
+        writer.u32(signing_window_len);
+        writer.u32(self.signed_window_count);
+        let mut signing_bits = vec![0u8; self.signing_window.len().div_ceil(8)];
+        for (index, signed) in self.signing_window.iter().copied().enumerate() {
+            if signed {
+                signing_bits[index / 8] |= 1 << (7 - (index % 8));
+            }
+        }
+        writer.bytes(&signing_bits);
+        writer.u64(self.score_epoch);
+        writer.u128(self.epoch_score);
         Ok(writer.finish())
     }
 
     pub fn decode_persistent(bytes: &[u8]) -> Result<Self> {
         let mut reader = Reader::new(bytes);
-        reader.version(4)?;
+        reader.version(5)?;
         let validator_id = reader.hash32()?;
         let operator_pubkey = reader.hash32()?;
         let consensus_pubkey = reader.hash32()?;
@@ -464,7 +543,7 @@ impl Validator {
             .map_err(|_| Error::Overflow)?
             .checked_mul(32)
             .ok_or(Error::Overflow)?;
-        if reader.remaining() < required + 16 {
+        if reader.remaining() < required + 40 {
             return Err(Error::InvalidEncoding("truncated self bond index"));
         }
         let mut self_bond_positions = BTreeSet::new();
@@ -475,6 +554,27 @@ impl Validator {
         }
         let voting_power = reader.u64()?;
         let sequence = reader.u64()?;
+        let signing_window_len = usize::try_from(reader.u32()?).map_err(|_| Error::Overflow)?;
+        let signed_window_count = reader.u32()?;
+        let signing_bytes_len = signing_window_len.div_ceil(8);
+        let signing_bytes = reader.take(signing_bytes_len)?;
+        if signing_window_len % 8 != 0
+            && signing_bytes
+                .last()
+                .is_some_and(|last| last & ((1 << (8 - signing_window_len % 8)) - 1) != 0)
+        {
+            return Err(Error::InvalidEncoding("nonzero signing-window padding"));
+        }
+        let signing_window: VecDeque<bool> = (0..signing_window_len)
+            .map(|index| signing_bytes[index / 8] & (1 << (7 - (index % 8))) != 0)
+            .collect();
+        if signing_window.iter().filter(|signed| **signed).count()
+            != usize::try_from(signed_window_count).map_err(|_| Error::Overflow)?
+        {
+            return Err(Error::InvalidEncoding("signing-window count mismatch"));
+        }
+        let score_epoch = reader.u64()?;
+        let epoch_score = reader.u128()?;
         reader.finish()?;
         Ok(Self {
             validator_id,
@@ -495,6 +595,10 @@ impl Validator {
             self_bond_positions,
             voting_power,
             sequence,
+            signing_window,
+            signed_window_count,
+            score_epoch,
+            epoch_score,
         })
     }
 }
@@ -1010,6 +1114,10 @@ impl StakingBook {
                     self_bond_positions: BTreeSet::new(),
                     voting_power: 0,
                     sequence: 0,
+                    signing_window: VecDeque::new(),
+                    signed_window_count: 0,
+                    score_epoch: 0,
+                    epoch_score: 0,
                 },
             );
             next.pools.insert(id, StakePool::empty(id));
@@ -1362,6 +1470,140 @@ impl StakingBook {
                 }
             }
             Ok(rewards)
+        })
+    }
+
+    /// Record one opportunity for every member of CometBFT's actual previous
+    /// validator set. Only a commit for the decided block contributes power to
+    /// the epoch score; absent and nil votes remain missed opportunities.
+    pub fn record_last_commit(
+        &mut self,
+        score_epoch: u64,
+        observed_at_height: u64,
+        observed_at_time_seconds: u64,
+        votes: &[CommitVote],
+    ) -> Result<LastCommitOutcome> {
+        self.transact(|next| {
+            let mut address_to_validator = BTreeMap::new();
+            for validator in next.validators.values() {
+                for record in &validator.consensus_key_history {
+                    let address = consensus_address(&record.consensus_pubkey);
+                    if address_to_validator
+                        .insert(address, validator.validator_id)
+                        .is_some()
+                    {
+                        return Err(Error::Invariant("consensus address collision"));
+                    }
+                }
+            }
+
+            let mut seen = BTreeSet::new();
+            let mut observed_validators = BTreeSet::new();
+            let mut total_power = 0u64;
+            let mut updates = Vec::new();
+            for vote in votes {
+                if vote.power == 0 || vote.power > next.parameters.max_total_voting_power {
+                    return Err(Error::InvalidCommitVotingPower);
+                }
+                total_power = total_power
+                    .checked_add(vote.power)
+                    .ok_or(Error::VotingPowerExceeded)?;
+                if total_power > next.parameters.max_total_voting_power {
+                    return Err(Error::VotingPowerExceeded);
+                }
+                if !seen.insert(vote.consensus_address) {
+                    return Err(Error::DuplicateCommitValidator);
+                }
+                let validator_id = address_to_validator
+                    .get(&vote.consensus_address)
+                    .copied()
+                    .ok_or(Error::UnknownCommitValidator)?;
+                observed_validators.insert(validator_id);
+                let validator = next
+                    .validators
+                    .get_mut(&validator_id)
+                    .ok_or(Error::ValidatorNotFound)?;
+                if validator.score_epoch < score_epoch {
+                    if validator.epoch_score != 0 {
+                        return Err(Error::InvalidScoreEpoch);
+                    }
+                    validator.score_epoch = score_epoch;
+                } else if validator.score_epoch > score_epoch {
+                    return Err(Error::InvalidScoreEpoch);
+                }
+                if vote.signed {
+                    validator.epoch_score = validator
+                        .epoch_score
+                        .checked_add(u128::from(vote.power))
+                        .ok_or(Error::Overflow)?;
+                }
+
+                validator.signing_window.push_back(vote.signed);
+                if vote.signed {
+                    validator.signed_window_count = validator
+                        .signed_window_count
+                        .checked_add(1)
+                        .ok_or(Error::Overflow)?;
+                }
+                if validator.signing_window.len()
+                    > usize::try_from(next.parameters.downtime_window)
+                        .map_err(|_| Error::Overflow)?
+                {
+                    let evicted = validator
+                        .signing_window
+                        .pop_front()
+                        .ok_or(Error::Invariant("signing window unexpectedly empty"))?;
+                    validator.signed_window_count = validator
+                        .signed_window_count
+                        .checked_sub(u32::from(evicted))
+                        .ok_or(Error::Invariant("signed window count underflow"))?;
+                }
+
+                let window_is_full = validator.signing_window.len()
+                    == usize::try_from(next.parameters.downtime_window)
+                        .map_err(|_| Error::Overflow)?;
+                let below_threshold = u128::from(validator.signed_window_count) * 10_000
+                    < u128::from(next.parameters.downtime_window)
+                        * u128::from(next.parameters.min_signed_bps);
+                if window_is_full && below_threshold && validator.status == ValidatorStatus::Active
+                {
+                    validator.status = ValidatorStatus::Jailed;
+                    validator.voting_power = 0;
+                    validator.jailed_at_height = Some(observed_at_height);
+                    validator.jailed_at_time_seconds = Some(observed_at_time_seconds);
+                    updates.push(ConsensusPowerUpdate {
+                        consensus_pubkey: validator.consensus_pubkey,
+                        power: 0,
+                    });
+                }
+            }
+            Ok(LastCommitOutcome {
+                observed_validators,
+                validator_updates: updates,
+            })
+        })
+    }
+
+    /// Consume each nonzero score for one completed zero-based epoch and move
+    /// that accumulator forward. Zero-score validators can advance lazily when
+    /// they next appear in the actual set.
+    pub fn take_epoch_scores(&mut self, settled_epoch: u64) -> Result<BTreeMap<Hash32, u128>> {
+        self.transact(|next| {
+            let next_epoch = settled_epoch.checked_add(1).ok_or(Error::Overflow)?;
+            let mut scores = BTreeMap::new();
+            for validator in next.validators.values_mut() {
+                if validator.score_epoch > settled_epoch
+                    || (validator.score_epoch < settled_epoch && validator.epoch_score != 0)
+                {
+                    return Err(Error::InvalidScoreEpoch);
+                }
+                if validator.score_epoch == settled_epoch && validator.epoch_score != 0 {
+                    scores.insert(validator.validator_id, validator.epoch_score);
+                    validator.score_epoch = next_epoch;
+                    validator.epoch_score = 0;
+                }
+            }
+            Ok(scores)
         })
     }
 
@@ -1811,6 +2053,18 @@ impl StakingBook {
             if validator.commission_bps > self.parameters.max_commission_bps {
                 return Err(Error::Invariant("validator commission is out of range"));
             }
+            if validator.signing_window.len()
+                > usize::try_from(self.parameters.downtime_window).map_err(|_| Error::Overflow)?
+                || validator
+                    .signing_window
+                    .iter()
+                    .filter(|signed| **signed)
+                    .count()
+                    != usize::try_from(validator.signed_window_count)
+                        .map_err(|_| Error::Overflow)?
+            {
+                return Err(Error::Invariant("validator signing window is inconsistent"));
+            }
             if let Some(pending) = validator.pending_commission {
                 if pending.commission_bps > self.parameters.max_commission_bps
                     || pending.commission_bps == validator.commission_bps
@@ -2138,6 +2392,15 @@ fn add_u128(target: &mut u128, value: u128) -> Result<()> {
     Ok(())
 }
 
+/// CometBFT's Ed25519 validator address is the first 20 bytes of SHA-256 over
+/// the raw 32-byte consensus public key.
+pub fn consensus_address(consensus_pubkey: &PubKey32) -> ConsensusAddress {
+    let digest = Sha256::digest(consensus_pubkey);
+    let mut address = [0u8; COMETBFT_ADDRESS_BYTES];
+    address.copy_from_slice(&digest[..COMETBFT_ADDRESS_BYTES]);
+    address
+}
+
 fn amount(value: u128) -> Amount {
     Amount::new(value).expect("testnet staking constants and validated arithmetic fit Amount")
 }
@@ -2177,6 +2440,10 @@ impl Writer {
     }
 
     fn u64(&mut self, value: u64) {
+        self.bytes.extend_from_slice(&value.to_be_bytes());
+    }
+
+    fn u128(&mut self, value: u128) {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
 
@@ -2264,6 +2531,14 @@ impl<'a> Reader<'a> {
             self.take(8)?
                 .try_into()
                 .map_err(|_| Error::InvalidEncoding("invalid u64"))?,
+        ))
+    }
+
+    fn u128(&mut self) -> Result<u128> {
+        Ok(u128::from_be_bytes(
+            self.take(16)?
+                .try_into()
+                .map_err(|_| Error::InvalidEncoding("invalid u128"))?,
         ))
     }
 
@@ -3094,5 +3369,112 @@ mod tests {
         assert_eq!(book.validator(&first_id).unwrap().sequence, 1);
         assert_eq!(book.totals().unwrap().commission_assets, amount(7));
         assert!(book.validate().is_ok());
+    }
+
+    #[test]
+    fn actual_commit_power_drives_epoch_score_and_sliding_downtime_jail() {
+        let chain = key(1);
+        let operator = key(2);
+        let validator_id = validator_id(&chain, &operator);
+        let consensus_pubkey = key(3);
+        let mut parameters = StakingParameters::reference_testnet();
+        parameters.downtime_window = 4;
+        parameters.min_signed_bps = 7_500;
+        let mut book = StakingBook::new(chain, parameters).unwrap();
+        book.register_validator(validator_id, operator, consensus_pubkey, 500)
+            .unwrap();
+        let self_bond = open(
+            &mut book,
+            validator_id,
+            key(4),
+            TESTNET_MIN_SELF_BOND_ATOMIC,
+            0,
+            true,
+        );
+        book.activate_pending(&self_bond, 1).unwrap();
+        let power = book.apply_validator_set().unwrap()[0].power;
+        let address = consensus_address(&consensus_pubkey);
+
+        let before_invalid = book.clone();
+        let duplicate = CommitVote {
+            consensus_address: address,
+            power,
+            signed: true,
+        };
+        assert_eq!(
+            book.record_last_commit(0, 2, 20, &[duplicate, duplicate]),
+            Err(Error::DuplicateCommitValidator)
+        );
+        assert_eq!(book, before_invalid);
+        assert_eq!(
+            book.record_last_commit(
+                0,
+                2,
+                20,
+                &[CommitVote {
+                    consensus_address: [99; COMETBFT_ADDRESS_BYTES],
+                    power,
+                    signed: true,
+                }],
+            ),
+            Err(Error::UnknownCommitValidator)
+        );
+        assert_eq!(book, before_invalid);
+
+        for (index, signed) in [true, true, true, false].into_iter().enumerate() {
+            assert!(book
+                .record_last_commit(
+                    0,
+                    u64::try_from(index + 2).unwrap(),
+                    u64::try_from(index + 20).unwrap(),
+                    &[CommitVote {
+                        consensus_address: address,
+                        power,
+                        signed,
+                    }],
+                )
+                .unwrap()
+                .validator_updates
+                .is_empty());
+        }
+        assert_eq!(book.validator(&validator_id).unwrap().signed_bps(), 7_500);
+        assert_eq!(
+            book.validator(&validator_id).unwrap().status,
+            ValidatorStatus::Active
+        );
+
+        let outcome = book
+            .record_last_commit(
+                0,
+                6,
+                24,
+                &[CommitVote {
+                    consensus_address: address,
+                    power,
+                    signed: false,
+                }],
+            )
+            .unwrap();
+        assert_eq!(outcome.observed_validators, BTreeSet::from([validator_id]));
+        assert_eq!(
+            outcome.validator_updates,
+            vec![ConsensusPowerUpdate {
+                consensus_pubkey,
+                power: 0,
+            }]
+        );
+        let validator = book.validator(&validator_id).unwrap();
+        assert_eq!(validator.status, ValidatorStatus::Jailed);
+        assert_eq!(validator.signed_bps(), 5_000);
+        assert_eq!(validator.jailed_at_height, Some(6));
+        assert_eq!(validator.jailed_at_time_seconds, Some(24));
+        let decoded =
+            Validator::decode_persistent(&validator.encode_persistent().unwrap()).unwrap();
+        assert_eq!(decoded, *validator);
+
+        let scores = book.take_epoch_scores(0).unwrap();
+        assert_eq!(scores[&validator_id], u128::from(power) * 3);
+        assert_eq!(book.validator(&validator_id).unwrap().score_epoch, 1);
+        assert_eq!(book.validator(&validator_id).unwrap().epoch_score, 0);
     }
 }
