@@ -23,6 +23,6 @@ BIT 是一条以私密支付和原生质押为核心的独立单币 PoS 链。�
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-baseline-checks.ps1
 ```
 
-如已安装 `just`，也可运行 `just baseline`。基线同时启动四个本机 CometBFT/真实 BIT 应用进程验证 H+2、JMT 重启和投票权恢复；主报告写入 `reports/development-baseline.json`，网络证据写入 `feasibility/reports/bit-app-network-result.json`。Android 按用户要求跳过，基线命令不会访问手机。
+如已安装 `just`，也可运行 `just baseline`。基线同时启动四个本机 CometBFT/真实 BIT 应用进程，注入由临时测试验证人密钥签出的真实重复投票证据，并验证 H+2、罚没 Burn、JMT 重启和投票权恢复；主报告写入 `reports/development-baseline.json`，网络证据写入 `feasibility/reports/bit-app-network-result.json`。Android 按用户要求跳过，基线命令不会访问手机。
 
-当前还没有生产 execution/compact 摘要编码、正式节点命令、独立 signer、钱包或主网发布能力。真实四节点 CometBFT 空块实验已验证 H+2、JMT 重启、app hash 一致、ICS23 查询与投票权停机/恢复，但还没有注入真实双签证据或多节点真实 Transfer/退出。处罚链路已在状态集成测试中覆盖规范去重、永久 tombstone、P/X Burn、全局每块上限、FinalizeBlock/Commit 中断重放和逐块重启恢复。`HALT_NO_SAFE_VALIDATOR_SET` 现在会先写入带校验和的独立停签记录再停止 ABCI，重启必须检查记录并用精确摘要确认归档；危险区块重放仍会再次停机。`supply/audit_snapshot` 规范编码、JMT/RocksDB 磁盘故障注入、快照导入导出、历史证明和长期增长测试仍待完成；`config/mainnet-inputs.template.json` 保持阻断状态。
+当前还没有生产 execution/compact 摘要编码、正式节点命令、独立 signer、钱包或主网发布能力。真实四节点 CometBFT 实验已验证 H+2、JMT 重启、app hash 一致、ICS23 查询、投票权停机/恢复，以及真实重复投票证据进入区块后验证人按 H+2 移除、罚没计入 Burn、四个应用得到相同证据记录和状态根；多节点真实 Transfer/退出仍待接入。状态集成测试继续覆盖 P/X 罚没、规范去重、永久 tombstone、全局每块上限、FinalizeBlock/Commit 中断重放和逐块重启恢复。`HALT_NO_SAFE_VALIDATOR_SET` 会先写入带校验和的独立停签记录再停止 ABCI，重启必须检查记录并用精确摘要确认归档；危险区块重放仍会再次停机。`supply/audit_snapshot` 规范编码、JMT/RocksDB 磁盘故障注入、快照导入导出、历史证明和长期增长测试仍待完成；`config/mainnet-inputs.template.json` 保持阻断状态。

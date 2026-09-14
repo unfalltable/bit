@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 COMET = ROOT / ".tools/bin/cometbft.exe"
 GO = ROOT / ".tools/go/bin/go.exe"
+EVIDENCE_INJECTOR = ROOT / ".tools/bin/bit-evidence-injector.exe"
 TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", REPO / "target"))
 APP = TARGET_DIR / "debug/examples/comet_network_probe.exe"
 RUN = ROOT / "runtime" / (
@@ -139,6 +140,66 @@ def validator_powers(height_value):
     }
 
 
+def state_query(index, key):
+    query_path = urllib.parse.quote('"/bit/state/key"')
+    query_data = "0x" + key.encode("utf-8").hex()
+    response = rpc(
+        index,
+        f"abci_query?path={query_path}&data={query_data}&prove=true",
+    )["response"]
+    if int(response["code"]) != 0 or not response.get("proofOps", {}).get("ops"):
+        raise AssertionError(f"proved state query failed for {key} on node {index}")
+    value = response.get("value", "")
+    return base64.b64decode(value) if value else b""
+
+
+def domain_hash(domain, value):
+    return hashlib.sha256(domain + len(value).to_bytes(8, "big") + value).digest()
+
+
+def bit_evidence_hash(chain_id, evidence):
+    chain_context = domain_hash(
+        b"BIT-COMET-NETWORK-PROBE-CHAIN-V1", chain_id.encode("utf-8")
+    )
+    payload = b"".join(
+        [
+            b"BIT-EVIDENCE-V1",
+            chain_context,
+            b"\x01",
+            bytes.fromhex(evidence["validator_address"]),
+            int(evidence["validator_power"]).to_bytes(8, "big"),
+            int(evidence["infraction_height"]).to_bytes(8, "big"),
+            int(evidence["infraction_time_seconds"]).to_bytes(8, "big"),
+            int(evidence["infraction_time_nanos"]).to_bytes(4, "big"),
+            int(evidence["total_voting_power"]).to_bytes(8, "big"),
+        ]
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
+def wait_evidence_inclusion(first_height, validator_address, seconds=60):
+    address = bytes.fromhex(validator_address)
+    address_markers = {
+        validator_address.lower(),
+        base64.b64encode(address).decode("ascii").lower(),
+    }
+    deadline = time.monotonic() + seconds
+    checked_through = first_height - 1
+    while time.monotonic() < deadline:
+        latest = height(0)
+        for block_height in range(checked_through + 1, latest + 1):
+            block = rpc(0, f"block?height={block_height}")["block"]
+            evidence = block.get("evidence", {}).get("evidence", [])
+            encoded_evidence = json.dumps(evidence, separators=(",", ":")).lower()
+            if evidence and any(
+                marker in encoded_evidence for marker in address_markers
+            ):
+                return block_height
+        checked_through = max(checked_through, latest)
+        time.sleep(0.3)
+    raise TimeoutError(f"evidence was not included after height {first_height}")
+
+
 def configure_network():
     command(
         [
@@ -211,7 +272,12 @@ def configure_network():
 
 
 def main():
-    if not APP.is_file() or not COMET.is_file() or not GO.is_file():
+    if (
+        not APP.is_file()
+        or not COMET.is_file()
+        or not GO.is_file()
+        or not EVIDENCE_INJECTOR.is_file()
+    ):
         raise RuntimeError("build the probe and bootstrap CometBFT before running")
     comet_self_reported_version = command([COMET, "version"])
     comet_build_info = command([GO, "version", "-m", COMET])
@@ -259,24 +325,82 @@ def main():
     if len(app_hashes) != 1:
         raise AssertionError(f"application hash divergence at {common_height}")
 
-    query_path = urllib.parse.quote('"/bit/state/key"')
-    query_data = "0x" + b"meta/height".hex()
-    proof_query = rpc(
-        0,
-        f"abci_query?path={query_path}&data={query_data}&prove=true",
-    )["response"]
-    if int(proof_query["code"]) != 0 or not proof_query.get("proofOps", {}).get("ops"):
+    if not state_query(0, "meta/height"):
         raise AssertionError("latest meta/height proof was not returned")
 
+    genesis_path = RUN / "nodes/node0/config/genesis.json"
+    genesis = json.loads(genesis_path.read_text(encoding="utf-8"))
+    evidence_height = min(height(index) for index in range(4)) - 2
+    first_possible_inclusion = height(0) + 1
+    evidence = json.loads(
+        command(
+            [
+                EVIDENCE_INJECTOR,
+                "--rpc",
+                "http://127.0.0.1:29701",
+                "--genesis",
+                genesis_path,
+                "--priv-validator-key",
+                RUN / "nodes/node0/config/priv_validator_key.json",
+                "--height",
+                evidence_height,
+            ]
+        )
+    )
+    if int(evidence["infraction_height"]) != evidence_height:
+        raise AssertionError("evidence injector returned the wrong height")
+    evidence_inclusion_height = wait_evidence_inclusion(
+        first_possible_inclusion, evidence["validator_address"]
+    )
+    wait_height(evidence_inclusion_height + 3)
+
+    validator_address = evidence["validator_address"].lower()
+    before_removal = rpc(
+        0, f"validators?height={evidence_inclusion_height + 1}&per_page=100"
+    )["validators"]
+    after_removal = rpc(
+        0, f"validators?height={evidence_inclusion_height + 2}&per_page=100"
+    )["validators"]
+    if not any(
+        validator["address"].lower() == validator_address
+        for validator in before_removal
+    ):
+        raise AssertionError("Byzantine validator disappeared before H+2")
+    if any(
+        validator["address"].lower() == validator_address
+        for validator in after_removal
+    ):
+        raise AssertionError("Byzantine validator was not removed at H+2")
+    if len(after_removal) != 3:
+        raise AssertionError(f"unexpected post-slash validator count: {len(after_removal)}")
+
+    bit_hash = bit_evidence_hash(genesis["chain_id"], evidence)
+    evidence_values = [
+        state_query(index, f"staking/evidence/{bit_hash}") for index in range(4)
+    ]
+    if not evidence_values[0] or len(set(evidence_values)) != 1:
+        raise AssertionError("proved BIT evidence records differ across applications")
+    burned_values = [state_query(index, "supply/burned") for index in range(4)]
+    if len(set(burned_values)) != 1 or int.from_bytes(burned_values[0], "big") <= 0:
+        raise AssertionError("slashed Burn is zero or differs across applications")
+    post_evidence_height = evidence_inclusion_height + 2
+    post_evidence_app_hashes = {
+        rpc(index, f"block?height={post_evidence_height}")["block"]["header"][
+            "app_hash"
+        ].lower()
+        for index in range(4)
+    }
+    if len(post_evidence_app_hashes) != 1:
+        raise AssertionError("application hash diverged after evidence execution")
+
     stop("node2")
-    stop("node3")
     time.sleep(2)
     halted_height = height(0)
     time.sleep(3)
     if height(0) != halted_height:
         raise AssertionError("chain advanced without more than two-thirds voting power")
     spawn("node2", [COMET, "start", "--home", RUN / "nodes/node2"])
-    recovered = wait_height(halted_height + 4, indices=[0, 1, 2])
+    recovered = wait_height(halted_height + 4)
 
     return {
         "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, staking and emission",
@@ -286,6 +410,9 @@ def main():
             "cometbft_self_reported": comet_self_reported_version,
             "cometbft_sha256": hashlib.sha256(COMET.read_bytes()).hexdigest(),
             "application_sha256": hashlib.sha256(APP.read_bytes()).hexdigest(),
+            "evidence_injector_sha256": hashlib.sha256(
+                EVIDENCE_INJECTOR.read_bytes()
+            ).hexdigest(),
         },
         "checks": {
             "validator_powers_h6_h7_h8": powers,
@@ -295,13 +422,24 @@ def main():
             "same_app_hash_height": common_height,
             "same_app_hash": app_hashes.pop(),
             "latest_ics23_proof": True,
+            "real_duplicate_vote_evidence": {
+                **evidence,
+                "inclusion_height": evidence_inclusion_height,
+                "bit_evidence_hash": bit_hash,
+                "validator_present_at_h_plus_one": True,
+                "validator_removed_at_h_plus_two": True,
+                "post_evidence_validator_count": len(after_removal),
+                "burned_atomic": str(int.from_bytes(burned_values[0], "big")),
+                "same_app_hash": post_evidence_app_hashes.pop(),
+                "ics23_evidence_membership": True,
+            },
             "quorum_halt_height": halted_height,
             "quorum_recovery_heights": recovered,
         },
         "limitations": [
             "accelerated five-block epochs and deterministic probe genesis",
             "temporary domain-separated request digests pending SPEC-03",
-            "empty blocks; real transfer remains covered by in-process and TCP tests",
+            "empty user-transaction blocks; real transfer remains covered by in-process and TCP tests",
             "upstream CometBFT FilePV signer, not the future independent BIT signer",
             "same physical host, not independent failure domains",
         ],
@@ -321,7 +459,9 @@ if __name__ == "__main__":
         (RUN / "result.json").write_text(
             json.dumps(result, indent=2) + "\n", encoding="utf-8"
         )
-        print("Real BIT app four-node H+2, JMT restart and quorum checks passed")
+        print(
+            "Real BIT app four-node H+2, duplicate-vote slashing, JMT restart and quorum checks passed"
+        )
     except Exception as error:
         failure = {
             "status": "FAIL",
@@ -337,7 +477,9 @@ if __name__ == "__main__":
             )
         raise
     finally:
-        for name in list(PROCESSES):
+        for name in [name for name in list(PROCESSES) if name.startswith("node")]:
+            stop(name)
+        for name in [name for name in list(PROCESSES) if name.startswith("app")]:
             stop(name)
         for handle in HANDLES:
             handle.close()

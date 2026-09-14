@@ -6,6 +6,8 @@ New-Item -ItemType Directory -Force -Path $bitReports | Out-Null
 $env:CARGO_TARGET_DIR = Join-Path $bitRoot 'feasibility\target'
 $env:RAYON_NUM_THREADS = '4'
 $env:CARGO_BUILD_JOBS = '1'
+$env:GOMODCACHE = Join-Path $bitRoot 'feasibility\.tools\go-mod-cache'
+$env:GOCACHE = Join-Path $bitRoot 'feasibility\.tools\go-cache'
 
 $bitChecks = @()
 function Invoke-BitCheck {
@@ -32,6 +34,7 @@ try {
     Invoke-BitCheck 'clippy' 'cargo' @('clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings')
     Invoke-BitCheck 'rust-unit' 'cargo' @('test', '--workspace', '--locked')
     Invoke-BitCheck 'python-oracle' 'py' @('-B', '-m', 'unittest', 'discover', '-s', 'reference', '-p', 'test_*.py', '-v')
+    Invoke-BitCheck 'comet-evidence-build' (Join-Path $bitRoot 'feasibility\.tools\go\bin\go.exe') @('-C', (Join-Path $bitRoot 'feasibility\evidence-injector'), 'build', '-trimpath', '-o', (Join-Path $bitRoot 'feasibility\.tools\bin\bit-evidence-injector.exe'), '.')
     Invoke-BitCheck 'comet-app-build' 'cargo' @('build', '-p', 'bit-app', '--example', 'comet_network_probe', '--locked')
     Invoke-BitCheck 'comet-app-network' 'py' @('-B', 'feasibility/scripts/run_bit_app_network.py')
 } finally {
@@ -83,6 +86,9 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'crates/bit-app/src/safety.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\src\safety.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/examples/comet_network_probe.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\examples\comet_network_probe.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-app/examples/safety_halt_admin.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-app\examples\safety_halt_admin.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'feasibility/evidence-injector/go.mod'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\evidence-injector\go.mod') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'feasibility/evidence-injector/go.sum'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\evidence-injector\go.sum') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'feasibility/evidence-injector/main.go'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\evidence-injector\main.go') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/run_bit_app_network.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\run_bit_app_network.py') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/rust_env.ps1'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\rust_env.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/scripts/bootstrap_tools.py'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\scripts\bootstrap_tools.py') -Algorithm SHA256).Hash.ToLowerInvariant() }

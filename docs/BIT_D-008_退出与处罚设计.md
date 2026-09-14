@@ -1,6 +1,6 @@
 # BIT D-008 退出与处罚设计
 
-状态：`IN_PROGRESS`。Unbond、ClaimExit、CometBFT Byzantine evidence、永久 tombstone、按比例 Burn 和可恢复的有界 SlashJob 已进入正式状态与 ABCI 链路；多节点真实违规注入、停链安全边界和处罚过程故障注入仍待完成。
+状态：`IN_PROGRESS`。Unbond、ClaimExit、CometBFT Byzantine evidence、永久 tombstone、按比例 Burn 和可恢复的有界 SlashJob 已进入正式状态与 ABCI 链路；真实重复投票已在四节点 CometBFT 网络完成端到端注入，处罚过程底层存储故障注入和极端停链处置规程仍待完成。
 
 ## 1. 退出对象与标识
 
@@ -51,6 +51,8 @@ SlashJob 在证据接受时冻结当时已有的 validator-local cohort 范围�
 
 测试覆盖池份额退出、尾差、双成熟边界、两类费用、epoch 交错、证据字段/责任/power 校验、两个年龄维度的单独超限与同时超限、永久 tombstone、重复证据、供应守恒、全局处理上限、跨块游标、FinalizeBlock 已 prepare 但 Commit 前中断后的确定性重放、每块关闭并重启后的继续执行，以及 evidence/job/cohort 的 ICS23 证明。真实 Unbond/ClaimExit 信封继续使用 Groth16、PositionOwner Ed25519、binding 和正式交易分发入口。
 
+四节点集成测试另外使用 CometBFT v0.38.23 原生类型和临时 FilePV 密钥构造两个同高度、同轮次、同类型但 BlockID 冲突的已签名 prevote，并通过 `/broadcast_evidence` 提交。测试从区块读取与目标验证人地址匹配的证据，确认该验证人在包含证据后的 H+1 仍存在、H+2 被移除，四个独立应用的 `staking/evidence/<hash>` ICS23 查询值完全相同、`supply/burned` 非零且相同，并在处罚后只保留三个验证人。随后停止其中一个仍有投票权的节点，剩余 power 恰为三分之二时链停止，节点恢复后四节点继续出块。
+
 ## 5. 最后安全验证人停签记录
 
 若 downtime jail、epoch 集合选择或有效重大证据产生的更新会把非空实际集合变为空，候选区块继续返回 `HALT_NO_SAFE_VALIDATOR_SET`，不会提交 tombstone、Burn 或集合日程的部分状态。ABCI 在停止请求前把触发上下文写到状态目录旁的 `<state-dir>.safety-halt-v1`。v1 记录绑定 chain context、最后已提交高度和 app hash、尝试高度/区块 hash/链时间、`next_validators_hash` 以及按规范 hash 排序去重后的完整 evidence 字段；文件末尾带域分离 SHA-256 校验和。
@@ -68,7 +70,6 @@ cargo run -p bit-app --example safety_halt_admin -- acknowledge <STATE_DIR> <REC
 
 ## 6. 下一切片
 
-1. 把真实重复投票或轻客户端攻击证据注入多节点 CometBFT 场景，核对四个独立应用的 app hash、验证人移除和 Burn 一致。
-2. 对 JMT/RocksDB 处罚提交增加磁盘满、fsync 失败和底层批次损坏故障注入；停签日志本身已覆盖临时文件恢复、损坏、路径不可写、冲突防覆盖和精确摘要确认。
-3. 为需要人工修复最后验证人集合的极端网络冻结正式治理/升级恢复规程；现有确认操作不会修改共识状态或跳过证据。
-4. 接入公开事件、gateway/indexer 和钱包的“处罚结算中”状态。
+1. 对 JMT/RocksDB 处罚提交增加磁盘满、fsync 失败和底层批次损坏故障注入；停签日志本身已覆盖临时文件恢复、损坏、路径不可写、冲突防覆盖和精确摘要确认。
+2. 为需要人工修复最后验证人集合的极端网络冻结正式治理/升级恢复规程；现有确认操作不会修改共识状态或跳过证据。
+3. 接入公开事件、gateway/indexer 和钱包的“处罚结算中”状态。

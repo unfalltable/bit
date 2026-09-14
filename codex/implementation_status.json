@@ -3,8 +3,8 @@
   "scope": "active BIT 1.2 implementation; docs/solo remains historical reference",
   "overall": "IN_PROGRESS",
   "completion_estimate": {
-    "full_launch_percent_range": [18, 22],
-    "chain_core_percent": 60,
+    "full_launch_percent_range": [19, 23],
+    "chain_core_percent": 62,
     "basis": "implemented and tested code versus D-001 through D-030, including product, operations, independent review, release evidence, and mainnet external inputs",
     "confidence": "MEDIUM_FOR_CURRENT_CHAIN_SLICES_LOW_FOR_FULL_LAUNCH"
   },
@@ -61,7 +61,7 @@
       "status": "IN_PROGRESS",
       "implemented": ["shared CheckTx/PrepareProposal/ProcessProposal/FinalizeBlock execution", "strict InitChain", "last-commit and next-validator-hash checks", "H+2 ValidatorUpdates", "FinalizeBlock Byzantine evidence normalization", "latest ICS23 query", "durable last-validator safety halt journal and digest-gated acknowledgement", "ABCI TCP roundtrip", "four-node CometBFT application probe"],
       "tested_by": ["reports/development-baseline.json", "feasibility/reports/bit-app-network-result.json"],
-      "remaining": ["production execution and compact digest provider", "snapshot ABCI", "historical-height queries", "formal node command", "multi-node private transaction and evidence scenarios"]
+      "remaining": ["production execution and compact digest provider", "snapshot ABCI", "historical-height queries", "formal node command", "multi-node private transaction scenarios"]
     },
     {
       "id": "D-006",
@@ -83,9 +83,9 @@
       "id": "D-008",
       "name": "退出与处罚",
       "status": "IN_PROGRESS",
-      "implemented": ["Unbond cohorts and non-transferable tickets", "dual height/time maturity", "ClaimExit", "three persistent exit queues", "per-height validator responsibility history", "Comet duplicate-vote and light-client evidence validation", "canonical evidence deduplication", "permanent tombstone", "active pool and exposed exit cohort Burn", "globally bounded persistent SlashJob", "freeze during settlement", "prepare/commit interruption replay", "durable HALT_NO_SAFE_VALIDATOR_SET evidence and startup lock", "per-block restart recovery and ICS23 proofs"],
-      "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["real multi-node evidence injection", "JMT/RocksDB disk-full, fsync, and batch-corruption fault injection", "coordinated last-validator set remediation procedure", "gateway/indexer/wallet penalty status"]
+      "implemented": ["Unbond cohorts and non-transferable tickets", "dual height/time maturity", "ClaimExit", "three persistent exit queues", "per-height validator responsibility history", "Comet duplicate-vote and light-client evidence validation", "canonical evidence deduplication", "permanent tombstone", "active pool and exposed exit cohort Burn", "globally bounded persistent SlashJob", "freeze during settlement", "prepare/commit interruption replay", "durable HALT_NO_SAFE_VALIDATOR_SET evidence and startup lock", "per-block restart recovery and ICS23 proofs", "real four-node duplicate-vote injection with H+2 removal and consistent Burn"],
+      "tested_by": ["reports/development-baseline.json", "feasibility/reports/bit-app-network-result.json"],
+      "remaining": ["JMT/RocksDB disk-full, fsync, and batch-corruption fault injection", "coordinated last-validator set remediation procedure", "gateway/indexer/wallet penalty status"]
     }
   ],
   "not_started_from": "D-009",
