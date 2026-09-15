@@ -1,6 +1,6 @@
 # BIT D-008 退出与处罚设计
 
-状态：`IN_PROGRESS`。Unbond、ClaimExit、CometBFT Byzantine evidence、永久 tombstone、按比例 Burn 和可恢复的有界 SlashJob 已进入正式状态与 ABCI 链路；真实重复投票已在四节点 CometBFT 网络完成端到端注入，处罚过程底层存储故障注入和极端停链处置规程仍待完成。
+状态：`IN_PROGRESS`。Unbond、ClaimExit、CometBFT Byzantine evidence、永久 tombstone、按比例 Burn 和可恢复的有界 SlashJob 已进入正式状态与 ABCI 链路；真实退出和真实重复投票均已在四节点 CometBFT 网络完成端到端验证，处罚过程底层存储故障注入和极端停链处置规程仍待完成。
 
 ## 1. 退出对象与标识
 
@@ -49,7 +49,9 @@ ABCI v0.38 `FinalizeBlock.misbehavior` 只接受重复投票和轻客户端攻�
 
 SlashJob 在证据接受时冻结当时已有的 validator-local cohort 范围，保存结束键、当前游标、已处理数量及 P/X 累计罚没。所有未完成任务按 validator_id 和 exit_epoch/cohort_id 稳定排序，共享每块最多 `slash_cohorts_per_block` 项的全局上限。游标也跨过不在责任范围或已经成熟的记录，避免重复扫描；任务未完成时拒绝相关 Unbond 和 ClaimExit，pending 激活会转为可退款状态。任务、被修改 cohort、供应 Burn、证据记录和集合日程在同一个 JMT/RocksDB 批次提交。
 
-测试覆盖池份额退出、尾差、双成熟边界、两类费用、epoch 交错、证据字段/责任/power 校验、两个年龄维度的单独超限与同时超限、永久 tombstone、重复证据、供应守恒、全局处理上限、跨块游标、FinalizeBlock 已 prepare 但 Commit 前中断后的确定性重放、损坏 RocksDB WriteBatch 的写前拒绝、同步写入后但内存快照发布前的重启恢复、每块关闭并重启后的继续执行，以及 evidence/job/cohort 的 ICS23 证明。真实 Unbond/ClaimExit 信封继续使用 Groth16、PositionOwner Ed25519、binding 和正式交易分发入口。
+测试覆盖池份额退出、尾差、双成熟边界、两类费用、epoch 交错、证据字段/责任/power 校验、两个年龄维度的单独超限与同时超限、永久 tombstone、重复证据、供应守恒、全局处理上限、跨块游标、FinalizeBlock 已 prepare 但 Commit 前中断后的确定性重放、损坏 RocksDB WriteBatch 的写前拒绝、同步写入后但内存快照发布前的重启恢复、每块关闭并重启后的继续执行，以及 evidence/job/cohort 的 ICS23 证明。真实 Unbond/ClaimExit 信封使用 Groth16 Output 证明、PositionOwner Ed25519、binding 和正式交易分发入口。
+
+四节点退出场景在最后一个测试验证人的普通委托中加入公开测试控制键。Unbond 从释放值支付费用，并用一笔零额 Output 提供非单位元 balance blinding；该 Output 仍生成和验证真实 Groth16 证明、加密 memo 与 binding 签名，但不增加 Q。测试在非 epoch 结算块精确核对 `P -= gross; X += gross-fee; F += fee`，并在四个应用上证明 ticket、cohort、交易记录和 TCT 根。cohort 达到暴露截止并进入 Unbonding 后，测试立即成对重启一个应用与 CometBFT 进程，复核旧高度证明，再同时等待高度和链时间成熟。ClaimExit 随后用另一份真实 Groth16 Output 将 `X -= release; Q += release-fee; F += fee`，四节点核对已领取票据、耗尽 cohort、树根和 app hash；另一笔密码学有效且 tx id 不同的同 ticket 交易会进入 BIT CheckTx，并按已领取状态拒绝。精确高度、金额和哈希写入 `feasibility/reports/bit-app-network-result.json`。
 
 四节点集成测试另外使用 CometBFT v0.38.23 原生类型和临时 FilePV 密钥构造两个同高度、同轮次、同类型但 BlockID 冲突的已签名 prevote，并通过 `/broadcast_evidence` 提交。测试从区块读取与目标验证人地址匹配的证据，确认该验证人在包含证据后的 H+1 仍存在、H+2 被移除，四个独立应用的 `staking/evidence/<hash>` ICS23 查询值完全相同、`supply/burned` 非零且相同，并在处罚后只保留三个验证人。随后停止其中一个仍有投票权的节点，剩余 power 恰为三分之二时链停止，节点恢复后四节点继续出块。
 

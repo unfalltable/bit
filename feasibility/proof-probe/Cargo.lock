@@ -462,6 +462,7 @@ dependencies = [
  "anyhow",
  "bit-emission",
  "bit-shielded",
+ "bit-staking",
  "bit-transaction",
  "bit-types",
  "decaf377",
@@ -495,6 +496,17 @@ dependencies = [
  "penumbra-sdk-proto",
  "penumbra-sdk-shielded-pool",
  "penumbra-sdk-tct",
+]
+
+[[package]]
+name = "bit-staking"
+version = "0.1.0"
+dependencies = [
+ "bit-types",
+ "primitive-types",
+ "sha2 0.10.9",
+ "tendermint",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

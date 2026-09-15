@@ -8,6 +8,7 @@ publish = false
 anyhow = "1.0"
 bit-shielded = { path = "../../crates/bit-shielded" }
 bit-emission = { path = "../../crates/bit-emission" }
+bit-staking = { path = "../../crates/bit-staking" }
 bit-transaction = { path = "../../crates/bit-transaction" }
 bit-types = { path = "../../crates/bit-types" }
 decaf377 = "0.10.1"

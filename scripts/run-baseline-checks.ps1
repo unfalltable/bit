@@ -68,6 +68,7 @@ try {
     Invoke-BitCheck 'genesis-node-smoke' 'py' @('-B', 'scripts/run-genesis-node-smoke.py')
     Invoke-BitCheck 'state-sync-network' 'py' @('-B', 'scripts/run-state-sync-smoke.py')
     Invoke-BitCheck 'comet-app-build' 'cargo' @('build', '-p', 'bit-app', '--example', 'comet_network_probe', '--locked')
+    Invoke-BitCheck 'exit-fixture-build' 'cargo' @('build', '--manifest-path', 'feasibility/proof-probe/Cargo.toml', '--bin', 'bit-exit-fixture', '--release', '--locked')
     Invoke-BitCheck 'comet-app-network' 'py' @('-B', 'feasibility/scripts/run_bit_app_network.py')
 } finally {
     Pop-Location
@@ -159,6 +160,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'feasibility/proof-probe/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\proof-probe\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/proof-probe/Cargo.lock'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\proof-probe\Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/proof-probe/src/main.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\proof-probe\src\main.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'feasibility/proof-probe/src/bin/bit-exit-fixture.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\proof-probe\src\bin\bit-exit-fixture.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/reports/proof-stdout.json'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\reports\proof-stdout.json') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/evidence-injector/go.mod'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\evidence-injector\go.mod') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'feasibility/evidence-injector/go.sum'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'feasibility\evidence-injector\go.sum') -Algorithm SHA256).Hash.ToLowerInvariant() },

@@ -1,17 +1,18 @@
 {
-  "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer and ClaimGenesis, canonical block artifacts, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260914T234003867828",
+  "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, ClaimGenesis, Unbond and ClaimExit, canonical block artifacts, staking and emission",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260915T002011732249",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "application_sha256": "81371c2c6993be1b68427b5d11669abaa6a1627b537156e0ba21efcb8db8c19f",
-    "evidence_injector_sha256": "4dacb6a5f6db5c1ed5f8adbe0a1006b8a137666a738d660ad11853a6249e5d77"
+    "application_sha256": "bb6574234ab8046e628915ac88d12d641cc6f612610a83ecf6882d67a963bcc9",
+    "exit_fixture_sha256": "931fe7cd4c184510acff0197f213c3635b6bd928a7ca17470ace723c15766ab8",
+    "evidence_injector_sha256": "cf031dbfae7589668d91d25b221e3d62a600e1a9533c7edce0f418740cd71da8"
   },
   "checks": {
     "real_transfer": {
       "fixture_source_sha256": "11ccbd9c637aedfaea45d9e95e0bbe6f5f75060a1eced9d11d95a645170e8f00",
-      "height": 11,
+      "height": 12,
       "index": 0,
       "canonical_envelope_bytes": 2762,
       "tx_id": "451fc1a9de652601ec269ceb5245af5d17aff0b2dbb52b33a83379259ab389b4",
@@ -25,15 +26,15 @@
       ],
       "transaction_record_proved_on_nodes": 4,
       "nullifier_records_proved_on_nodes": 4,
-      "post_transfer_tree_root": "db49efed5b9ac98ddc00041fb844e89c4db2c4814c09aaa65fb2a5a0a1fc9a05",
-      "post_transfer_app_hash": "3bd1ace4ccf46c0ccb60c9a7be35e5a794df4886d46e4b3ccde1bbef7ecd30f5"
+      "post_transfer_tree_root": "b47b652d8693b457cb7070edcb56b69ffb85108ddef04c78fbb2f6c6623e7008",
+      "post_transfer_app_hash": "f365847296429dac5a840e4b0971ea48db30c50eca717655a93dac44b319cf26"
     },
     "canonical_block_artifacts": {
-      "height": 11,
-      "execution_hash": "59b1d89ed98af373ff2f017c98be92cda6e37d35c90cc87b9f48441a79cec30c",
-      "compact_hash": "d5933f1e97a0a83f2984ff1f4ac99de89f99726c6264418019dc758ff25de29e",
-      "execution_bytes": 1219,
-      "compact_bytes": 2559,
+      "height": 12,
+      "execution_hash": "19da54b243f70c2b596a376442b562b7793ff4d82e1c186ce3ea57ca382c624a",
+      "compact_hash": "c592de54a4a158f57048d3672c2ef6324686ac3a0a70d5f09937d5b7d8ccea24",
+      "execution_bytes": 237,
+      "compact_bytes": 1577,
       "state_proofs_and_abci_event_match_on_nodes": 4,
       "immutable_archives_match_on_nodes": 4,
       "archive_restart_readback": true,
@@ -42,7 +43,7 @@
     },
     "canonical_supply_audit": {
       "canonical_bytes": 309,
-      "sha256": "1ba362517ae30213f0a5048e88b2839c5f2f2193a054414d33d0d0ed80792102",
+      "sha256": "49c4cc975f8206385a1fd26a0153d2bf9a35356b94e5b66fea2e8c68eca97c7e",
       "state_proved_on_nodes": 4
     },
     "claim_genesis": {
@@ -62,8 +63,8 @@
         "shielded": "99000000",
         "fees": "1000000"
       },
-      "post_claim_tree_root": "b39377daa726732f708837f694f507e7aeb3371bf3c20177e80a3c2110c34110",
-      "post_claim_app_hash": "e71f89b9d28e70893dedcae9a204bfe0fee45aa454672dca2868cf764ff7a0ad",
+      "post_claim_tree_root": "fe07334979e69253baf67e099b63cb54c3c1f8ef16eac4584d839330b143ff0e",
+      "post_claim_app_hash": "dcb948caa8ac2fea11ad357b9acda67d07e2ef3ca7375c0f8b66b75361579c8b",
       "distinct_spent_claim_replay": {
         "tx_id": "8f7600288854752666c464e9fab4bfc65103bcc36b3d2d235ffb91e2e0cf651d",
         "check_tx_code": 12,
@@ -71,68 +72,145 @@
       },
       "historical_proof_after_restart": true
     },
+    "real_exit": {
+      "unbond_height": 23,
+      "unbond_index": 0,
+      "unbond_tx_id": "c605575688acb9a6e290db813d5fe677aa20a16f6c22578423e2d0eb8750c143",
+      "claim_exit_height": 39,
+      "claim_exit_index": 0,
+      "claim_exit_tx_id": "98ba6debeb0ec5e9668b8f03b417874a5ac3d36f1b91d93386c9bdd12d9eb19a",
+      "owner_pubkey": "8ca63145907a2e6c5fb3dc0791c0189b8252da3e4143704b3b2ca4e526f25dd1",
+      "position_id": "cc24ba013ee4470668805f2f5b5a1a8d6a9dcf921f55ab7853d48e45ae84352f",
+      "ticket_id": "8f75af2e045ae1d6b4bcc07753f7c94754c8e989efc91b8ef466b2308da26035",
+      "cohort_id": "ec484b80c8bff63724b749fdc84e945eba2444a88b8762987bf17fefe4d44a65",
+      "shares_atomic": "5000000000",
+      "gross_atomic": "5569868542857",
+      "exit_release_atomic": "5569867542857",
+      "unbond_fee_atomic": "1000000",
+      "claim_exit_fee_atomic": "1000000",
+      "claim_output_atomic": "5569866542857",
+      "zero_value_unbond_output_commitment": "983962a1afb90e669becd8f427d63d5db9afeb3c25d26a305794978a767e440d",
+      "claim_output_commitments": [
+        "3f720f6a33bf5efe94fe7960f80611aa2a8a73331191c401165117b24143ae0e"
+      ],
+      "pending_cohort": {
+        "cohort_id": "ec484b80c8bff63724b749fdc84e945eba2444a88b8762987bf17fefe4d44a65",
+        "validator_id": "d74d8afbcb0efed60737787b01951ed5e866931b5b5401d04412f37d70e0a5b5",
+        "exit_epoch": 4,
+        "assets_atomic": 5569867542857,
+        "total_units_atomic": 5569867542857,
+        "exposure_end_height": 27,
+        "exposure_end_time_seconds": null,
+        "maturity_time_seconds": null,
+        "maturity_height": 35,
+        "status": 0
+      },
+      "mature_cohort": {
+        "cohort_id": "ec484b80c8bff63724b749fdc84e945eba2444a88b8762987bf17fefe4d44a65",
+        "validator_id": "d74d8afbcb0efed60737787b01951ed5e866931b5b5401d04412f37d70e0a5b5",
+        "exit_epoch": 4,
+        "assets_atomic": 5569867542857,
+        "total_units_atomic": 5569867542857,
+        "exposure_end_height": 27,
+        "exposure_end_time_seconds": 1789431647,
+        "maturity_time_seconds": 1789431655,
+        "maturity_height": 35,
+        "status": 2
+      },
+      "unbond_container_deltas": {
+        "stake": "-5569868542857",
+        "exits": "5569867542857",
+        "shielded": "0",
+        "fees": "1000000"
+      },
+      "claim_exit_container_deltas": {
+        "stake": "0",
+        "exits": "-5569867542857",
+        "shielded": "5569866542857",
+        "fees": "1000000"
+      },
+      "unbonding_restart_height": 27,
+      "unbonding_restart_resumed_heights": [
+        30,
+        30,
+        30,
+        30
+      ],
+      "output_proofs_verified": true,
+      "position_owner_authorizations_verified": true,
+      "binding_signatures_verified": true,
+      "transaction_ticket_and_cohort_records_proved_on_nodes": 4,
+      "historical_pending_and_claimed_records_after_restart": true,
+      "post_claim_exit_tree_root": "d1fa30bca6bd8ad9130b372dd4067413e96dde7f8cca35883b2a7bd3ed044c05",
+      "post_claim_exit_app_hash": "b57b5dcf9ae78ca7a0351d0b3b3b368a61a7a006dd450df0465ea780e589ae23",
+      "distinct_claimed_ticket_replay": {
+        "tx_id": "4764211e8b7f651b1bf6fac9ccc7b06cf0e1d3881f213651fb5f7258f25186a8",
+        "check_tx_code": 11,
+        "rejected_by_bit_app": true
+      }
+    },
     "validator_powers_h6_h7_h8": {
       "6": {
-        "a836735812261e4a5618a9b5bb724da95eb7745b135c4197a46842af11b95c44": 10,
-        "30f2e7a0a8d6793183c4ddc8f1c8c0b8671b6cdc3569d7aac91201cf5f48077b": 10,
-        "c7627c493295837432da0c7f43b1a1d8adfc96bcc3dc2a3e7b8d500e26009d65": 10,
-        "6bbd7712386ab634dc3128fca64867c39c086761ec0f7c3fa4382e74369079ba": 10
+        "146ea111831afae725a78d6b52916b8059d3e927c7dae5019b0297539cf2f9e1": 10,
+        "00a4d3113f68fabf413f03e07b1dc3f0abb6098a997155fdb0b54c5671e20978": 10,
+        "2481a483d7ff9779f30a0c522743e4cdfedccc0a94d43f24e19df450cd68e110": 10,
+        "376b96e7740abe14d612f620baab850da6e08cdf13fbd61f880eeae136db645b": 10
       },
       "7": {
-        "a836735812261e4a5618a9b5bb724da95eb7745b135c4197a46842af11b95c44": 10,
-        "30f2e7a0a8d6793183c4ddc8f1c8c0b8671b6cdc3569d7aac91201cf5f48077b": 10,
-        "c7627c493295837432da0c7f43b1a1d8adfc96bcc3dc2a3e7b8d500e26009d65": 10,
-        "6bbd7712386ab634dc3128fca64867c39c086761ec0f7c3fa4382e74369079ba": 10
+        "146ea111831afae725a78d6b52916b8059d3e927c7dae5019b0297539cf2f9e1": 10,
+        "00a4d3113f68fabf413f03e07b1dc3f0abb6098a997155fdb0b54c5671e20978": 10,
+        "2481a483d7ff9779f30a0c522743e4cdfedccc0a94d43f24e19df450cd68e110": 10,
+        "376b96e7740abe14d612f620baab850da6e08cdf13fbd61f880eeae136db645b": 10
       },
       "8": {
-        "a836735812261e4a5618a9b5bb724da95eb7745b135c4197a46842af11b95c44": 3659,
-        "30f2e7a0a8d6793183c4ddc8f1c8c0b8671b6cdc3569d7aac91201cf5f48077b": 3659,
-        "6bbd7712386ab634dc3128fca64867c39c086761ec0f7c3fa4382e74369079ba": 3659,
-        "c7627c493295837432da0c7f43b1a1d8adfc96bcc3dc2a3e7b8d500e26009d65": 2929
+        "146ea111831afae725a78d6b52916b8059d3e927c7dae5019b0297539cf2f9e1": 3659,
+        "2481a483d7ff9779f30a0c522743e4cdfedccc0a94d43f24e19df450cd68e110": 3659,
+        "376b96e7740abe14d612f620baab850da6e08cdf13fbd61f880eeae136db645b": 3659,
+        "00a4d3113f68fabf413f03e07b1dc3f0abb6098a997155fdb0b54c5671e20978": 2930
       }
     },
     "h_plus_two_update": true,
-    "process_restart_from_durable_jmt_height": 19,
+    "process_restart_from_durable_jmt_height": 42,
     "resumed_heights": [
-      24,
-      27,
-      26,
-      27
+      48,
+      50,
+      50,
+      50
     ],
-    "same_app_hash_height": 23,
-    "same_app_hash": "73155448874b0ad40861f14ce2fc03a7fd50d4e4d58a494ae169aeffbf6d1aec",
+    "same_app_hash_height": 47,
+    "same_app_hash": "a4a97e88961fc74096598f34339a9aee297ee396ac50262bc2d47d1198146005",
     "latest_and_historical_ics23_proofs": true,
     "real_duplicate_vote_evidence": {
-      "comet_evidence_hash": "86563137a01624e6d885bbc9f38d8c86ba1d5dca14384414d1cc09a865c287b4",
-      "validator_address": "d7e738c32451b7bca4155a0d9b6a06887d872b87",
-      "validator_power": 8772,
-      "infraction_height": 22,
-      "infraction_time_seconds": 1789429234,
-      "infraction_time_nanos": 529349600,
-      "total_voting_power": 41640,
-      "inclusion_height": 28,
-      "bit_evidence_hash": "cd3fd8edc84d3b51e5787757f41d15607f88d44dbc93b9d232570319d2e3f168",
+      "comet_evidence_hash": "b3be72465405e48c7f05012d5edc5f6554adbbae6fda9239d82ace1fc5600626",
+      "validator_address": "c529c748a736a7bfd4aca5db5304ba0a0175b18f",
+      "validator_power": 27591,
+      "infraction_height": 47,
+      "infraction_time_seconds": 1789431666,
+      "infraction_time_nanos": 78198000,
+      "total_voting_power": 110423,
+      "inclusion_height": 51,
+      "bit_evidence_hash": "a8b81ad0ce9c003e369739c7fd9c70dcd78e51d8a7f0360c2ac80cc553529008",
       "validator_present_at_h_plus_one": true,
       "validator_removed_at_h_plus_two": true,
       "post_evidence_validator_count": 3,
-      "burned_atomic": "5567600570390",
-      "same_app_hash": "ffbdd61ff750e28e57c031ba416f36d45cf42844402af810e3ff311b52ec6773",
+      "burned_atomic": "14553380135524",
+      "same_app_hash": "ae5205ea9933ca2480fe8d1b1546829bcd2352ff433c2c75ee1d8a4914f2d4b8",
       "ics23_evidence_membership": true
     },
-    "quorum_halt_height": 31,
+    "quorum_halt_height": 54,
     "quorum_recovery_heights": [
-      35,
-      35,
-      35,
-      35
+      58,
+      58,
+      58,
+      58
     ]
   },
   "limitations": [
-    "accelerated five-block epochs and deterministic probe genesis",
+    "accelerated five-block epochs, eight-block/eight-second unbonding and deterministic probe genesis",
     "upstream CometBFT FilePV signer, not the future independent BIT signer",
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-14T23:40:03.867924+00:00",
-  "finished_at": "2026-09-14T23:40:56.781487+00:00"
+  "started_at": "2026-09-15T00:20:11.732348+00:00",
+  "finished_at": "2026-09-15T00:21:26.585093+00:00"
 }

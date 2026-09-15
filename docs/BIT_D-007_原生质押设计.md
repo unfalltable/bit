@@ -66,4 +66,4 @@ ABCI PrepareProposal、ProcessProposal 和 FinalizeBlock 使用请求中的规�
 ## 6. 完成 D-007 还需要
 
 1. 增量候选索引已经实现并进入 JMT；D-008 已完成退出 cohort/ticket、证据去重、永久 tombstone、P/X Burn、持久化 SlashJob 和四节点真实重复投票处罚，下一步补底层存储故障恢复。
-2. 在正式节点命令和生产摘要完成后，把真实质押交易加入多节点崩溃重放。
+2. 真实 Unbond/ClaimExit 已加入四节点崩溃重放；继续加入 RegisterValidator、Delegate、密钥轮换和佣金领取的多节点交错场景。

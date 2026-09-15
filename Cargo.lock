@@ -490,6 +490,7 @@ dependencies = [
  "bit-transaction",
  "bit-types",
  "decaf377",
+ "ed25519-consensus",
  "hex",
  "ics23",
  "prost",

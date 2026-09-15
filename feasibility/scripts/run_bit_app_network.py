@@ -1,7 +1,8 @@
 """Four CometBFT processes against the real BIT ABCI/JMT application.
 
 The node executable uses accelerated epochs and a deterministic public fixture,
-while exercising production Transfer, ClaimGenesis and block-artifact encodings.
+while exercising production Transfer, ClaimGenesis, Unbond, ClaimExit and
+block-artifact encodings.
 """
 
 from pathlib import Path
@@ -25,6 +26,11 @@ GO = ROOT / ".tools/go/bin/go.exe"
 EVIDENCE_INJECTOR = ROOT / ".tools/bin/bit-evidence-injector.exe"
 TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
 APP = TARGET_DIR / "debug/examples/comet_network_probe.exe"
+EXIT_FIXTURE = TARGET_DIR / "release/bit-exit-fixture.exe"
+PROOF_PARAMETERS = ROOT / ".tools/downloads"
+PROBE_EPOCH_BLOCKS = 5
+PROBE_UNBONDING_BLOCKS = 8
+PROBE_UNBONDING_SECONDS = 8
 RUN = ROOT / "runtime" / (
     "bit-app-network-" + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%f")
 )
@@ -43,14 +49,14 @@ PROCESSES = {}
 HANDLES = []
 
 
-def command(args):
+def command(args, timeout=60):
     completed = subprocess.run(
         [str(value) for value in args],
         capture_output=True,
         text=True,
         env=ENV,
         creationflags=0x08000000,
-        timeout=60,
+        timeout=timeout,
     )
     if completed.returncode:
         raise RuntimeError(f"{args[1:]}: {completed.stderr}")
@@ -303,6 +309,99 @@ def load_transfer_fixture():
     }
 
 
+def generated_exit_fixture(mode, current_height, anchor, expected_release=None):
+    args = [EXIT_FIXTURE, mode, PROOF_PARAMETERS, current_height, anchor]
+    if expected_release is not None:
+        args.append(expected_release)
+    fixture = json.loads(command(args, timeout=120))
+    envelope = bytes.fromhex(fixture["canonical_envelope_hex"])
+    if len(envelope) != int(fixture["canonical_envelope_bytes"]):
+        raise AssertionError(f"{mode} fixture envelope length mismatch")
+    if hashlib.sha256(envelope).hexdigest() != fixture["tx_id"]:
+        raise AssertionError(f"{mode} fixture transaction ID mismatch")
+    for name in ("owner_pubkey", "position_id", "ticket_id"):
+        if len(bytes.fromhex(fixture[name])) != 32:
+            raise AssertionError(f"{mode} fixture {name} must be 32 bytes")
+    if not all(
+        fixture.get(name)
+        for name in (
+            "output_proof_verified",
+            "stateless_authorization_verified",
+            "binding_signature_verified",
+        )
+    ):
+        raise AssertionError(f"{mode} fixture verification is incomplete")
+    fixture["envelope"] = envelope
+    return fixture
+
+
+def decode_exit_ticket(value):
+    if len(value) != 162 or value[0] != 1 or value[161] not in (0, 1):
+        raise AssertionError("invalid persistent exit ticket")
+    return {
+        "ticket_id": value[1:33].hex(),
+        "position_id": value[33:65].hex(),
+        "owner_pubkey": value[65:97].hex(),
+        "cohort_id": value[97:129].hex(),
+        "units_atomic": int.from_bytes(value[129:145], "big"),
+        "created_position_sequence": int.from_bytes(value[145:153], "big"),
+        "sequence": int.from_bytes(value[153:161], "big"),
+        "claimed": bool(value[161]),
+    }
+
+
+def decode_exit_cohort(value):
+    if len(value) not in (123, 139) or value[0] != 1:
+        raise AssertionError("invalid persistent exit cohort")
+    has_times = value[113]
+    if has_times not in (0, 1) or len(value) != (139 if has_times else 123):
+        raise AssertionError("invalid persistent exit cohort time encoding")
+    offset = 114
+    exposure_end_time = None
+    maturity_time = None
+    if has_times:
+        exposure_end_time = int.from_bytes(value[offset : offset + 8], "big")
+        maturity_time = int.from_bytes(value[offset + 8 : offset + 16], "big")
+        offset += 16
+    status = value[offset + 8]
+    if status not in (0, 1, 2):
+        raise AssertionError("invalid persistent exit cohort status")
+    return {
+        "cohort_id": value[1:33].hex(),
+        "validator_id": value[33:65].hex(),
+        "exit_epoch": int.from_bytes(value[65:73], "big"),
+        "assets_atomic": int.from_bytes(value[73:89], "big"),
+        "total_units_atomic": int.from_bytes(value[89:105], "big"),
+        "exposure_end_height": int.from_bytes(value[105:113], "big"),
+        "exposure_end_time_seconds": exposure_end_time,
+        "maturity_time_seconds": maturity_time,
+        "maturity_height": int.from_bytes(value[offset : offset + 8], "big"),
+        "status": status,
+    }
+
+
+def exit_cohort_values(cohort_id, height_value=None):
+    return [
+        state_query(index, f"staking/exits/cohorts/{cohort_id}", height_value)
+        for index in range(4)
+    ]
+
+
+def wait_exit_status(cohort_id, expected_status, seconds=90):
+    deadline = time.monotonic() + seconds
+    observed = None
+    while time.monotonic() < deadline:
+        values = exit_cohort_values(cohort_id)
+        if values[0] and len(set(values)) == 1:
+            observed = decode_exit_cohort(values[0])
+            if observed["status"] == expected_status:
+                return values, observed
+        time.sleep(0.2)
+    raise TimeoutError(
+        f"exit cohort {cohort_id} did not reach status {expected_status}: {observed}"
+    )
+
+
 def broadcast_transaction(fixture, label):
     response = rpc(0, "broadcast_tx_sync?tx=0x" + fixture["envelope"].hex())
     if int(response["code"]) != 0:
@@ -433,7 +532,7 @@ def configure_network(fixture):
     genesis["consensus_params"]["version"]["app"] = "1"
     genesis["consensus_params"]["abci"]["vote_extensions_enable_height"] = "0"
     genesis["app_state"] = {
-        "bit_app_network_probe": 3,
+        "bit_app_network_probe": 4,
         "genesis_claim": {
             "amount_atomic": str(fixture["claim"]["amount"]),
             "claim_id_hex": fixture["claim"]["claim_id"],
@@ -490,11 +589,13 @@ def configure_network(fixture):
 def main():
     if (
         not APP.is_file()
+        or not EXIT_FIXTURE.is_file()
         or not COMET.is_file()
         or not GO.is_file()
         or not EVIDENCE_INJECTOR.is_file()
+        or not (PROOF_PARAMETERS / "output_pk.bin").is_file()
     ):
-        raise RuntimeError("build the probe and bootstrap CometBFT before running")
+        raise RuntimeError("build the probes and bootstrap CometBFT before running")
     fixture = load_transfer_fixture()
     comet_self_reported_version = command([COMET, "version"])
     comet_build_info = command([GO, "version", "-m", COMET])
@@ -681,6 +782,259 @@ def main():
     if len(claim_app_hashes) != 1:
         raise AssertionError("application hash diverged after ClaimGenesis")
 
+    unbond_generation_height = height(0)
+    unbond = generated_exit_fixture(
+        "unbond",
+        unbond_generation_height,
+        state_query(0, "shielded/tree_root").hex(),
+    )
+    scheduled_from_height = wait_height_remainder(2, PROBE_EPOCH_BLOCKS)
+    first_unbond_height = scheduled_from_height + 1
+    broadcast_transaction(unbond, "Unbond")
+    unbond_height, unbond_index, _ = wait_transaction(
+        unbond, first_unbond_height, "Unbond"
+    )
+    if unbond_height % PROBE_EPOCH_BLOCKS == 1:
+        raise AssertionError("Unbond landed on an epoch settlement block")
+    wait_height(unbond_height + 2)
+
+    exit_container_keys = {
+        "stake": "supply/stake_total",
+        "exits": "supply/exit_total",
+        "shielded": "supply/shielded_total",
+        "fees": "fees/reserve",
+    }
+    before_unbond = {
+        name: int.from_bytes(state_query(0, key, unbond_height - 1), "big")
+        for name, key in exit_container_keys.items()
+    }
+    after_unbond = {
+        name: [
+            int.from_bytes(state_query(index, key, unbond_height), "big")
+            for index in range(4)
+        ]
+        for name, key in exit_container_keys.items()
+    }
+    if any(len(set(values)) != 1 for values in after_unbond.values()):
+        raise AssertionError("Unbond supply containers differ across applications")
+    unbond_fee = int(unbond["fee_atomic"])
+    unbond_gross = before_unbond["stake"] - after_unbond["stake"][0]
+    exit_release = after_unbond["exits"][0] - before_unbond["exits"]
+    if unbond_gross != exit_release + unbond_fee:
+        raise AssertionError("Unbond stake, exit and fee deltas do not balance")
+    if after_unbond["shielded"][0] != before_unbond["shielded"]:
+        raise AssertionError("zero-value Unbond output changed shielded supply")
+    if after_unbond["fees"][0] - before_unbond["fees"] != unbond_fee:
+        raise AssertionError("Unbond fee reserve delta is incorrect")
+
+    ticket_key = f"staking/exits/tickets/{unbond['ticket_id']}"
+    ticket_values = [
+        state_query(index, ticket_key, unbond_height) for index in range(4)
+    ]
+    if not ticket_values[0] or len(set(ticket_values)) != 1:
+        raise AssertionError("Unbond exit ticket differs across applications")
+    ticket = decode_exit_ticket(ticket_values[0])
+    for name in ("ticket_id", "position_id", "owner_pubkey"):
+        if ticket[name] != unbond[name]:
+            raise AssertionError(f"Unbond exit ticket {name} differs from fixture")
+    if (
+        ticket["units_atomic"] != exit_release
+        or ticket["created_position_sequence"] != 1
+        or ticket["sequence"] != 0
+        or ticket["claimed"]
+    ):
+        raise AssertionError("Unbond exit ticket state is incorrect")
+
+    cohort_id = ticket["cohort_id"]
+    cohort_values = exit_cohort_values(cohort_id, unbond_height)
+    if not cohort_values[0] or len(set(cohort_values)) != 1:
+        raise AssertionError("Unbond exit cohort differs across applications")
+    pending_cohort = decode_exit_cohort(cohort_values[0])
+    expected_exit_epoch = (unbond_height - 1) // PROBE_EPOCH_BLOCKS
+    expected_exposure_height = (expected_exit_epoch + 1) * PROBE_EPOCH_BLOCKS + 2
+    if (
+        pending_cohort["cohort_id"] != cohort_id
+        or pending_cohort["exit_epoch"] != expected_exit_epoch
+        or pending_cohort["assets_atomic"] != exit_release
+        or pending_cohort["total_units_atomic"] != exit_release
+        or pending_cohort["exposure_end_height"] != expected_exposure_height
+        or pending_cohort["exposure_end_time_seconds"] is not None
+        or pending_cohort["maturity_time_seconds"] is not None
+        or pending_cohort["maturity_height"]
+        != expected_exposure_height + PROBE_UNBONDING_BLOCKS
+        or pending_cohort["status"] != 0
+    ):
+        raise AssertionError(f"unexpected pending exit cohort: {pending_cohort}")
+    unbond_transaction_records = [
+        state_query(index, f"transactions/applied/{unbond['tx_id']}", unbond_height)
+        for index in range(4)
+    ]
+    if not unbond_transaction_records[0] or len(set(unbond_transaction_records)) != 1:
+        raise AssertionError("Unbond transaction record differs across applications")
+    unbond_tree_roots = [
+        state_query(index, "shielded/tree_root", unbond_height).hex()
+        for index in range(4)
+    ]
+    if len(set(unbond_tree_roots)) != 1 or unbond_tree_roots[0] == claim_tree_roots[0]:
+        raise AssertionError("Unbond output did not advance a common shielded tree root")
+
+    _, unbonding_cohort = wait_exit_status(cohort_id, 1)
+    if (
+        unbonding_cohort["exposure_end_time_seconds"] is None
+        or unbonding_cohort["maturity_time_seconds"]
+        != unbonding_cohort["exposure_end_time_seconds"] + PROBE_UNBONDING_SECONDS
+    ):
+        raise AssertionError("Unbonding cohort time bounds are incorrect")
+    unbonding_restart_height = height(0)
+    if unbonding_restart_height >= unbonding_cohort["maturity_height"]:
+        raise AssertionError("application restart was not initiated during Unbonding")
+    stop("node0")
+    stop("app0")
+    start_pair(0)
+    unbonding_resumed = wait_height(unbonding_restart_height + 3)
+    if state_query(0, ticket_key, unbond_height) != ticket_values[0]:
+        raise AssertionError("historical exit ticket changed after Unbonding restart")
+    if exit_cohort_values(cohort_id, unbond_height)[0] != cohort_values[0]:
+        raise AssertionError("historical exit cohort changed after Unbonding restart")
+
+    mature_cohort_values, mature_cohort = wait_exit_status(cohort_id, 2)
+    if (
+        len(set(mature_cohort_values)) != 1
+        or mature_cohort["assets_atomic"] != exit_release
+        or mature_cohort["total_units_atomic"] != exit_release
+    ):
+        raise AssertionError("mature exit cohort differs across applications")
+
+    claim_exit_generation_height = height(0)
+    claim_exit = generated_exit_fixture(
+        "claim",
+        claim_exit_generation_height,
+        state_query(0, "shielded/tree_root").hex(),
+        exit_release,
+    )
+    scheduled_from_height = wait_height_remainder(2, PROBE_EPOCH_BLOCKS)
+    first_claim_exit_height = scheduled_from_height + 1
+    broadcast_transaction(claim_exit, "ClaimExit")
+    claim_exit_height, claim_exit_index, _ = wait_transaction(
+        claim_exit, first_claim_exit_height, "ClaimExit"
+    )
+    if claim_exit_height % PROBE_EPOCH_BLOCKS == 1:
+        raise AssertionError("ClaimExit landed on an epoch settlement block")
+    wait_height(claim_exit_height + 2)
+    before_claim_exit = {
+        name: int.from_bytes(state_query(0, key, claim_exit_height - 1), "big")
+        for name, key in exit_container_keys.items()
+    }
+    after_claim_exit = {
+        name: [
+            int.from_bytes(state_query(index, key, claim_exit_height), "big")
+            for index in range(4)
+        ]
+        for name, key in exit_container_keys.items()
+    }
+    if any(len(set(values)) != 1 for values in after_claim_exit.values()):
+        raise AssertionError("ClaimExit supply containers differ across applications")
+    claim_exit_fee = int(claim_exit["fee_atomic"])
+    claim_exit_deltas = {
+        "stake": 0,
+        "exits": -exit_release,
+        "shielded": exit_release - claim_exit_fee,
+        "fees": claim_exit_fee,
+    }
+    for name, delta in claim_exit_deltas.items():
+        if after_claim_exit[name][0] - before_claim_exit[name] != delta:
+            raise AssertionError(f"ClaimExit {name} delta is incorrect")
+
+    claimed_ticket_values = [
+        state_query(index, ticket_key, claim_exit_height) for index in range(4)
+    ]
+    if len(set(claimed_ticket_values)) != 1:
+        raise AssertionError("claimed exit ticket differs across applications")
+    claimed_ticket = decode_exit_ticket(claimed_ticket_values[0])
+    if (
+        any(
+            claimed_ticket[name] != ticket[name]
+            for name in (
+                "ticket_id",
+                "position_id",
+                "owner_pubkey",
+                "cohort_id",
+                "units_atomic",
+                "created_position_sequence",
+            )
+        )
+        or claimed_ticket["sequence"] != 1
+        or not claimed_ticket["claimed"]
+    ):
+        raise AssertionError("ClaimExit did not consume the expected exit ticket")
+    claimed_cohort_values = exit_cohort_values(cohort_id, claim_exit_height)
+    if len(set(claimed_cohort_values)) != 1:
+        raise AssertionError("claimed exit cohort differs across applications")
+    claimed_cohort = decode_exit_cohort(claimed_cohort_values[0])
+    if (
+        any(
+            claimed_cohort[name] != mature_cohort[name]
+            for name in (
+                "cohort_id",
+                "validator_id",
+                "exit_epoch",
+                "exposure_end_height",
+                "exposure_end_time_seconds",
+                "maturity_time_seconds",
+                "maturity_height",
+                "status",
+            )
+        )
+        or claimed_cohort["cohort_id"] != cohort_id
+        or claimed_cohort["assets_atomic"] != 0
+        or claimed_cohort["total_units_atomic"] != 0
+        or claimed_cohort["status"] != 2
+    ):
+        raise AssertionError("ClaimExit did not drain the exit cohort")
+    claim_exit_transaction_records = [
+        state_query(
+            index,
+            f"transactions/applied/{claim_exit['tx_id']}",
+            claim_exit_height,
+        )
+        for index in range(4)
+    ]
+    if not claim_exit_transaction_records[0] or len(set(claim_exit_transaction_records)) != 1:
+        raise AssertionError("ClaimExit transaction record differs across applications")
+    claim_exit_tree_roots = [
+        state_query(index, "shielded/tree_root", claim_exit_height).hex()
+        for index in range(4)
+    ]
+    if len(set(claim_exit_tree_roots)) != 1 or claim_exit_tree_roots[0] == unbond_tree_roots[0]:
+        raise AssertionError("ClaimExit output did not advance a common shielded tree root")
+    claim_exit_app_hashes = {
+        rpc(index, f"block?height={claim_exit_height + 1}")["block"]["header"][
+            "app_hash"
+        ].lower()
+        for index in range(4)
+    }
+    if len(claim_exit_app_hashes) != 1:
+        raise AssertionError("application hash diverged after ClaimExit")
+    claimed_ticket_replay = generated_exit_fixture(
+        "claim",
+        height(0),
+        state_query(0, "shielded/tree_root").hex(),
+        exit_release,
+    )
+    if claimed_ticket_replay["tx_id"] == claim_exit["tx_id"]:
+        raise AssertionError("claimed-ticket replay must have a distinct transaction ID")
+    claimed_ticket_replay_response = rpc(
+        0,
+        "broadcast_tx_sync?tx=0x" + claimed_ticket_replay["envelope"].hex(),
+    )
+    if int(claimed_ticket_replay_response["code"]) == 0:
+        raise AssertionError("distinct transaction for a claimed exit ticket was accepted")
+    if (
+        claimed_ticket_replay_response.get("hash", "").lower()
+        != claimed_ticket_replay["tx_id"]
+    ):
+        raise AssertionError("claimed-ticket replay response has the wrong transaction ID")
+
     restart_height = height(0)
     stop("node0")
     stop("app0")
@@ -696,6 +1050,10 @@ def main():
         raise AssertionError("historical compact proof changed after application restart")
     if state_query(0, claim_key, claim_height) != expected_claim_record:
         raise AssertionError("ClaimGenesis record changed after application restart")
+    if state_query(0, ticket_key, unbond_height) != ticket_values[0]:
+        raise AssertionError("historical exit ticket changed after application restart")
+    if state_query(0, ticket_key, claim_exit_height) != claimed_ticket_values[0]:
+        raise AssertionError("claimed exit ticket changed after application restart")
 
     common_height = min(resumed) - 1
     headers = [rpc(i, f"block?height={common_height}")["block"]["header"] for i in range(4)]
@@ -777,13 +1135,14 @@ def main():
     recovered = wait_height(halted_height + 4)
 
     return {
-        "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer and ClaimGenesis, canonical block artifacts, staking and emission",
+        "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, ClaimGenesis, Unbond and ClaimExit, canonical block artifacts, staking and emission",
         "runtime_dir": str(RUN),
         "toolchain": {
             "cometbft_module": comet_module_version,
             "cometbft_self_reported": comet_self_reported_version,
             "cometbft_sha256": hashlib.sha256(COMET.read_bytes()).hexdigest(),
             "application_sha256": hashlib.sha256(APP.read_bytes()).hexdigest(),
+            "exit_fixture_sha256": hashlib.sha256(EXIT_FIXTURE.read_bytes()).hexdigest(),
             "evidence_injector_sha256": hashlib.sha256(
                 EVIDENCE_INJECTOR.read_bytes()
             ).hexdigest(),
@@ -840,6 +1199,53 @@ def main():
                 },
                 "historical_proof_after_restart": True,
             },
+            "real_exit": {
+                "unbond_height": unbond_height,
+                "unbond_index": unbond_index,
+                "unbond_tx_id": unbond["tx_id"],
+                "claim_exit_height": claim_exit_height,
+                "claim_exit_index": claim_exit_index,
+                "claim_exit_tx_id": claim_exit["tx_id"],
+                "owner_pubkey": unbond["owner_pubkey"],
+                "position_id": unbond["position_id"],
+                "ticket_id": unbond["ticket_id"],
+                "cohort_id": cohort_id,
+                "shares_atomic": unbond["shares_atomic"],
+                "gross_atomic": str(unbond_gross),
+                "exit_release_atomic": str(exit_release),
+                "unbond_fee_atomic": str(unbond_fee),
+                "claim_exit_fee_atomic": str(claim_exit_fee),
+                "claim_output_atomic": claim_exit["output_amount_atomic"],
+                "zero_value_unbond_output_commitment": unbond[
+                    "zero_value_output_commitment"
+                ],
+                "claim_output_commitments": claim_exit["output_commitments_hex"],
+                "pending_cohort": pending_cohort,
+                "mature_cohort": mature_cohort,
+                "unbond_container_deltas": {
+                    "stake": str(-unbond_gross),
+                    "exits": str(exit_release),
+                    "shielded": "0",
+                    "fees": str(unbond_fee),
+                },
+                "claim_exit_container_deltas": {
+                    name: str(delta) for name, delta in claim_exit_deltas.items()
+                },
+                "unbonding_restart_height": unbonding_restart_height,
+                "unbonding_restart_resumed_heights": unbonding_resumed,
+                "output_proofs_verified": True,
+                "position_owner_authorizations_verified": True,
+                "binding_signatures_verified": True,
+                "transaction_ticket_and_cohort_records_proved_on_nodes": 4,
+                "historical_pending_and_claimed_records_after_restart": True,
+                "post_claim_exit_tree_root": claim_exit_tree_roots[0],
+                "post_claim_exit_app_hash": claim_exit_app_hashes.pop(),
+                "distinct_claimed_ticket_replay": {
+                    "tx_id": claimed_ticket_replay["tx_id"],
+                    "check_tx_code": int(claimed_ticket_replay_response["code"]),
+                    "rejected_by_bit_app": True,
+                },
+            },
             "validator_powers_h6_h7_h8": powers,
             "h_plus_two_update": True,
             "process_restart_from_durable_jmt_height": restart_height,
@@ -862,7 +1268,7 @@ def main():
             "quorum_recovery_heights": recovered,
         },
         "limitations": [
-            "accelerated five-block epochs and deterministic probe genesis",
+            "accelerated five-block epochs, eight-block/eight-second unbonding and deterministic probe genesis",
             "upstream CometBFT FilePV signer, not the future independent BIT signer",
             "same physical host, not independent failure domains",
         ],
@@ -883,7 +1289,7 @@ if __name__ == "__main__":
             json.dumps(result, indent=2) + "\n", encoding="utf-8"
         )
         print(
-            "Real BIT app four-node Transfer, ClaimGenesis, H+2, slashing, restart and quorum checks passed"
+            "Real BIT app four-node Transfer, ClaimGenesis, Unbond, ClaimExit, H+2, slashing, restart and quorum checks passed"
         )
     except Exception as error:
         failure = {

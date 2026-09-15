@@ -14,14 +14,15 @@
 |---|---|
 | 完整两 Spend + 两 Output Transfer | 5 组真实证明通过；生成中位数 4.39 秒、严格 proof 验证中位数 26.32 ms；完整 envelope、Spend 授权、binding 和重复 nullifier 负例通过 |
 | 固定发行与有限会计边界 | 18 个 Rust 测试通过 |
-| 真实四节点 + Rust ABCI/JMT | 同高度状态一致、H+2、应用重启、真实重复投票处罚、ICS23、投票权不足停止及恢复检查通过 |
+| 真实四节点 + Rust ABCI/JMT | Transfer、ClaimGenesis、Unbond/ClaimExit、供应守恒、同高度状态一致、H+2、应用重启、真实重复投票处罚、ICS23、投票权不足停止及恢复检查通过 |
 | 手机 | 用户跳过；ADB 服务已停止 |
 
-密码学程序已经组成并验收完整 BIT Transfer，但本目录的早期 proof probe 只写入内存账本夹具。当前四节点网络复用生产 `bit-app` 与 JMT/RocksDB 状态核心，仍只处理没有用户交易的区块；它已通过标准 CometBFT RPC 注入真实重复投票证据并验证处罚，但没有独立 signer。四个节点运行于同一宿主。总体状态仍是部分开发验证通过。
+密码学程序已经组成并验收完整 BIT Transfer；早期 proof probe 只写入内存账本夹具，当前四节点网络已复用生产 `bit-app` 与 JMT/RocksDB 状态核心执行真实 Transfer、ClaimGenesis、Unbond 和 ClaimExit。它还通过标准 CometBFT RPC 注入真实重复投票证据并验证处罚，但没有独立 signer。四个节点运行于同一宿主。总体状态仍是部分开发验证通过。
 
 ## 目录
 
 - `proof-probe/`：真实 Penumbra v2.1.1 原语和扫描实验，包含 Cargo.lock。
+- `proof-probe/src/bin/bit-exit-fixture.rs`：为隔离四节点网络动态生成并自验真实 Unbond/ClaimExit 信封。
 - `consensus-probe/`：Rust ABCI 空块状态机与独立固定发行数学实验，包含 Cargo.lock。
 - `evidence-injector/`：仅用于 `bit-app-probe-*` 隔离测试链的 CometBFT 重复投票证据生成与广播工具。
 - `scripts/`：项目内工具准备、构建环境、网络运行、证明测量和证据汇总。

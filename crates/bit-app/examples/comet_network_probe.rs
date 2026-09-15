@@ -35,6 +35,8 @@ const PROBE_EPOCH_BLOCKS: u64 = 5;
 const PROBE_POWER_UNIT_ATOMIC: u128 = 100 * ATOMIC_PER_BIT;
 const PROBE_SHIELDED_ATOMIC: u128 = 15_000_000_000;
 const PROBE_GENESIS_MANIFEST_HASH: [u8; 32] = [0x33; 32];
+const PROBE_EXIT_DELEGATION_ATOMIC: u128 = 50 * ATOMIC_PER_BIT;
+const PROBE_EXIT_OWNER_SEED: [u8; 32] = [0x91; 32];
 
 #[derive(Deserialize)]
 struct GenesisDocument {
@@ -182,7 +184,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
     let app_state: ProbeAppState = serde_json::from_value(document.app_state.clone())
         .context("invalid BIT probe app_state")?;
     ensure!(
-        app_state.bit_app_network_probe == 3,
+        app_state.bit_app_network_probe == 4,
         "unsupported BIT probe app_state version"
     );
     let genesis_manifest_hash = hash32_hex(
@@ -223,23 +225,27 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
     );
     let mut parameters = StakingParameters::reference_testnet();
     parameters.power_unit_atomic = Amount::new(PROBE_POWER_UNIT_ATOMIC)?;
+    parameters.evidence_max_age_blocks = 5;
+    parameters.evidence_max_age_seconds = 5;
+    parameters.unbonding_blocks = 8;
+    parameters.unbonding_seconds = 8;
     let mut staking = StakingBook::new(chain_context, parameters)?;
     let principal = Amount::new(bit_staking::TESTNET_MIN_SELF_BOND_ATOMIC)?;
     let mut expected_validators = Vec::with_capacity(document.validators.len());
 
-    for validator in &document.validators {
+    for (index, validator) in document.validators.iter().enumerate() {
         let key = validator_key(validator)?;
         let power: u64 = parse_number(&validator.power, "validator power")?;
         ensure!(power == 10, "probe validators must start with power 10");
         let operator = domain_hash(b"BIT-COMET-NETWORK-PROBE-OPERATOR-V1", &key);
         let owner = domain_hash(b"BIT-COMET-NETWORK-PROBE-OWNER-V1", &key);
         let validator_id = validator_id(&chain_context, &operator);
-        let position_id = position_id(&chain_context, &owner);
+        let self_position = position_id(&chain_context, &owner);
         staking.register_validator(validator_id, operator, key, 500)?;
         staking.open_pending_delegation(
             0,
             0,
-            position_id,
+            self_position,
             owner,
             validator_id,
             principal,
@@ -247,7 +253,24 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
             true,
             vec![key[0]; RECOVERY_RECEIPT_BYTES],
         )?;
-        staking.activate_pending(&position_id, 1)?;
+        staking.activate_pending(&self_position, 1)?;
+        if index + 1 == document.validators.len() {
+            let owner_key = ed25519_consensus::SigningKey::from(PROBE_EXIT_OWNER_SEED);
+            let exit_owner = owner_key.verification_key().to_bytes();
+            let exit_position = position_id(&chain_context, &exit_owner);
+            staking.open_pending_delegation(
+                0,
+                0,
+                exit_position,
+                exit_owner,
+                validator_id,
+                Amount::new(PROBE_EXIT_DELEGATION_ATOMIC)?,
+                Amount::ZERO,
+                false,
+                vec![0x92; RECOVERY_RECEIPT_BYTES],
+            )?;
+            staking.activate_pending(&exit_position, 1)?;
+        }
         expected_validators.push(ValidatorUpdate {
             pub_key: Some(PublicKey {
                 sum: Some(public_key::Sum::Ed25519(key.to_vec())),
@@ -290,6 +313,7 @@ fn build_configuration(document: GenesisDocument) -> Result<(GenesisConfig, Abci
         principal
             .value()
             .checked_mul(validator_count)
+            .and_then(|value| value.checked_add(PROBE_EXIT_DELEGATION_ATOMIC))
             .context("genesis stake overflow")?,
     )?;
     let mut monetary_policy = MonetaryPolicy::reference_testnet();

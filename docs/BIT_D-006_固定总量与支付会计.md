@@ -78,11 +78,12 @@ min_fee = base + ceil(canonical_envelope_bytes / 1024) * per_kib
 - 两个验证人按 1:3 score 分配 101 原子单位时得到 25/75 gross，1 原子余数留 F；佣金分别按 5% 和 10% 向下取整为 1/7，P/C 与账本逐项交叉一致。
 - 单验证人状态集成测试覆盖 `quota + 既有 F → P/C`、旧池结算 epoch、ClaimCommission 的 `C→Q/F`、sequence、Commit 和重启恢复。
 - ClaimGenesis 真实 envelope 覆盖领取公钥签名、精确金额、Groth16、binding、`G→Q/F`、领取高度、ICS23 证明和重启恢复；已领取状态及错误金额在写状态前拒绝。
+- 四节点真实 Unbond/ClaimExit 覆盖释放值费用、Groth16 Output、PositionOwner 授权、P/X/Q/F 精确转换、双成熟门槛、Unbonding 中重启、ticket/cohort 历史证明和不同 tx id 的重复领取拒绝。
 - 销毁后未来发行预算不增加；人为篡改持久化费用池后，重启校验拒绝数据库。
 
 ## 6. 完成 D-006 还需要
 
-1. 四节点实验已验证 H/H+1/H+2 实际集合、last commit power、请求哈希、奖励后投票权，以及真实 Transfer 的费用、交易/nullifier 证明、TCT 根和 execution/compact 摘要一致；下一步补区块产物分发及多节点真实退出。
+1. 四节点实验已验证 H/H+1/H+2 实际集合、last commit power、请求哈希、奖励后投票权，以及真实 Transfer、Unbond、ClaimExit 的费用、供应转换、交易/状态证明和 TCT 根一致；下一步补区块产物分发和多动作交错压力测试。
 2. 为钱包和网关提供带证明的费率、在线率、奖励和佣金报价接口。
 3. ClaimGenesis 与 Byzantine Slash 已接入；后续补主网创世 manifest/签名 CLI、多节点领取与处罚/领取交错压力测试。
 4. 为已冻结的 `supply/audit_snapshot` 增加面向 SDK 的跨语言验证映射；共识值、REST DTO、最新/历史高度查询、共享测试向量和严格 Rust 解码器已经完成。

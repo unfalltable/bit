@@ -5,7 +5,7 @@ At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
     + CategoryInfo          : NotSpecified: (warning: hiding...re is confusing:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
 
-   --> feasibility\upstream\penumbra\crates\crypto\tct\src\tree.rs:753:22
+   --> D:\others\BIT\feasibility\upstream\penumbra\crates\crypto\tct\src\tree.rs:753:22
     |
 753 |     pub fn structure(&self) -> structure::Node {
     |                      ^^^^^     ^^^^^^^^^^^^^^^ the same lifetime is hidden here
@@ -20,7 +20,7 @@ help: use `'_` for type paths
     |                                               ++++
 
 warning: hiding a lifetime that's elided elsewhere is confusing
-   --> feasibility\upstream\penumbra\crates\crypto\tct\src\internal\three.rs:106:18
+   --> D:\others\BIT\feasibility\upstream\penumbra\crates\crypto\tct\src\internal\three.rs:106:18
     |
 106 |     pub fn elems(&self) -> Elems<T> {
     |                  ^^^^^     ^^^^^^^^ the same lifetime is hidden here
@@ -34,7 +34,7 @@ help: use `'_` for type paths
     |                                  +++
 
 warning: hiding a lifetime that's elided elsewhere is confusing
-   --> feasibility\upstream\penumbra\crates\crypto\tct\src\internal\three.rs:117:22
+   --> D:\others\BIT\feasibility\upstream\penumbra\crates\crypto\tct\src\internal\three.rs:117:22
     |
 117 |     pub fn elems_mut(&mut self) -> ElemsMut<T> {
     |                      ^^^^^^^^^     ^^^^^^^^^^^ the same lifetime is hidden here
@@ -47,8 +47,8 @@ help: use `'_` for type paths
 117 |     pub fn elems_mut(&mut self) -> ElemsMut<'_, T> {
     |                                             +++
 
-warning: `penumbra-sdk-tct` (lib) generated 3 warnings (run `cargo clippy --fix --lib -p penumbra-sdk-tct -- -D warning
-s` to apply 3 suggestions)
+warning: `penumbra-sdk-tct` (lib) generated 3 warnings (run `cargo fix --lib -p penumbra-sdk-tct` to apply 3 suggestion
+s)
 warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/output_pk.bin enable 'download-provi
 ng-keys' feature to obtain key files
 warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/spend_pk.bin enable 'download-provin
@@ -64,7 +64,7 @@ ad-proving-keys' feature to obtain key files
 warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/nullifier_derivation_pk.bin enable '
 download-proving-keys' feature to obtain key files
 warning: function `pick_connection_version` is never used
- --> feasibility\upstream\penumbra\crates\core\component\ibc\src\version.rs:4:8
+ --> D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\ibc\src\version.rs:4:8
   |
 4 | pub fn pick_connection_version(
   |        ^^^^^^^^^^^^^^^^^^^^^^^
@@ -73,7 +73,7 @@ warning: function `pick_connection_version` is never used
 
 warning: `penumbra-sdk-ibc` (lib) generated 1 warning
 warning: unused import: `channel::PortId`
- --> feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\ics20_withdrawal.rs:1:43
+ --> D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\ics20_withdrawal.rs:1:43
   |
 1 | use ibc_types::core::{channel::ChannelId, channel::PortId, client::Height as IbcHeight};
   |                                           ^^^^^^^^^^^^^^^
@@ -81,7 +81,7 @@ warning: unused import: `channel::PortId`
   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
 warning: function `algorithm_state` is never used
-  --> feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\fmd\state_key.rs:12:12
+  --> D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\fmd\state_key.rs:12:12
    |
 12 |     pub fn algorithm_state() -> &'static str {
    |            ^^^^^^^^^^^^^^^
@@ -89,18 +89,18 @@ warning: function `algorithm_state` is never used
    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: function `current` is never used
-  --> feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\fmd\state_key.rs:18:12
+  --> D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\fmd\state_key.rs:18:12
    |
 18 |     pub fn current() -> &'static str {
    |            ^^^^^^^
 
 warning: function `previous` is never used
-  --> feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\fmd\state_key.rs:22:12
+  --> D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\fmd\state_key.rs:22:12
    |
 22 |     pub fn previous() -> &'static str {
    |            ^^^^^^^^
 
-warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo clippy --fix --lib -p penumbra-sdk-shielde
-d-pool -- -D warnings` to apply 1 suggestion)
-    Checking bit-app v0.1.0 (D:\others\BIT\crates\bit-app)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.39s
+warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo fix --lib -p penumbra-sdk-shielded-pool` t
+o apply 1 suggestion)
+   Compiling bit-proof-probe v0.1.0 (D:\others\BIT\feasibility\proof-probe)
+    Finished `release` profile [optimized] target(s) in 3.78s
