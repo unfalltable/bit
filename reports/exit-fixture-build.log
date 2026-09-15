@@ -58,7 +58,6 @@ warning: function `pick_connection_version` is never used
   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: `penumbra-sdk-ibc` (lib) generated 1 warning
-   Compiling bit-types v0.1.0 (D:\others\BIT\crates\bit-types)
 warning: unused import: `channel::PortId`
  --> D:\others\BIT\feasibility\upstream\penumbra\crates\core\component\shielded-pool\src\ics20_withdrawal.rs:1:43
   |
@@ -88,8 +87,4 @@ warning: function `previous` is never used
    |            ^^^^^^^^
 
 warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo fix --lib -p penumbra-sdk-shielded-pool` to apply 1 suggestion)
-   Compiling bit-emission v0.1.0 (D:\others\BIT\crates\bit-emission)
-   Compiling bit-transaction v0.1.0 (D:\others\BIT\crates\bit-transaction)
-   Compiling bit-staking v0.1.0 (D:\others\BIT\crates\bit-staking)
-   Compiling bit-proof-probe v0.1.0 (D:\others\BIT\feasibility\proof-probe)
-    Finished `release` profile [optimized] target(s) in 25.70s
+    Finished `release` profile [optimized] target(s) in 4.12s

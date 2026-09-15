@@ -148,6 +148,7 @@ $bitReport = [ordered]@{
         [ordered]@{ path = 'crates/bit-gateway/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-gateway\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-light-client/Cargo.toml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-light-client\Cargo.toml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'crates/bit-light-client/src/lib.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-light-client\src\lib.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
+        [ordered]@{ path = 'crates/bit-light-client/src/verified_sync.rs'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'crates\bit-light-client\src\verified_sync.rs') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'contracts/openapi.yaml'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'contracts\openapi.yaml') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'contracts/genesis_identity.cddl'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'contracts\genesis_identity.cddl') -Algorithm SHA256).Hash.ToLowerInvariant() },
         [ordered]@{ path = 'contracts/checkpoint.cddl'; sha256 = (Get-FileHash -LiteralPath (Join-Path $bitRoot 'contracts\checkpoint.cddl') -Algorithm SHA256).Hash.ToLowerInvariant() },

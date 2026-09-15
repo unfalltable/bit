@@ -107,7 +107,7 @@ ABCI State Sync 使用固定 format 1。chunk 0 携带规范 manifest，后续 c
 
 恢复继续经过 `import_snapshot` 的文件集、chunk hash、完整配置和状态不变量检查，目标写入由 snapshot ID 派生的独立状态目录。通过后先同步写入带校验和的活动状态标记，再替换进程内状态；重启根据标记选择该目录。刚激活时标记与数据库摘要精确相等；节点继续提交后，启动会要求当前高度不低于激活高度，并在标记高度重新取得 `meta/height` 的 ICS23 成员证明，核对 storage version、值和标记 app hash。有效的临时标记会自动完成发布，冲突、损坏或历史锚点不一致会拒绝启动。应用状态目录与共识 signer 水位目录没有复用，State Sync 不接触签名状态。
 
-正式 `bit-node` 用 `--state-sync-dir` 启用周期发布，默认每 1000 块生成一次并保留最近 2 份，保留数限制为 1 至 100；快照目录、活动状态目录和 bundle 必须两两隔离。快照生成在 Commit 成功后运行，失败会记录错误且不改变已经提交的共识结果。真实网络由 CometBFT 的两个 RPC 服务器验证可信头，一个指定 P2P 发布者提供物理 checkpoint；`RequestOfferSnapshot.app_hash` 把应用导入结果绑定到该已验证头。D-010 仍需完成签名检查点、可信期过期/更新、中断下载恢复和独立故障域部署。
+正式 `bit-node` 用 `--state-sync-dir` 启用周期发布，默认每 1000 块生成一次并保留最近 2 份，保留数限制为 1 至 100；快照目录、活动状态目录和 bundle 必须两两隔离。快照生成在 Commit 成功后运行，失败会记录错误且不改变已经提交的共识结果。真实网络由 CometBFT 的两个 RPC 服务器验证可信头，一个指定 P2P 发布者提供物理 checkpoint；`RequestOfferSnapshot.app_hash` 把应用导入结果绑定到该已验证头。D-010 已补签名检查点、可信期和钱包侧头/验证者集合/状态证明验证原语，仍需完成 wallet SQLCipher 与网络接线、中断下载恢复和独立故障域部署。
 
 ## 6. 已验证不变量
 

@@ -14,6 +14,14 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use thiserror::Error;
 
+mod verified_sync;
+
+pub use verified_sync::{
+    CometVerifier, CompactBlockVerifier, HeaderIdentity, StateProof, VerificationParameters,
+    VerifiedHeader, WitnessQuorum, WitnessStatus, DEFAULT_CLOCK_DRIFT_SECONDS,
+    DEFAULT_REQUIRED_WITNESSES, MAX_PROOF_BYTES, MAX_PROOF_OPS,
+};
+
 pub type Hash32 = [u8; 32];
 
 pub const POLICY_FORMAT: &str = "BIT-CHECKPOINT-POLICY";
@@ -28,7 +36,10 @@ pub const CHECKPOINT_HASH_DOMAIN: &[u8] = b"BIT-CHECKPOINT-HASH-V1";
 pub const SIGNED_CHECKPOINT_FORMAT: &str = "BIT-SIGNED-CHECKPOINT";
 pub const SIGNED_CHECKPOINT_VERSION: u64 = 1;
 pub const CHECKPOINT_SIGNATURE_DOMAIN: &[u8] = b"BIT-CHECKPOINT-PUBLISHER-SIGNATURE-V1";
+pub const TRUST_SNAPSHOT_FORMAT: &str = "BIT-LIGHT-CLIENT-TRUST-SNAPSHOT";
+pub const TRUST_SNAPSHOT_VERSION: u64 = 1;
 pub const MAX_PUBLISHERS: usize = 1_024;
+pub const MAX_POLICY_HISTORY: usize = 1_024;
 pub const MAX_CHECKPOINT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -55,6 +66,8 @@ pub enum Error {
     ConfirmationMismatch,
     #[error("trusted checkpoint is unavailable")]
     Unavailable,
+    #[error("local clock moved behind the last persisted observation")]
+    ClockRollback,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -574,6 +587,7 @@ pub enum TrustStatus {
     ExpiringSoon,
     Expired,
     Conflict,
+    ClockRollback,
 }
 
 impl TrustStatus {
@@ -585,23 +599,25 @@ impl TrustStatus {
             Self::ExpiringSoon => "expiring_soon",
             Self::Expired => "expired",
             Self::Conflict => "conflict",
+            Self::ClockRollback => "clock_rollback",
         }
     }
 }
 
 #[derive(Clone, Debug)]
-struct TrustedCheckpoint {
-    checkpoint: Checkpoint,
-    warning_seconds: u64,
+struct ApprovedPolicy {
+    policy: CheckpointPolicy,
+    approvals: PolicySignaturePackage,
 }
 
-/// In-memory transition guard for a caller that persists the verified policy,
-/// signed checkpoint, and conflict marker atomically.
+/// Verified trust state. `encode_snapshot` produces one canonical value for an
+/// encrypted wallet database to replace atomically with its scan cursor.
 #[derive(Clone, Debug)]
 pub struct TrustStore {
-    active_policy: CheckpointPolicy,
-    latest: Option<TrustedCheckpoint>,
+    policies: Vec<ApprovedPolicy>,
+    latest: Option<SignedCheckpoint>,
     conflicted: bool,
+    last_observed_time_seconds: u64,
 }
 
 impl TrustStore {
@@ -617,31 +633,45 @@ impl TrustStore {
         }
         approvals.verify(&policy, authority)?;
         Ok(Self {
-            active_policy: policy,
+            policies: vec![ApprovedPolicy {
+                policy,
+                approvals: approvals.clone(),
+            }],
             latest: None,
             conflicted: false,
+            last_observed_time_seconds: 0,
         })
     }
 
     pub fn active_policy(&self) -> &CheckpointPolicy {
-        &self.active_policy
+        &self
+            .policies
+            .last()
+            .expect("TrustStore always has an approved policy")
+            .policy
     }
 
     pub fn latest_checkpoint(&self) -> Option<&Checkpoint> {
-        self.latest.as_ref().map(|trusted| &trusted.checkpoint)
+        self.latest.as_ref().map(|signed| &signed.checkpoint)
     }
 
     pub fn status(&self, now_seconds: u64) -> TrustStatus {
+        if now_seconds < self.last_observed_time_seconds {
+            return TrustStatus::ClockRollback;
+        }
         if self.conflicted {
             return TrustStatus::Conflict;
         }
-        let Some(trusted) = &self.latest else {
+        let Some(signed) = &self.latest else {
             return TrustStatus::NeedsCheckpoint;
         };
+        let Some(policy) = self.policy_for_hash(&signed.checkpoint.policy_hash) else {
+            return TrustStatus::Conflict;
+        };
         match status_at(
-            trusted.checkpoint.issued_at_seconds,
-            trusted.checkpoint.expires_at_seconds,
-            trusted.warning_seconds,
+            signed.checkpoint.issued_at_seconds,
+            signed.checkpoint.expires_at_seconds,
+            policy.expiry_warning_seconds,
             now_seconds,
         ) {
             Ok(status) => status,
@@ -660,16 +690,20 @@ impl TrustStore {
     ) -> Result<()> {
         next.validate_safety(unbonding_seconds)?;
         approvals.verify(&next, authority)?;
-        if next.genesis_manifest_hash != self.active_policy.genesis_manifest_hash
-            || next.chain_context != self.active_policy.chain_context
-            || next.consensus_parameters_sha256 != self.active_policy.consensus_parameters_sha256
+        self.observe_time(now_seconds)?;
+        if self.policies.len() >= MAX_POLICY_HISTORY {
+            return Err(Error::InvalidPolicy("policy history exceeds maximum size"));
+        }
+        let active_policy = self.active_policy();
+        if next.genesis_manifest_hash != active_policy.genesis_manifest_hash
+            || next.chain_context != active_policy.chain_context
+            || next.consensus_parameters_sha256 != active_policy.consensus_parameters_sha256
             || next.sequence
-                != self
-                    .active_policy
+                != active_policy
                     .sequence
                     .checked_add(1)
                     .ok_or(Error::InvalidPolicy("policy sequence overflow"))?
-            || next.previous_policy_hash != Some(self.active_policy.hash()?)
+            || next.previous_policy_hash != Some(active_policy.hash()?)
         {
             return Err(Error::InvalidPolicy("invalid policy rotation chain"));
         }
@@ -679,7 +713,10 @@ impl TrustStore {
         if next.revoke_previous_immediately {
             self.latest = None;
         }
-        self.active_policy = next;
+        self.policies.push(ApprovedPolicy {
+            policy: next,
+            approvals: approvals.clone(),
+        });
         Ok(())
     }
 
@@ -691,15 +728,17 @@ impl TrustStore {
         signed: &SignedCheckpoint,
         now_seconds: u64,
     ) -> Result<TrustStatus> {
+        self.observe_time(now_seconds)?;
         if self.conflicted {
             return Err(Error::Conflict);
         }
         if self.status(now_seconds) == TrustStatus::Expired {
             return Err(Error::TrustExpired);
         }
-        signed.verify(&self.active_policy)?;
-        require_usable(&signed.checkpoint, &self.active_policy, now_seconds)?;
-        self.accept_monotonic(signed.checkpoint.clone())?;
+        let active_policy = self.active_policy().clone();
+        signed.verify(&active_policy)?;
+        require_usable(&signed.checkpoint, &active_policy, now_seconds)?;
+        self.accept_monotonic(signed.clone())?;
         Ok(self.status(now_seconds))
     }
 
@@ -712,22 +751,21 @@ impl TrustStore {
         confirmed_checkpoint_hash: Hash32,
         now_seconds: u64,
     ) -> Result<TrustStatus> {
-        signed.verify(&self.active_policy)?;
+        self.observe_time(now_seconds)?;
+        let active_policy = self.active_policy().clone();
+        signed.verify(&active_policy)?;
         let checkpoint_hash = signed.checkpoint.hash()?;
         if checkpoint_hash != confirmed_checkpoint_hash {
             return Err(Error::ConfirmationMismatch);
         }
-        require_usable(&signed.checkpoint, &self.active_policy, now_seconds)?;
+        require_usable(&signed.checkpoint, &active_policy, now_seconds)?;
         if self.latest.as_ref().is_some_and(|trusted| {
             signed.checkpoint.header_height < trusted.checkpoint.header_height
         }) {
             return Err(Error::NonMonotonic);
         }
         self.conflicted = false;
-        self.latest = Some(TrustedCheckpoint {
-            checkpoint: signed.checkpoint.clone(),
-            warning_seconds: self.active_policy.expiry_warning_seconds,
-        });
+        self.latest = Some(signed.clone());
         Ok(self.status(now_seconds))
     }
 
@@ -740,17 +778,19 @@ impl TrustStore {
                 .ok_or(Error::Unavailable),
             TrustStatus::Expired => Err(Error::TrustExpired),
             TrustStatus::Conflict => Err(Error::Conflict),
+            TrustStatus::ClockRollback => Err(Error::ClockRollback),
             TrustStatus::NeedsCheckpoint | TrustStatus::NotYetValid => Err(Error::Unavailable),
         }
     }
 
-    fn accept_monotonic(&mut self, checkpoint: Checkpoint) -> Result<()> {
+    fn accept_monotonic(&mut self, signed: SignedCheckpoint) -> Result<()> {
+        let checkpoint = &signed.checkpoint;
         if let Some(latest) = &self.latest {
             if checkpoint.header_height < latest.checkpoint.header_height {
                 return Err(Error::NonMonotonic);
             }
             if checkpoint.header_height == latest.checkpoint.header_height {
-                if checkpoint == latest.checkpoint {
+                if checkpoint == &latest.checkpoint {
                     return Ok(());
                 }
                 if checkpoint.header_hash != latest.checkpoint.header_hash
@@ -762,11 +802,166 @@ impl TrustStore {
                 return Err(Error::NonMonotonic);
             }
         }
-        self.latest = Some(TrustedCheckpoint {
-            checkpoint,
-            warning_seconds: self.active_policy.expiry_warning_seconds,
-        });
+        self.latest = Some(signed);
         Ok(())
+    }
+
+    fn observe_time(&mut self, now_seconds: u64) -> Result<()> {
+        if now_seconds < self.last_observed_time_seconds {
+            return Err(Error::ClockRollback);
+        }
+        self.last_observed_time_seconds = now_seconds;
+        Ok(())
+    }
+
+    fn policy_for_hash(&self, hash: &Hash32) -> Option<&CheckpointPolicy> {
+        self.policies
+            .iter()
+            .find(|approved| approved.policy.hash().ok().as_ref() == Some(hash))
+            .map(|approved| &approved.policy)
+    }
+
+    /// Encode the complete verified trust state as one canonical value. The
+    /// wallet database must replace this value and its scan cursor in the same
+    /// encrypted transaction.
+    pub fn encode_snapshot(&mut self, now_seconds: u64) -> Result<Vec<u8>> {
+        self.observe_time(now_seconds)?;
+        let mut writer = Writer::new();
+        writer.array(6);
+        writer.text(TRUST_SNAPSHOT_FORMAT);
+        writer.uint(TRUST_SNAPSHOT_VERSION);
+        writer.array(self.policies.len());
+        for approved in &self.policies {
+            writer.array(2);
+            writer.bytes(&approved.policy.encode_canonical()?);
+            writer.bytes(&approved.approvals.encode_canonical()?);
+        }
+        if let Some(signed) = &self.latest {
+            writer.bytes(&signed.encode_canonical()?);
+        } else {
+            writer.null();
+        }
+        writer.boolean(self.conflicted);
+        writer.uint(self.last_observed_time_seconds);
+        let bytes = writer.finish();
+        require_size(&bytes)?;
+        Ok(bytes)
+    }
+
+    /// Restore a snapshot by replaying every genesis-authorized policy link
+    /// and re-verifying the stored publisher threshold signatures.
+    pub fn restore_snapshot(
+        bytes: &[u8],
+        authority: &AuthorityPolicy,
+        unbonding_seconds: u64,
+        now_seconds: u64,
+    ) -> Result<Self> {
+        require_size(bytes)?;
+        let mut cursor = Cursor::new(bytes);
+        if map_cbor(cursor.array())? != 6
+            || map_cbor(cursor.text())? != TRUST_SNAPSHOT_FORMAT
+            || map_cbor(cursor.uint())? != TRUST_SNAPSHOT_VERSION
+        {
+            return Err(Error::InvalidCbor("unknown trust snapshot format"));
+        }
+        let policy_count = bounded_count(map_cbor(cursor.array())?)?;
+        if policy_count == 0 || policy_count > MAX_POLICY_HISTORY {
+            return Err(Error::InvalidCbor("invalid policy history length"));
+        }
+        let mut policies = Vec::with_capacity(policy_count);
+        for index in 0..policy_count {
+            if map_cbor(cursor.array())? != 2 {
+                return Err(Error::InvalidCbor("approved policy field count"));
+            }
+            let policy = CheckpointPolicy::decode_canonical(&map_cbor(cursor.bytes())?)?;
+            let approvals = PolicySignaturePackage::decode_canonical(&map_cbor(cursor.bytes())?)?;
+            policy.validate_safety(unbonding_seconds)?;
+            approvals.verify(&policy, authority)?;
+            if index == 0 {
+                if policy.sequence != 1 || policy.previous_policy_hash.is_some() {
+                    return Err(Error::InvalidPolicy(
+                        "snapshot policy history does not start at sequence one",
+                    ));
+                }
+            } else {
+                let previous: &ApprovedPolicy = &policies[index - 1];
+                if policy.sequence
+                    != previous
+                        .policy
+                        .sequence
+                        .checked_add(1)
+                        .ok_or(Error::InvalidPolicy("policy sequence overflow in snapshot"))?
+                    || policy.previous_policy_hash != Some(previous.policy.hash()?)
+                    || policy.genesis_manifest_hash != previous.policy.genesis_manifest_hash
+                    || policy.chain_context != previous.policy.chain_context
+                    || policy.consensus_parameters_sha256
+                        != previous.policy.consensus_parameters_sha256
+                {
+                    return Err(Error::InvalidPolicy(
+                        "snapshot contains a broken policy rotation chain",
+                    ));
+                }
+            }
+            policies.push(ApprovedPolicy { policy, approvals });
+        }
+        let latest = map_cbor(cursor.nullable(|cursor| cursor.bytes()))?
+            .map(|value| SignedCheckpoint::decode_canonical(&value))
+            .transpose()?;
+        let conflicted = map_cbor(cursor.boolean())?;
+        let last_observed_time_seconds = map_cbor(cursor.uint())?;
+        map_cbor(cursor.finish())?;
+
+        if now_seconds < last_observed_time_seconds {
+            return Err(Error::ClockRollback);
+        }
+        if conflicted && latest.is_none() {
+            return Err(Error::InvalidCbor(
+                "conflict marker requires a prior trusted checkpoint",
+            ));
+        }
+        if let Some(signed) = &latest {
+            let approved = policies
+                .iter()
+                .find(|approved| {
+                    approved.policy.hash().ok().as_ref() == Some(&signed.checkpoint.policy_hash)
+                })
+                .ok_or(Error::InvalidCheckpoint(
+                    "snapshot checkpoint policy is absent",
+                ))?;
+            signed.verify(&approved.policy)?;
+            if last_observed_time_seconds < signed.checkpoint.issued_at_seconds {
+                return Err(Error::InvalidCbor(
+                    "snapshot clock predates the trusted checkpoint",
+                ));
+            }
+            let active = &policies
+                .last()
+                .expect("non-empty policy history was checked")
+                .policy;
+            if active.revoke_previous_immediately
+                && signed.checkpoint.policy_hash != active.hash()?
+            {
+                return Err(Error::InvalidCheckpoint(
+                    "revoked checkpoint remains in snapshot",
+                ));
+            }
+        }
+        let mut restored = Self {
+            policies,
+            latest,
+            conflicted,
+            last_observed_time_seconds,
+        };
+        if restored
+            .encode_snapshot(last_observed_time_seconds)?
+            .as_slice()
+            != bytes
+        {
+            return Err(Error::InvalidCbor(
+                "trust snapshot does not round-trip canonically",
+            ));
+        }
+        Ok(restored)
     }
 }
 
@@ -778,9 +973,10 @@ fn require_usable(
     match checkpoint.status(policy, now_seconds)? {
         TrustStatus::Current | TrustStatus::ExpiringSoon => Ok(()),
         TrustStatus::Expired => Err(Error::IncomingExpired),
-        TrustStatus::NotYetValid | TrustStatus::NeedsCheckpoint | TrustStatus::Conflict => {
-            Err(Error::NotYetValid)
-        }
+        TrustStatus::NotYetValid
+        | TrustStatus::NeedsCheckpoint
+        | TrustStatus::Conflict
+        | TrustStatus::ClockRollback => Err(Error::NotYetValid),
     }
 }
 
@@ -1223,6 +1419,68 @@ mod tests {
         assert_eq!(
             trust.status(next.activates_at_seconds),
             TrustStatus::NeedsCheckpoint
+        );
+    }
+
+    #[test]
+    fn trust_snapshot_reverifies_history_checkpoint_and_clock() {
+        let initial = policy();
+        let mut trust = TrustStore::install_initial_policy(
+            initial.clone(),
+            &approved_policy(&initial),
+            &authority(),
+            UNBONDING,
+        )
+        .unwrap();
+        let first = signed_checkpoint(&initial, 100, ACTIVATION + 100);
+        trust
+            .import_checkpoint(&first, first.checkpoint.issued_at_seconds)
+            .unwrap();
+
+        let mut next = initial.clone();
+        next.sequence = 2;
+        next.previous_policy_hash = Some(initial.hash().unwrap());
+        next.activates_at_seconds = ACTIVATION + 200;
+        next.publishers = vec![key(10).1, key(11).1];
+        next.publishers.sort();
+        let next_approvals = approved_policy(&next);
+        trust
+            .rotate_policy(
+                next.clone(),
+                &next_approvals,
+                &authority(),
+                UNBONDING,
+                next.activates_at_seconds,
+            )
+            .unwrap();
+        let saved_at = next.activates_at_seconds + 1;
+        let snapshot = trust.encode_snapshot(saved_at).unwrap();
+
+        let mut restored =
+            TrustStore::restore_snapshot(&snapshot, &authority(), UNBONDING, saved_at).unwrap();
+        assert_eq!(restored.active_policy(), &next);
+        assert_eq!(restored.latest_checkpoint(), Some(&first.checkpoint));
+        assert_eq!(restored.status(saved_at), TrustStatus::Current);
+        assert_eq!(restored.encode_snapshot(saved_at).unwrap(), snapshot);
+        assert_eq!(
+            TrustStore::restore_snapshot(&snapshot, &authority(), UNBONDING, saved_at - 1)
+                .unwrap_err(),
+            Error::ClockRollback
+        );
+        assert_eq!(
+            restored.encode_snapshot(saved_at - 1),
+            Err(Error::ClockRollback)
+        );
+
+        let signed_bytes = first.encode_canonical().unwrap();
+        let offset = snapshot
+            .windows(signed_bytes.len())
+            .position(|window| window == signed_bytes)
+            .unwrap();
+        let mut tampered = snapshot;
+        tampered[offset + signed_bytes.len() - 1] ^= 1;
+        assert!(
+            TrustStore::restore_snapshot(&tampered, &authority(), UNBONDING, saved_at).is_err()
         );
     }
 

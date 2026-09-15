@@ -31,6 +31,8 @@ PROOF_PARAMETERS = ROOT / ".tools/downloads"
 PROBE_EPOCH_BLOCKS = 5
 PROBE_UNBONDING_BLOCKS = 8
 PROBE_UNBONDING_SECONDS = 8
+PROBE_EVIDENCE_MAX_AGE_BLOCKS = 5
+PROBE_EVIDENCE_MAX_AGE_SECONDS = 5
 RUN = ROOT / "runtime" / (
     "bit-app-network-" + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%f")
 )
@@ -531,6 +533,12 @@ def configure_network(fixture):
     genesis["initial_height"] = "1"
     genesis["consensus_params"]["version"]["app"] = "1"
     genesis["consensus_params"]["abci"]["vote_extensions_enable_height"] = "0"
+    genesis["consensus_params"]["evidence"]["max_age_num_blocks"] = str(
+        PROBE_EVIDENCE_MAX_AGE_BLOCKS
+    )
+    genesis["consensus_params"]["evidence"]["max_age_duration"] = str(
+        PROBE_EVIDENCE_MAX_AGE_SECONDS * 1_000_000_000
+    )
     genesis["app_state"] = {
         "bit_app_network_probe": 4,
         "genesis_claim": {
@@ -1066,7 +1074,12 @@ def main():
 
     genesis_path = RUN / "nodes/node0/config/genesis.json"
     genesis = json.loads(genesis_path.read_text(encoding="utf-8"))
-    evidence_height = min(height(index) for index in range(4)) - 2
+    # Use the newest height committed by every node.  The probe deliberately
+    # has a five-block/five-second evidence window, so subtracting an
+    # arbitrary margin here races the network while the injector is running.
+    evidence_height = min(height(index) for index in range(4))
+    if evidence_height <= 0:
+        raise AssertionError("no positive common height is available for evidence")
     first_possible_inclusion = height(0) + 1
     evidence = json.loads(
         command(
@@ -1088,6 +1101,11 @@ def main():
     evidence_inclusion_height = wait_evidence_inclusion(
         first_possible_inclusion, evidence["validator_address"]
     )
+    if (
+        evidence_inclusion_height - evidence_height
+        > PROBE_EVIDENCE_MAX_AGE_BLOCKS
+    ):
+        raise AssertionError("evidence was included outside the configured block window")
     wait_height(evidence_inclusion_height + 3)
 
     validator_address = evidence["validator_address"].lower()

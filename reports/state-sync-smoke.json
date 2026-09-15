@@ -1,16 +1,16 @@
 {
   "scope": "official bit-node snapshot publication and real CometBFT State Sync using two RPC trust sources, one P2P snapshot publisher, and one fresh target",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-state-sync-20260915T010159034824",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-state-sync-20260915T051152285065",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "bit_sha256": "8c262cc2bda6f97546d1a3232fdccb2a43b975767d3ee8e848825296a9c3aa99",
-    "bit_node_sha256": "ecb91b9a878a62f3dc590cd305e682003ddbba033e139b4ec50058964bb58647"
+    "bit_sha256": "4a84caf22066e22fac7d8719eb848271dc4855a9177ba8bf39e8adead16144bb",
+    "bit_node_sha256": "1bdcf5f80639998428023cace312b04458a095d5b8cccc947bd8a3cb1deff570"
   },
   "checks": {
-    "identity_manifest_hash": "6eea857de8f5e7814ae60545cc7678ee5baef1771a3f05f9e2ab063cae57397c",
-    "derived_manifest_hash": "45cb005779e87b120a20f1e05f6fe027f20ba91ba97d17e0cf43445a369f7532",
+    "identity_manifest_hash": "e1c6b1f34be1f97b3a63dbf32d7c598d69bce067dcee23b95c83a78fe84be784",
+    "derived_manifest_hash": "68ad220d5217fc8399a4f5fb8f8197c09e31603946f2d2b9137160304a7bf970",
     "derived_approval_count": 2,
     "snapshot_interval_blocks": 5,
     "source_snapshot_heights": {
@@ -33,19 +33,19 @@
     "rpc_sources": 2,
     "snapshot_p2p_sources": 1,
     "trust_height": 11,
-    "trust_hash": "9f8e6854d5b0b459e136654e21ba6697e11c31040afcfa9befca23d5bb7fdd46",
+    "trust_hash": "b35ea4a9b992b1ce08ae84fd9d121ac1a125c280e58b1d63be6ce257dc61184b",
     "rpc_sources_agreed_on_trust_block": true,
     "activated_snapshot": {
-      "snapshot_id": "d896e630a651da1bc838bf76cc380d1dee7181fd29fe5b9c83ab81939c65c61f",
-      "state_height": 25,
-      "app_hash": "af9783bb96dfd52c2849308500cf381fdb75192b03ef75e39d4f32d08fddb7eb",
-      "chain_context": "9ffbb9fbb444bf8f0527877d19e16115f1e109212ae91915dfcd583227de37ab"
+      "snapshot_id": "0665634e0a1d91fbea7c46ff70a1a7d82aa2bd9d00fe74f7f7f69cc53713c549",
+      "state_height": 20,
+      "app_hash": "2f331158687f9fb1fc2e8492de88c1cf4bb173b728db671cc2d2db1b42aaf777",
+      "chain_context": "3c7aae25d75c930a1f8ce867e4008e6442518dd285e96c415f2d94c0e7047b24"
     },
-    "state_sync_elapsed_seconds": 21.41763570002513,
-    "target_caught_up_height": 47,
+    "state_sync_elapsed_seconds": 19.821544900012668,
+    "target_caught_up_height": 45,
     "active_app_hash_matches_source_light_block": true,
     "historical_ics23_value_and_proof_after_restart": true,
-    "restart_height": 47,
+    "restart_height": 45,
     "resumed_height": 53
   },
   "limitations": [
@@ -56,6 +56,6 @@
     "bad-peer chunk refetch remains covered by the direct ABCI test rather than this live network run"
   ],
   "status": "PASS",
-  "started_at": "2026-09-15T01:01:59.034927+00:00",
-  "finished_at": "2026-09-15T01:03:06.266327+00:00"
+  "started_at": "2026-09-15T05:11:52.285166+00:00",
+  "finished_at": "2026-09-15T05:13:00.304985+00:00"
 }

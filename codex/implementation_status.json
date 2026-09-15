@@ -3,18 +3,18 @@
   "scope": "active BIT 1.2 implementation; docs/solo remains historical reference",
   "overall": "IN_PROGRESS",
   "completion_estimate": {
-    "full_launch_percent_range": [37, 41],
+    "full_launch_percent_range": [38, 42],
     "chain_core_percent": 88,
     "basis": "implemented and tested code versus D-001 through D-030, including product, operations, independent review, release evidence, and mainnet external inputs",
     "confidence": "MEDIUM_FOR_CURRENT_CHAIN_SLICES_LOW_FOR_FULL_LAUNCH"
   },
   "validated_cross_milestone_slice": {
-    "name": "private transfer, native staking, exits, Byzantine slashing, real state sync, and signed-checkpoint trust lifecycle",
+    "name": "private transfer, native staking, exits, Byzantine slashing, real state sync, signed checkpoints, and wallet-side verified sync primitives",
     "status": "TESTED_ON_WINDOWS_DESKTOP",
     "implementation": "crates/bit-types + crates/bit-shielded + crates/bit-transaction + crates/bit-emission + crates/bit-staking + crates/bit-state + crates/bit-app + crates/bit-light-client + crates/bit-gateway",
     "evidence": "reports/development-baseline.json",
     "persistent_state": true,
-    "storage_schema": 16,
+    "storage_schema": 20,
     "mainnet_native_asset_id": false
   },
   "milestones": [
@@ -51,9 +51,9 @@
       "id": "D-004",
       "name": "状态存储",
       "status": "IN_PROGRESS",
-      "implemented": ["schema v16 Cnidarium/JMT/RocksDB state", "Penumbra TCT frontier", "atomic prepare/commit", "synchronous WAL commit with propagated storage errors", "pre-WAL WriteBatch validation", "deterministic pre-write and post-write/cache-publication fault boundaries", "supply and staking cross-checks", "exit queues", "H/H+1/H+2 schedules", "per-height validator history", "evidence and SlashJob persistence", "latest-state ICS23 membership and non-membership proofs", "canonical chunk-hashed RocksDB checkpoint export and isolated validated restore", "restart validation and tamper rejection"],
+      "implemented": ["schema v20 Cnidarium/JMT/RocksDB state", "Penumbra TCT frontier", "atomic prepare/commit", "synchronous WAL commit with propagated storage errors", "pre-WAL WriteBatch validation", "deterministic pre-write and post-write/cache-publication fault boundaries", "supply and staking cross-checks", "exit queues", "H/H+1/H+2 schedules", "per-height validator history", "evidence and SlashJob persistence", "latest and historical ICS23 membership and non-membership proofs", "canonical chunk-hashed RocksDB checkpoint export and isolated validated restore", "restart validation and tamper rejection"],
       "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["real disk-quota and operating-system fsync failure injection", "database-file corruption and version-rollback process tests", "ABCI state-sync transport and light-client trusted roots", "cross-platform snapshot restore", "historical proofs after restart", "pruning and growth benchmarks", "schema migration tooling"]
+      "remaining": ["real disk-quota and operating-system fsync failure injection", "database-file corruption and version-rollback process tests", "cross-platform snapshot restore", "pruning and growth benchmarks", "schema migration tooling"]
     },
     {
       "id": "D-005",
@@ -61,7 +61,7 @@
       "status": "IN_PROGRESS",
       "implemented": ["shared CheckTx/PrepareProposal/ProcessProposal/FinalizeBlock execution", "strict InitChain", "last-commit and next-validator-hash checks", "H+2 ValidatorUpdates", "FinalizeBlock Byzantine evidence normalization", "latest ICS23 query", "durable last-validator safety halt journal and digest-gated acknowledgement", "ABCI TCP roundtrip", "four-node CometBFT application probe"],
       "tested_by": ["reports/development-baseline.json", "feasibility/reports/bit-app-network-result.json"],
-      "remaining": ["production execution and compact digest provider", "snapshot ABCI", "historical-height queries", "formal node command", "multi-node private transaction scenarios"]
+      "remaining": ["external signer integration", "operating-system crash and disk-exhaustion process tests", "multi-machine consensus deployment", "production service lifecycle and telemetry"]
     },
     {
       "id": "D-006",
@@ -69,7 +69,7 @@
       "status": "IN_PROGRESS",
       "implemented": ["102.4 billion BIT cap", "checked Q/P/D/X/C/F/G accounting", "fixed epoch issuance and forfeiture", "fee policy", "reward and commission distribution", "Unbond/ClaimExit transitions", "Byzantine P/X Burn with no issuance reopening", "state supply audits and tamper rejection"],
       "tested_by": ["reports/development-baseline.json"],
-      "remaining": ["proof-backed fee quote API", "SPEC-04 supply audit snapshot encoding", "wallet scan and balance loop", "multi-node accounting replay"]
+      "remaining": ["proof-backed fee quote API", "wallet scan and balance loop", "independent accounting review and long-duration load replay"]
     },
     {
       "id": "D-007",
@@ -91,9 +91,9 @@
       "id": "D-010",
       "name": "轻客户端与状态同步",
       "status": "IN_PROGRESS",
-      "implemented": ["formal bit-node ABCI state sync", "two-RPC CometBFT trust-source recovery", "canonical signed checkpoint policy and package", "genesis-authority-approved publisher threshold", "trust period shorter than unbonding", "contiguous policy rotation and immediate revocation", "current/warning/expired/conflict trust state machine", "explicit hash-confirmed trust re-establishment", "bit network verify-checkpoint", "typed mainnet checkpoint preflight evidence", "bounded GET /v1/checkpoints candidate contract", "Rust/Python shared checkpoint vectors"],
+      "implemented": ["formal bit-node ABCI state sync", "two-RPC CometBFT trust-source recovery", "canonical signed checkpoint policy and package", "genesis-authority-approved publisher threshold", "trust period shorter than unbonding", "contiguous policy rotation and immediate revocation", "current/warning/expired/conflict/clock-rollback trust state machine", "explicit hash-confirmed trust re-establishment", "canonical checkpoint trust snapshot with policy-chain re-verification", "bounded full LightBlock persistence and checkpoint re-verification", "Tendermint 0.40.4 header/commit/current-and-next-validator-set verification", "two-independent-witness quorum and valid-header conflict lock", "verified-header-bound ICS23 membership and non-membership verification", "compact block chain-context/hash-proof/height continuity verification", "bit network verify-checkpoint", "typed mainnet checkpoint preflight evidence", "bounded GET /v1/checkpoints candidate contract", "Rust/Python shared checkpoint vectors"],
       "tested_by": ["reports/development-baseline.json", "reports/state-sync-smoke.json"],
-      "remaining": ["wallet header and validator-set verification", "atomic wallet trust persistence", "interrupted-download and disk-full process tests", "independent failure-domain deployment", "Tor and W39 recovery integration", "production publisher operations"]
+      "remaining": ["SQLCipher atomic integration for trust/header/evidence/scan cursor", "NetworkClient and GET /v1/headers integration", "interrupted-download and disk-full process tests", "independent failure-domain deployment", "Tor and W39 recovery integration", "production publisher operations"]
     }
   ],
   "remaining_task_range": "D-009 and D-011 through D-030 remain unstarted or partial; D-010 is in progress",

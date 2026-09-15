@@ -1,6 +1,6 @@
 # BIT D-010 轻客户端与状态同步
 
-状态：`IN_PROGRESS`。正式 `bit-node` 的应用快照发布、ABCI State Sync、两个 RPC 轻客户端来源和真实 CometBFT 空节点恢复已经实现；签名检查点的 v1 字节合同、阈值验证、策略轮换和可信期状态机也已实现。钱包头验证与可信状态持久化、中断续传和跨独立故障域验收尚未完成。
+状态：`IN_PROGRESS`。正式 `bit-node` 的应用快照发布、ABCI State Sync、两个 RPC 轻客户端来源和真实 CometBFT 空节点恢复已经实现；签名检查点的 v1 字节合同、阈值验证、策略轮换和可信期状态机也已实现。钱包侧 CometBFT 头/验证者集合、双证人门槛、ICS23 状态证明和 compact 连续性验证原语已实现；加密数据库与网络接线、中断续传和跨独立故障域验收尚未完成。
 
 ## 1. 信任边界
 
@@ -8,7 +8,7 @@
 
 CometBFT 在 `OfferSnapshot` 中把轻客户端已验证状态对应的 app hash 交给应用。BIT 要求它与快照 manifest 的 app hash 完全一致，再检查 snapshot ID、chain context、schema、高度、文件集合和每个 chunk hash。应用导入后独立打开状态并执行全部持久化不变量，因此 P2P 快照发布者不能仅靠伪造 manifest 改变已验证状态根。
 
-钱包和只读客户端仍必须实现自己的已验证头存储、相邻头/验证者集合验证和 ICS23 proof 校验。节点 State Sync 通过不代表钱包 D-010 已完成。
+钱包和只读客户端通过 `bit-light-client` 从签名检查点物化完整可信 LightBlock：检查锚点高度、头哈希、H-1 app hash、commit、当前验证者集合和下一验证者集合哈希，再用固定的 Tendermint 0.40.4 verifier 校验后续头的链 ID、BFT 时间、信任期、时钟漂移、投票权与集合变化。节点 State Sync 通过不代表钱包 D-010 已完成；这些原语仍需接入 wallet-core 的数据库、Tor 网络和扫描事务。
 
 ## 2. 快照发布
 
@@ -55,14 +55,22 @@ bit-node start --bundle BUNDLE --state-dir STATE --listen 127.0.0.1:26658 \
 
 `TrustStore` 区分 `needs_checkpoint`、`not_yet_valid`、`current`、`expiring_soon`、`expired` 和 `conflict`。正常更新只接受严格递增高度；两个达到阈值但同高度指向不同头或 app hash 的检查点会进入持久化调用方必须保存的冲突锁定状态。当前锚点到期后，普通导入一律返回 `TrustExpired`；重新建立信任必须额外传入用户或操作员从独立渠道核对的精确 checkpoint hash，网关多数响应不能绕过这一步。
 
+钱包侧验证内核新增以下约束：
+
+- `CometVerifier` 用检查点固定的头/app hash 核验完整 LightBlock 的 commit、当前和下一验证者集合，后续更新调用上游 Tendermint 生产 verifier；信任期仍严格短于解除质押期，默认最大时钟漂移为 10 秒。
+- `WitnessQuorum` 要求主来源之外至少两个配置唯一的 witness。只有已经对同一可信状态通过密码学验证的头才能计入确认；同高度出现另一份有效头时立即进入冲突状态，HTTP 多数本身不替代共识验证。
+- `StateProof` 限制 key、证明数量和总字节数，按网关 `ics23:jmt:v1` 顺序解码 protobuf proof，并要求 proof 的 `state_height` 和 `app_hash` 精确等于已验证头承诺的 H-1 状态。
+- `CompactBlockVerifier` 严格解码 canonical compact block，核对 chain context、连续高度和 `compact/hash/<20 位高度>` 的 ICS23 成员证明，只有证明值等于本地重算的域分离 hash 才推进扫描游标。
+- 检查点可信状态可编码为一个规范本地快照，包含从序号 1 开始的完整策略/审批链、原始签名检查点、冲突标记和最后观测时间。恢复会重放所有创世审批和发布者签名，并拒绝本地时钟退到已持久化水位之前。完整 LightBlock 另以有界 JSON 保存，恢复时重新执行锚点、commit 与验证者集合检查，不能只反序列化后直接信任。
+
 `bit network verify-checkpoint` 同时读取签署的 genesis identity、运行时输入、策略、策略审批和签名检查点，复核全部绑定、阈值、解除质押关系、当前时间及 `--expected-checkpoint-hash`。主网输入 schema 和 `bit release preflight` 另外要求策略、策略审批、可信检查点的文件 SHA-256 及逐字段副本，并与实际签名产物逐项核对。`GET /v1/checkpoints` 只发布经过密码学验证且数量有界的候选产物，返回固定的 `manual_confirmation_required`，并在响应前核对目录绑定的 genesis/chain 与实际应用状态；它不是自动信任入口。
 
 迁移规则是拒绝旧形状。活跃 BIT 此前没有已冻结的检查点 wire version，因此只有上述 version 1 可以进入可信存储；缺少 `expires_at_seconds`、策略哈希或 app hash 的旧草案对象不做字段补全，也不能从 `issued_at` 本地推导到期时间。升级后的客户端若没有 v1 锚点，从 `needs_checkpoint` 开始并要求显式导入。
 
 ## 7. 剩余工作
 
-1. 把已验证策略、签名检查点和冲突标记原子持久化到钱包数据库，并做进程崩溃、时钟回拨、长期离线和策略轮换恢复测试。
+1. 把规范检查点快照、完整 LightBlock、header 冲突证据和扫描游标接入 SQLCipher 同一事务，并做数据库进程崩溃、长期离线和策略轮换恢复测试；当前库级恢复已覆盖策略链重新验签、内容篡改和时钟回拨拒绝。
 2. 对 State Sync 下载中断、进程崩溃、peer 切换、旧快照淘汰和磁盘空间不足做真实进程级恢复测试。
 3. 在独立机器和故障域部署 RPC、P2P 快照及归档来源，验证来源独立性、限流、可用性和恶意响应。
-4. 实现钱包/SDK 的相邻头与验证者集合验证、ICS23 proof、compact 连续性，并接入 Rust NetworkClient、Tor 网络出口与 W39 恢复界面。
+4. 将已经实现的头/验证者集合、双 witness、ICS23 proof 和 compact 连续性原语接入 Rust NetworkClient、Tor 网络出口、扫描数据库与 W39 恢复界面，并增加真实网关恶意响应测试。
 5. 把检查点构建、分签、轮换、撤销和网关目录装载串成正式运营流程；当前库能构建签名对象，CLI 与主网 preflight 能验证最终产物，但正式节点尚未装载真实发布者材料。

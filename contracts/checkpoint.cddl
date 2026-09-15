@@ -52,6 +52,24 @@ signed-checkpoint-v1 = [
   publisher-signatures: [* signature-entry],
 ]
 
+; Local wallet value. The encrypted wallet database stores this value and the
+; separately serialized full CometBFT LightBlock in the same transaction. On
+; restore, every embedded policy approval and checkpoint signature is verified
+; again, and the LightBlock must reproduce the pinned header/app hashes.
+approved-checkpoint-policy-v1 = [
+  checkpoint-policy-cbor: bytes,
+  checkpoint-policy-approvals-cbor: bytes,
+]
+
+light-client-trust-snapshot-v1 = [
+  "BIT-LIGHT-CLIENT-TRUST-SNAPSHOT",
+  1,
+  policy-history: [1* approved-checkpoint-policy-v1],
+  latest-signed-checkpoint-cbor: nil / bytes,
+  conflicting-headers-or-checkpoints: bool,
+  last-observed-time-seconds: uint,
+]
+
 ; policy-hash = SHA-256(
 ;   "BIT-CHECKPOINT-POLICY-HASH-V1" || uint64_be(len(policy-cbor)) || policy-cbor)
 ; checkpoint-hash = SHA-256(
