@@ -1,6 +1,6 @@
 # BIT D-010 轻客户端与状态同步
 
-状态：`IN_PROGRESS`。正式 `bit-node` 的应用快照发布、ABCI State Sync、两个 RPC 轻客户端来源和真实 CometBFT 空节点恢复已经实现；钱包轻客户端、签名检查点、可信期更新、中断续传和跨独立故障域验收尚未完成。
+状态：`IN_PROGRESS`。正式 `bit-node` 的应用快照发布、ABCI State Sync、两个 RPC 轻客户端来源和真实 CometBFT 空节点恢复已经实现；签名检查点的 v1 字节合同、阈值验证、策略轮换和可信期状态机也已实现。钱包头验证与可信状态持久化、中断续传和跨独立故障域验收尚未完成。
 
 ## 1. 信任边界
 
@@ -45,10 +45,24 @@ bit-node start --bundle BUNDLE --state-dir STATE --listen 127.0.0.1:26658 \
 
 现阶段网络应为每个 height/format 指定一个快照发布者，其他节点可以镜像该发布者生成的完全相同快照。生产多来源分发需要在以下方案中完成并验证一项：规范逻辑状态快照；按 snapshot ID 路由的协议扩展；或内容寻址镜像与 P2P 发布约束。两个独立 RPC 轻客户端来源已经用于验证可信头，但不等于已有两个独立物理快照发布者。
 
-## 6. 剩余工作
+## 6. 签名检查点与可信期
 
-1. 冻结签名检查点的规范编码、发布者集合、阈值、生成时间、到期时间、轮换和撤销语义，并把检查点绑定到 genesis 与网络配置。
-2. 实现信任期即将到期、已经过期、检查点冲突和长期离线的状态机；过期后必须要求重新建立信任，不能自动相信多数 HTTP 响应。
-3. 对下载中断、进程崩溃、peer 切换、旧快照淘汰和磁盘空间不足做真实进程级恢复测试。
-4. 在独立机器和故障域部署 RPC、P2P 快照及归档来源，验证来源独立性、限流、可用性和恶意响应。
-5. 实现钱包/SDK 的头验证、证明验证、compact 连续性和可信状态持久化，并接入网关、Tor 网络出口与恢复界面。
+`crates/bit-light-client` 冻结了 `BIT-CHECKPOINT-POLICY`、`BIT-CHECKPOINT-POLICY-APPROVALS`、`BIT-CHECKPOINT` 和 `BIT-SIGNED-CHECKPOINT` 四种规范 CBOR 产物。精确字段、顺序和哈希/签名域见 `contracts/checkpoint.cddl`，Rust 与独立 Python oracle 共同锁定 `tests/vectors/checkpoint-vectors.json`。
+
+发布者策略绑定 `genesis_manifest_hash`、派生 `chain_context` 和创世签署的运行时参数 SHA-256。策略列出有序唯一的 Ed25519 发布者公钥、阈值、启用时间、信任期、预警期、序号、前一策略哈希和是否立即撤销前策略；策略自身必须达到创世 identity 审批公钥的原阈值。轮换策略必须序号连续且引用活动策略哈希。非立即撤销时，仅已接受的旧检查点可沿用到自身到期，旧发布者不能再导入新检查点；立即撤销会清除旧锚点并要求新策略检查点。
+
+每个检查点绑定策略、创世和网络，明确记录 CometBFT `header_height`/`header_hash` 及其认证的 `state_height = header_height - 1`/`app_hash`，并包含生成与到期秒数。有效期不得长于策略信任期，策略信任期必须严格短于签署运行时配置的解除质押秒数。发布者按策略阈值签名；这些签名只表示发布者背书，不改变共识状态或验证者权力。
+
+`TrustStore` 区分 `needs_checkpoint`、`not_yet_valid`、`current`、`expiring_soon`、`expired` 和 `conflict`。正常更新只接受严格递增高度；两个达到阈值但同高度指向不同头或 app hash 的检查点会进入持久化调用方必须保存的冲突锁定状态。当前锚点到期后，普通导入一律返回 `TrustExpired`；重新建立信任必须额外传入用户或操作员从独立渠道核对的精确 checkpoint hash，网关多数响应不能绕过这一步。
+
+`bit network verify-checkpoint` 同时读取签署的 genesis identity、运行时输入、策略、策略审批和签名检查点，复核全部绑定、阈值、解除质押关系、当前时间及 `--expected-checkpoint-hash`。主网输入 schema 和 `bit release preflight` 另外要求策略、策略审批、可信检查点的文件 SHA-256 及逐字段副本，并与实际签名产物逐项核对。`GET /v1/checkpoints` 只发布经过密码学验证且数量有界的候选产物，返回固定的 `manual_confirmation_required`，并在响应前核对目录绑定的 genesis/chain 与实际应用状态；它不是自动信任入口。
+
+迁移规则是拒绝旧形状。活跃 BIT 此前没有已冻结的检查点 wire version，因此只有上述 version 1 可以进入可信存储；缺少 `expires_at_seconds`、策略哈希或 app hash 的旧草案对象不做字段补全，也不能从 `issued_at` 本地推导到期时间。升级后的客户端若没有 v1 锚点，从 `needs_checkpoint` 开始并要求显式导入。
+
+## 7. 剩余工作
+
+1. 把已验证策略、签名检查点和冲突标记原子持久化到钱包数据库，并做进程崩溃、时钟回拨、长期离线和策略轮换恢复测试。
+2. 对 State Sync 下载中断、进程崩溃、peer 切换、旧快照淘汰和磁盘空间不足做真实进程级恢复测试。
+3. 在独立机器和故障域部署 RPC、P2P 快照及归档来源，验证来源独立性、限流、可用性和恶意响应。
+4. 实现钱包/SDK 的相邻头与验证者集合验证、ICS23 proof、compact 连续性，并接入 Rust NetworkClient、Tor 网络出口与 W39 恢复界面。
+5. 把检查点构建、分签、轮换、撤销和网关目录装载串成正式运营流程；当前库能构建签名对象，CLI 与主网 preflight 能验证最终产物，但正式节点尚未装载真实发布者材料。

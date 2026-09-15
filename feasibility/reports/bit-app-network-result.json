@@ -1,13 +1,13 @@
 {
   "scope": "four CometBFT v0.38.23 processes using real bit-app, bit-state JMT/RocksDB, Groth16 Transfer, ClaimGenesis, Unbond and ClaimExit, canonical block artifacts, staking and emission",
-  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260915T002011732249",
+  "runtime_dir": "D:\\others\\BIT\\feasibility\\runtime\\bit-app-network-20260915T010337302353",
   "toolchain": {
     "cometbft_module": "v0.38.23",
     "cometbft_self_reported": "0.38.22",
     "cometbft_sha256": "48488ceb8cd3dd008d4225b166e87f9b355955c92ae7cc75172b1bc59fd9833e",
-    "application_sha256": "bb6574234ab8046e628915ac88d12d641cc6f612610a83ecf6882d67a963bcc9",
-    "exit_fixture_sha256": "931fe7cd4c184510acff0197f213c3635b6bd928a7ca17470ace723c15766ab8",
-    "evidence_injector_sha256": "cf031dbfae7589668d91d25b221e3d62a600e1a9533c7edce0f418740cd71da8"
+    "application_sha256": "ce2556dd62a6782c0bb3c7e93978b416d6c02b9939c6314a604a55ff802ddda0",
+    "exit_fixture_sha256": "d362ea4f0a00114f6178f040158e39a9ea1f0c7608ad8da759a0f7305f469ece",
+    "evidence_injector_sha256": "52c85bc0ae181b2ba1126e330b4cb8b8c31da13b0c36385a7af8c6035f503668"
   },
   "checks": {
     "real_transfer": {
@@ -27,12 +27,12 @@
       "transaction_record_proved_on_nodes": 4,
       "nullifier_records_proved_on_nodes": 4,
       "post_transfer_tree_root": "b47b652d8693b457cb7070edcb56b69ffb85108ddef04c78fbb2f6c6623e7008",
-      "post_transfer_app_hash": "f365847296429dac5a840e4b0971ea48db30c50eca717655a93dac44b319cf26"
+      "post_transfer_app_hash": "c3de607db6cf348c60cd1058942ff1ed7136ffa28c10fd35a9348f1d63c77a66"
     },
     "canonical_block_artifacts": {
       "height": 12,
-      "execution_hash": "19da54b243f70c2b596a376442b562b7793ff4d82e1c186ce3ea57ca382c624a",
-      "compact_hash": "c592de54a4a158f57048d3672c2ef6324686ac3a0a70d5f09937d5b7d8ccea24",
+      "execution_hash": "ae108ddb7878bde926e7c51bc309f5a824807fecb6d182285d92f867b22ce4bf",
+      "compact_hash": "fe00e2ac82e5db955569adab86f192dde5a0060487705a2568aa9341cdad3f75",
       "execution_bytes": 237,
       "compact_bytes": 1577,
       "state_proofs_and_abci_event_match_on_nodes": 4,
@@ -43,7 +43,7 @@
     },
     "canonical_supply_audit": {
       "canonical_bytes": 309,
-      "sha256": "49c4cc975f8206385a1fd26a0153d2bf9a35356b94e5b66fea2e8c68eca97c7e",
+      "sha256": "9a76112f8485fdcbcea3295dcf65ac809f633fe5ab4c8146c5901ae1e093b4ed",
       "state_proved_on_nodes": 4
     },
     "claim_genesis": {
@@ -64,7 +64,7 @@
         "fees": "1000000"
       },
       "post_claim_tree_root": "fe07334979e69253baf67e099b63cb54c3c1f8ef16eac4584d839330b143ff0e",
-      "post_claim_app_hash": "dcb948caa8ac2fea11ad357b9acda67d07e2ef3ca7375c0f8b66b75361579c8b",
+      "post_claim_app_hash": "16c6e284fa109d396076d5b72cd9b7e727c32413b0ad262933793824bd549db9",
       "distinct_spent_claim_replay": {
         "tx_id": "8f7600288854752666c464e9fab4bfc65103bcc36b3d2d235ffb91e2e0cf651d",
         "check_tx_code": 12,
@@ -75,30 +75,30 @@
     "real_exit": {
       "unbond_height": 23,
       "unbond_index": 0,
-      "unbond_tx_id": "c605575688acb9a6e290db813d5fe677aa20a16f6c22578423e2d0eb8750c143",
-      "claim_exit_height": 39,
+      "unbond_tx_id": "43d0f1e31b40c5677b257f658ee75b22f74df5aeecf20a75d9cefb771d9d2b5f",
+      "claim_exit_height": 38,
       "claim_exit_index": 0,
-      "claim_exit_tx_id": "98ba6debeb0ec5e9668b8f03b417874a5ac3d36f1b91d93386c9bdd12d9eb19a",
+      "claim_exit_tx_id": "b0782f0ad730e9a9ae16af06a129aef796b1ceee96db2a39dd3072bd3b89cfdb",
       "owner_pubkey": "8ca63145907a2e6c5fb3dc0791c0189b8252da3e4143704b3b2ca4e526f25dd1",
       "position_id": "cc24ba013ee4470668805f2f5b5a1a8d6a9dcf921f55ab7853d48e45ae84352f",
       "ticket_id": "8f75af2e045ae1d6b4bcc07753f7c94754c8e989efc91b8ef466b2308da26035",
-      "cohort_id": "ec484b80c8bff63724b749fdc84e945eba2444a88b8762987bf17fefe4d44a65",
+      "cohort_id": "308482492cd514c370b2f6d2d9ee0bf246b4269ad80e3fdb8733fc8ea8d777da",
       "shares_atomic": "5000000000",
-      "gross_atomic": "5569868542857",
-      "exit_release_atomic": "5569867542857",
+      "gross_atomic": "4414035368863",
+      "exit_release_atomic": "4414034368863",
       "unbond_fee_atomic": "1000000",
       "claim_exit_fee_atomic": "1000000",
-      "claim_output_atomic": "5569866542857",
+      "claim_output_atomic": "4414033368863",
       "zero_value_unbond_output_commitment": "983962a1afb90e669becd8f427d63d5db9afeb3c25d26a305794978a767e440d",
       "claim_output_commitments": [
-        "3f720f6a33bf5efe94fe7960f80611aa2a8a73331191c401165117b24143ae0e"
+        "1da4eecfb6913b8f83277df4c0af054fbf5858eebe148403e64c4cbe8b06b00c"
       ],
       "pending_cohort": {
-        "cohort_id": "ec484b80c8bff63724b749fdc84e945eba2444a88b8762987bf17fefe4d44a65",
-        "validator_id": "d74d8afbcb0efed60737787b01951ed5e866931b5b5401d04412f37d70e0a5b5",
+        "cohort_id": "308482492cd514c370b2f6d2d9ee0bf246b4269ad80e3fdb8733fc8ea8d777da",
+        "validator_id": "ff9f186c30a7ba31720b4b1ca5c677e2aab292591a357bf42afef8d5a2aaa1bc",
         "exit_epoch": 4,
-        "assets_atomic": 5569867542857,
-        "total_units_atomic": 5569867542857,
+        "assets_atomic": 4414034368863,
+        "total_units_atomic": 4414034368863,
         "exposure_end_height": 27,
         "exposure_end_time_seconds": null,
         "maturity_time_seconds": null,
@@ -106,103 +106,103 @@
         "status": 0
       },
       "mature_cohort": {
-        "cohort_id": "ec484b80c8bff63724b749fdc84e945eba2444a88b8762987bf17fefe4d44a65",
-        "validator_id": "d74d8afbcb0efed60737787b01951ed5e866931b5b5401d04412f37d70e0a5b5",
+        "cohort_id": "308482492cd514c370b2f6d2d9ee0bf246b4269ad80e3fdb8733fc8ea8d777da",
+        "validator_id": "ff9f186c30a7ba31720b4b1ca5c677e2aab292591a357bf42afef8d5a2aaa1bc",
         "exit_epoch": 4,
-        "assets_atomic": 5569867542857,
-        "total_units_atomic": 5569867542857,
+        "assets_atomic": 4414034368863,
+        "total_units_atomic": 4414034368863,
         "exposure_end_height": 27,
-        "exposure_end_time_seconds": 1789431647,
-        "maturity_time_seconds": 1789431655,
+        "exposure_end_time_seconds": 1789434252,
+        "maturity_time_seconds": 1789434260,
         "maturity_height": 35,
         "status": 2
       },
       "unbond_container_deltas": {
-        "stake": "-5569868542857",
-        "exits": "5569867542857",
+        "stake": "-4414035368863",
+        "exits": "4414034368863",
         "shielded": "0",
         "fees": "1000000"
       },
       "claim_exit_container_deltas": {
         "stake": "0",
-        "exits": "-5569867542857",
-        "shielded": "5569866542857",
+        "exits": "-4414034368863",
+        "shielded": "4414033368863",
         "fees": "1000000"
       },
       "unbonding_restart_height": 27,
       "unbonding_restart_resumed_heights": [
         30,
-        30,
-        30,
-        30
+        32,
+        32,
+        32
       ],
       "output_proofs_verified": true,
       "position_owner_authorizations_verified": true,
       "binding_signatures_verified": true,
       "transaction_ticket_and_cohort_records_proved_on_nodes": 4,
       "historical_pending_and_claimed_records_after_restart": true,
-      "post_claim_exit_tree_root": "d1fa30bca6bd8ad9130b372dd4067413e96dde7f8cca35883b2a7bd3ed044c05",
-      "post_claim_exit_app_hash": "b57b5dcf9ae78ca7a0351d0b3b3b368a61a7a006dd450df0465ea780e589ae23",
+      "post_claim_exit_tree_root": "9822ab95e4bcc473c9693ea623fb35ee735c1d8daaeaf37932efc8fe4e7ea800",
+      "post_claim_exit_app_hash": "6e353cd6d9e6fad303901bc5e03dff882a8e4b8dbdbc099cb47b9319c3910636",
       "distinct_claimed_ticket_replay": {
-        "tx_id": "4764211e8b7f651b1bf6fac9ccc7b06cf0e1d3881f213651fb5f7258f25186a8",
+        "tx_id": "501f70c45d88c954c292a419a9a994ea56f843da51bfc7d1bcfb20d9cf29a2e2",
         "check_tx_code": 11,
         "rejected_by_bit_app": true
       }
     },
     "validator_powers_h6_h7_h8": {
       "6": {
-        "146ea111831afae725a78d6b52916b8059d3e927c7dae5019b0297539cf2f9e1": 10,
-        "00a4d3113f68fabf413f03e07b1dc3f0abb6098a997155fdb0b54c5671e20978": 10,
-        "2481a483d7ff9779f30a0c522743e4cdfedccc0a94d43f24e19df450cd68e110": 10,
-        "376b96e7740abe14d612f620baab850da6e08cdf13fbd61f880eeae136db645b": 10
+        "9e26522e189d7b970e66fdd32ae25795304a314953bad447f72f24882d4df921": 10,
+        "4fd6faebbbe450909b4d91061f6d437a29fb735b1b5378959b4d53f66f31e00c": 10,
+        "63b750680e74b8a661d0e22f47c29262c91cddc9a8d6cfcabf241b720c82bb7f": 10,
+        "5f1e8929dde32f2b9afedf7800b5cc3b992344453a8c4820490b3a716c48a32d": 10
       },
       "7": {
-        "146ea111831afae725a78d6b52916b8059d3e927c7dae5019b0297539cf2f9e1": 10,
-        "00a4d3113f68fabf413f03e07b1dc3f0abb6098a997155fdb0b54c5671e20978": 10,
-        "2481a483d7ff9779f30a0c522743e4cdfedccc0a94d43f24e19df450cd68e110": 10,
-        "376b96e7740abe14d612f620baab850da6e08cdf13fbd61f880eeae136db645b": 10
+        "9e26522e189d7b970e66fdd32ae25795304a314953bad447f72f24882d4df921": 10,
+        "4fd6faebbbe450909b4d91061f6d437a29fb735b1b5378959b4d53f66f31e00c": 10,
+        "63b750680e74b8a661d0e22f47c29262c91cddc9a8d6cfcabf241b720c82bb7f": 10,
+        "5f1e8929dde32f2b9afedf7800b5cc3b992344453a8c4820490b3a716c48a32d": 10
       },
       "8": {
-        "146ea111831afae725a78d6b52916b8059d3e927c7dae5019b0297539cf2f9e1": 3659,
-        "2481a483d7ff9779f30a0c522743e4cdfedccc0a94d43f24e19df450cd68e110": 3659,
-        "376b96e7740abe14d612f620baab850da6e08cdf13fbd61f880eeae136db645b": 3659,
-        "00a4d3113f68fabf413f03e07b1dc3f0abb6098a997155fdb0b54c5671e20978": 2930
+        "9e26522e189d7b970e66fdd32ae25795304a314953bad447f72f24882d4df921": 3862,
+        "4fd6faebbbe450909b4d91061f6d437a29fb735b1b5378959b4d53f66f31e00c": 3862,
+        "63b750680e74b8a661d0e22f47c29262c91cddc9a8d6cfcabf241b720c82bb7f": 3862,
+        "5f1e8929dde32f2b9afedf7800b5cc3b992344453a8c4820490b3a716c48a32d": 2321
       }
     },
     "h_plus_two_update": true,
-    "process_restart_from_durable_jmt_height": 42,
+    "process_restart_from_durable_jmt_height": 41,
     "resumed_heights": [
+      46,
+      47,
       48,
-      50,
-      50,
-      50
+      48
     ],
-    "same_app_hash_height": 47,
-    "same_app_hash": "a4a97e88961fc74096598f34339a9aee297ee396ac50262bc2d47d1198146005",
+    "same_app_hash_height": 45,
+    "same_app_hash": "752415fcce66e3ca3955b59b822add984a4770dcf1d778321a41736258cfc9a5",
     "latest_and_historical_ics23_proofs": true,
     "real_duplicate_vote_evidence": {
-      "comet_evidence_hash": "b3be72465405e48c7f05012d5edc5f6554adbbae6fda9239d82ace1fc5600626",
-      "validator_address": "c529c748a736a7bfd4aca5db5304ba0a0175b18f",
-      "validator_power": 27591,
-      "infraction_height": 47,
-      "infraction_time_seconds": 1789431666,
-      "infraction_time_nanos": 78198000,
-      "total_voting_power": 110423,
-      "inclusion_height": 51,
-      "bit_evidence_hash": "a8b81ad0ce9c003e369739c7fd9c70dcd78e51d8a7f0360c2ac80cc553529008",
+      "comet_evidence_hash": "6654e498c80c251308e36ce9d011bdf6cfa3aaad35b4732ca7db1057d6a7963b",
+      "validator_address": "87ed4013228fbb44747e86f6e88dc52a16ffa3b8",
+      "validator_power": 25124,
+      "infraction_height": 44,
+      "infraction_time_seconds": 1789434270,
+      "infraction_time_nanos": 906970700,
+      "total_voting_power": 110538,
+      "inclusion_height": 49,
+      "bit_evidence_hash": "09c8997ae7c7806e399d7f2e38c697767f624cc9f05f700a0671c48046664c9b",
       "validator_present_at_h_plus_one": true,
       "validator_removed_at_h_plus_two": true,
       "post_evidence_validator_count": 3,
-      "burned_atomic": "14553380135524",
-      "same_app_hash": "ae5205ea9933ca2480fe8d1b1546829bcd2352ff433c2c75ee1d8a4914f2d4b8",
+      "burned_atomic": "12916735340469",
+      "same_app_hash": "348797a9b7073c6d1f6cd366090ca164540dcec6907ab6aae27dbb3ad31f8e27",
       "ics23_evidence_membership": true
     },
-    "quorum_halt_height": 54,
+    "quorum_halt_height": 52,
     "quorum_recovery_heights": [
-      58,
-      58,
-      58,
-      58
+      56,
+      56,
+      56,
+      56
     ]
   },
   "limitations": [
@@ -211,6 +211,6 @@
     "same physical host, not independent failure domains"
   ],
   "status": "PASS",
-  "started_at": "2026-09-15T00:20:11.732348+00:00",
-  "finished_at": "2026-09-15T00:21:26.585093+00:00"
+  "started_at": "2026-09-15T01:03:37.302454+00:00",
+  "finished_at": "2026-09-15T01:04:53.619242+00:00"
 }

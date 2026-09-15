@@ -1,17 +1,17 @@
 {
-  "updated_at": "2026-09-14",
+  "updated_at": "2026-09-15",
   "scope": "active BIT 1.2 implementation; docs/solo remains historical reference",
   "overall": "IN_PROGRESS",
   "completion_estimate": {
-    "full_launch_percent_range": [19, 23],
-    "chain_core_percent": 64,
+    "full_launch_percent_range": [37, 41],
+    "chain_core_percent": 88,
     "basis": "implemented and tested code versus D-001 through D-030, including product, operations, independent review, release evidence, and mainnet external inputs",
     "confidence": "MEDIUM_FOR_CURRENT_CHAIN_SLICES_LOW_FOR_FULL_LAUNCH"
   },
   "validated_cross_milestone_slice": {
-    "name": "private transfer, native staking, exits, rewards, Comet validator scheduling, and Byzantine slashing lifecycle",
+    "name": "private transfer, native staking, exits, Byzantine slashing, real state sync, and signed-checkpoint trust lifecycle",
     "status": "TESTED_ON_WINDOWS_DESKTOP",
-    "implementation": "crates/bit-types + crates/bit-shielded + crates/bit-transaction + crates/bit-emission + crates/bit-staking + crates/bit-state + crates/bit-app",
+    "implementation": "crates/bit-types + crates/bit-shielded + crates/bit-transaction + crates/bit-emission + crates/bit-staking + crates/bit-state + crates/bit-app + crates/bit-light-client + crates/bit-gateway",
     "evidence": "reports/development-baseline.json",
     "persistent_state": true,
     "storage_schema": 16,
@@ -86,9 +86,17 @@
       "implemented": ["Unbond cohorts and non-transferable tickets", "dual height/time maturity", "ClaimExit", "three persistent exit queues", "per-height validator responsibility history", "Comet duplicate-vote and light-client evidence validation", "canonical evidence deduplication", "permanent tombstone", "active pool and exposed exit cohort Burn", "globally bounded persistent SlashJob", "freeze during settlement", "prepare/commit interruption replay", "durable HALT_NO_SAFE_VALIDATOR_SET evidence and startup lock", "per-block restart recovery and ICS23 proofs", "real four-node duplicate-vote injection with H+2 removal and consistent Burn"],
       "tested_by": ["reports/development-baseline.json", "feasibility/reports/bit-app-network-result.json"],
       "remaining": ["real disk-quota and operating-system fsync failure injection", "coordinated last-validator set remediation procedure", "gateway/indexer/wallet penalty status"]
+    },
+    {
+      "id": "D-010",
+      "name": "轻客户端与状态同步",
+      "status": "IN_PROGRESS",
+      "implemented": ["formal bit-node ABCI state sync", "two-RPC CometBFT trust-source recovery", "canonical signed checkpoint policy and package", "genesis-authority-approved publisher threshold", "trust period shorter than unbonding", "contiguous policy rotation and immediate revocation", "current/warning/expired/conflict trust state machine", "explicit hash-confirmed trust re-establishment", "bit network verify-checkpoint", "typed mainnet checkpoint preflight evidence", "bounded GET /v1/checkpoints candidate contract", "Rust/Python shared checkpoint vectors"],
+      "tested_by": ["reports/development-baseline.json", "reports/state-sync-smoke.json"],
+      "remaining": ["wallet header and validator-set verification", "atomic wallet trust persistence", "interrupted-download and disk-full process tests", "independent failure-domain deployment", "Tor and W39 recovery integration", "production publisher operations"]
     }
   ],
-  "not_started_from": "D-009",
+  "remaining_task_range": "D-009 and D-011 through D-030 remain unstarted or partial; D-010 is in progress",
   "mainnet_ready": false,
   "mobile": "SKIPPED_BY_USER"
 }

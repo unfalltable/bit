@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: BIT Public Read API
-  version: 0.3.1
+  version: 0.4.0
   description: >-
     Implemented read-only gateway subset. Plain HTTP is restricted to loopback;
     public deployment requires a separately configured TLS ingress.
@@ -132,6 +132,20 @@ paths:
         "500":
           $ref: "#/components/responses/Error"
         "503":
+          $ref: "#/components/responses/Error"
+  /v1/checkpoints:
+    get:
+      operationId: checkpointCandidates
+      responses:
+        "200":
+          description: >-
+            Threshold-signed checkpoint candidates. Clients must independently
+            validate expiry and require explicit hash confirmation after trust expires.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckpointsResponse"
+        "500":
           $ref: "#/components/responses/Error"
 components:
   parameters:
@@ -403,6 +417,85 @@ components:
           type: boolean
         canonical_bytes:
           $ref: "#/components/schemas/HeightString"
+    CheckpointPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - sequence
+        - policy_hash
+        - previous_policy_hash
+        - genesis_manifest_hash
+        - chain_context
+        - consensus_parameters_sha256
+        - activates_at_seconds
+        - trust_period_seconds
+        - expiry_warning_seconds
+        - publisher_threshold
+        - publishers
+        - revoke_previous_immediately
+        - canonical_policy_base64
+        - policy_approvals_base64
+      properties:
+        sequence: { $ref: "#/components/schemas/HeightString" }
+        policy_hash: { $ref: "#/components/schemas/Hex32" }
+        previous_policy_hash:
+          oneOf:
+            - $ref: "#/components/schemas/Hex32"
+            - type: "null"
+        genesis_manifest_hash: { $ref: "#/components/schemas/Hex32" }
+        chain_context: { $ref: "#/components/schemas/Hex32" }
+        consensus_parameters_sha256: { $ref: "#/components/schemas/Hex32" }
+        activates_at_seconds: { $ref: "#/components/schemas/HeightString" }
+        trust_period_seconds: { $ref: "#/components/schemas/HeightString" }
+        expiry_warning_seconds: { $ref: "#/components/schemas/HeightString" }
+        publisher_threshold: { type: integer, minimum: 1, maximum: 1024 }
+        publishers:
+          type: array
+          minItems: 1
+          maxItems: 1024
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Hex32" }
+        revoke_previous_immediately: { type: boolean }
+        canonical_policy_base64: { type: string, contentEncoding: base64 }
+        policy_approvals_base64: { type: string, contentEncoding: base64 }
+    CheckpointCandidate:
+      type: object
+      additionalProperties: false
+      required:
+        - checkpoint_hash
+        - header_height
+        - header_hash
+        - state_height
+        - app_hash
+        - issued_at_seconds
+        - expires_at_seconds
+        - signature_count
+        - signed_checkpoint_base64
+      properties:
+        checkpoint_hash: { $ref: "#/components/schemas/Hex32" }
+        header_height: { $ref: "#/components/schemas/HeightString" }
+        header_hash: { $ref: "#/components/schemas/Hex32" }
+        state_height: { $ref: "#/components/schemas/HeightString" }
+        app_hash: { $ref: "#/components/schemas/Hex32" }
+        issued_at_seconds: { $ref: "#/components/schemas/HeightString" }
+        expires_at_seconds: { $ref: "#/components/schemas/HeightString" }
+        signature_count: { type: integer, minimum: 1, maximum: 1024 }
+        signed_checkpoint_base64: { type: string, contentEncoding: base64 }
+    CheckpointsResponse:
+      type: object
+      additionalProperties: false
+      required: [trust_decision, policy, items]
+      properties:
+        trust_decision:
+          const: manual_confirmation_required
+        policy:
+          oneOf:
+            - $ref: "#/components/schemas/CheckpointPolicy"
+            - type: "null"
+        items:
+          type: array
+          maxItems: 64
+          items: { $ref: "#/components/schemas/CheckpointCandidate" }
     Error:
       type: object
       additionalProperties: false

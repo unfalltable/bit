@@ -6,7 +6,7 @@
 
 mod amount;
 mod block;
-mod cbor;
+pub mod cbor;
 mod envelope;
 mod policy;
 mod supply;

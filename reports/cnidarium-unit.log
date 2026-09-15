@@ -1,31 +1,25 @@
-cargo.exe :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
-At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
-+     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.29s:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
-
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
      Running unittests src\lib.rs (feasibility\target\debug\deps\cnidarium-24de44c44fea9fd1.exe)
 
 running 16 tests
 test tests::range_query_bad_range ... ok
-test snapshot_cache::test::cache_manage_pre_genesis ... ok
-test snapshot_cache::test::fail_insert_stale_snapshot ... ok
 test tests::range_queries_basic ... ok
 test tests::range_query_prepend_peeked_value ... ok
+test snapshot_cache::test::fail_insert_stale_snapshot ... ok
+test snapshot_cache::test::fail_insert_gapped_snapshot ... ok
+test tests::range_query_overwrites ... ok
+test snapshot_cache::test::cache_manage_pre_genesis ... ok
 test snapshot_cache::test::drop_oldest_snapshot ... ok
 test snapshot_cache::test::fail_zero_capacity ... ok
-test tests::range_query_ordering ... ok
 test tests::delete_nonexistent_key ... ok
-test tests::range_query_overwrites ... ok
-test snapshot_cache::test::fail_insert_gapped_snapshot ... ok
-test tests::range_query_storage_basic ... ok
+test tests::range_query_ordering ... ok
 test tests::range_query_storage ... ok
+test tests::range_query_storage_basic ... ok
 test tests::simple_flow ... ok
 test tests::uniform_historical_snapshot_survives_restart ... ok
 test tests::db_lock_is_released ... ok
 
-test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.97s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.91s
 
      Running tests\migration.rs (feasibility\target\debug\deps\migration-020678320b0203f1.exe)
 
@@ -40,13 +34,13 @@ test test_substore_nv_range_queries_main_store ... ignored
 test test_disallow_empty_prefix - should panic ... ok
 test reproduction_bad_substore_cache_range ... ok
 test test_route_key_cases ... ok
-test test_substore_prefix_keys ... ok
+test test_substore_prefix_queries ... ok
 test test_substore_simple ... ok
 test test_substore_proofs ... ok
+test test_substore_prefix_keys ... ok
 test test_substore_nv_prefix ... ok
-test test_substore_prefix_queries ... ok
 
-test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.72s
+test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.67s
 
      Running tests\write_batch.rs (feasibility\target\debug\deps\write_batch-0e6ed970442d4322.exe)
 
@@ -55,7 +49,7 @@ test test_two_empty_writes ... ok
 test test_write_batch_stale_version_substores ... ok
 test test_batch_substore ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.24s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.32s
 
    Doc-tests cnidarium
 

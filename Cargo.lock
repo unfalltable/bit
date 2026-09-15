@@ -521,9 +521,11 @@ dependencies = [
  "base64 0.22.1",
  "bit-app",
  "bit-emission",
+ "bit-light-client",
  "bit-staking",
  "bit-state",
  "bit-types",
+ "ed25519-consensus",
  "hex",
  "prost",
  "serde",
@@ -540,6 +542,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bit-emission",
+ "bit-light-client",
  "bit-staking",
  "bit-state",
  "bit-types",
@@ -551,6 +554,19 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+]
+
+[[package]]
+name = "bit-light-client"
+version = "0.1.0"
+dependencies = [
+ "bit-types",
+ "ed25519-consensus",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

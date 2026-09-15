@@ -1,32 +1,39 @@
 use crate::{Error, Result};
 
-pub(crate) struct Writer(Vec<u8>);
+/// Minimal deterministic-CBOR writer shared by BIT protocol crates.
+pub struct Writer(Vec<u8>);
+
+impl Default for Writer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Writer {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self(Vec::new())
     }
-    pub(crate) fn finish(self) -> Vec<u8> {
+    pub fn finish(self) -> Vec<u8> {
         self.0
     }
-    pub(crate) fn array(&mut self, len: usize) {
+    pub fn array(&mut self, len: usize) {
         self.head(4, len as u64);
     }
-    pub(crate) fn uint(&mut self, value: u64) {
+    pub fn uint(&mut self, value: u64) {
         self.head(0, value);
     }
-    pub(crate) fn bytes(&mut self, value: &[u8]) {
+    pub fn bytes(&mut self, value: &[u8]) {
         self.head(2, value.len() as u64);
         self.0.extend_from_slice(value);
     }
-    pub(crate) fn text(&mut self, value: &str) {
+    pub fn text(&mut self, value: &str) {
         self.head(3, value.len() as u64);
         self.0.extend_from_slice(value.as_bytes());
     }
-    pub(crate) fn boolean(&mut self, value: bool) {
+    pub fn boolean(&mut self, value: bool) {
         self.0.push(if value { 0xf5 } else { 0xf4 });
     }
-    pub(crate) fn null(&mut self) {
+    pub fn null(&mut self) {
         self.0.push(0xf6);
     }
     fn head(&mut self, major: u8, value: u64) {
@@ -50,30 +57,31 @@ impl Writer {
     }
 }
 
-pub(crate) struct Cursor<'a> {
+/// Strict deterministic-CBOR cursor shared by BIT protocol crates.
+pub struct Cursor<'a> {
     bytes: &'a [u8],
     offset: usize,
 }
 
 impl<'a> Cursor<'a> {
-    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+    pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
     }
-    pub(crate) fn finish(self) -> Result<()> {
+    pub fn finish(self) -> Result<()> {
         if self.offset == self.bytes.len() {
             Ok(())
         } else {
             Err(Error::InvalidCbor("trailing bytes"))
         }
     }
-    pub(crate) fn array(&mut self) -> Result<usize> {
+    pub fn array(&mut self) -> Result<usize> {
         let (major, value) = self.head()?;
         if major != 4 {
             return Err(Error::InvalidCbor("expected array"));
         }
         usize::try_from(value).map_err(|_| Error::InvalidCbor("array too large"))
     }
-    pub(crate) fn uint(&mut self) -> Result<u64> {
+    pub fn uint(&mut self) -> Result<u64> {
         let (major, value) = self.head()?;
         if major == 0 {
             Ok(value)
@@ -81,7 +89,7 @@ impl<'a> Cursor<'a> {
             Err(Error::InvalidCbor("expected unsigned integer"))
         }
     }
-    pub(crate) fn bytes(&mut self) -> Result<Vec<u8>> {
+    pub fn bytes(&mut self) -> Result<Vec<u8>> {
         let (major, len) = self.head()?;
         if major != 2 {
             return Err(Error::InvalidCbor("expected byte string"));
@@ -90,7 +98,7 @@ impl<'a> Cursor<'a> {
             .take(usize::try_from(len).map_err(|_| Error::InvalidCbor("byte string too large"))?)?
             .to_vec())
     }
-    pub(crate) fn text(&mut self) -> Result<String> {
+    pub fn text(&mut self) -> Result<String> {
         let (major, len) = self.head()?;
         if major != 3 {
             return Err(Error::InvalidCbor("expected text"));
@@ -99,17 +107,14 @@ impl<'a> Cursor<'a> {
             self.take(usize::try_from(len).map_err(|_| Error::InvalidCbor("text too large"))?)?;
         String::from_utf8(raw.to_vec()).map_err(|_| Error::InvalidCbor("invalid UTF-8"))
     }
-    pub(crate) fn boolean(&mut self) -> Result<bool> {
+    pub fn boolean(&mut self) -> Result<bool> {
         match self.byte()? {
             0xf4 => Ok(false),
             0xf5 => Ok(true),
             _ => Err(Error::InvalidCbor("expected boolean")),
         }
     }
-    pub(crate) fn nullable<T>(
-        &mut self,
-        parse: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<Option<T>> {
+    pub fn nullable<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T>) -> Result<Option<T>> {
         if self.peek()? == 0xf6 {
             self.offset += 1;
             Ok(None)

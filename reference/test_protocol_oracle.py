@@ -153,6 +153,33 @@ class ProtocolOracleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             oracle.supply_audit_snapshot(changed)
 
+    def test_checkpoint_policy_and_checkpoint_encoding(self):
+        vector = json.loads((ROOT / "tests/vectors/checkpoint-vectors.json").read_text(
+            encoding="utf-8"))
+        policy = vector["initial_policy"]
+        encoded_policy = oracle.checkpoint_policy(policy)
+        policy_hash = oracle.checkpoint_policy_hash(encoded_policy)
+        self.assertEqual(encoded_policy.hex(), policy["canonical_cbor_hex"])
+        self.assertEqual(policy_hash.hex(), policy["policy_hash_hex"])
+        self.assertEqual(
+            (b"BIT-CHECKPOINT-POLICY-APPROVAL-V1"
+             + bytes.fromhex(policy["genesis_manifest_hash_hex"])
+             + policy_hash).hex(),
+            policy["approval_message_hex"],
+        )
+
+        checkpoint = vector["checkpoint"]
+        encoded_checkpoint = oracle.signed_checkpoint_body(
+            policy, checkpoint, policy_hash)
+        checkpoint_hash = oracle.checkpoint_hash(encoded_checkpoint)
+        self.assertEqual(encoded_checkpoint.hex(), checkpoint["canonical_cbor_hex"])
+        self.assertEqual(checkpoint_hash.hex(), checkpoint["checkpoint_hash_hex"])
+        self.assertEqual(
+            (b"BIT-CHECKPOINT-PUBLISHER-SIGNATURE-V1"
+             + policy_hash + checkpoint_hash).hex(),
+            checkpoint["signature_message_hex"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

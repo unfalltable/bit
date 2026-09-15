@@ -9,6 +9,7 @@ members = [
     "crates/bit-state",
     "crates/bit-app",
     "crates/bit-gateway",
+    "crates/bit-light-client",
 ]
 exclude = ["feasibility/proof-probe", "feasibility/consensus-probe", "feasibility/upstream/penumbra", "third_party/cnidarium"]
 resolver = "2"

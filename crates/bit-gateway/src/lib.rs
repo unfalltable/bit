@@ -9,6 +9,9 @@ use axum::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bit_app::{ApplicationCore, Error as CoreError};
+use bit_light_client::{
+    AuthorityPolicy, CheckpointPolicy, PolicySignaturePackage, SignedCheckpoint,
+};
 use bit_state::QueryProof;
 use bit_types::{
     MonetaryPolicy, SupplyAuditSnapshot, EMPTY_SET_POLICY, MAX_SUPPLY_ATOMIC, POLICY_ID,
@@ -29,6 +32,7 @@ pub const MAX_COMPACT_LIMIT: u32 = 100;
 pub const DEFAULT_COMPACT_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_COMPACT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_STATE_KEY_BYTES: usize = 256;
+pub const MAX_CHECKPOINT_CANDIDATES: usize = 64;
 pub const PROOF_FORMAT: &str = "ics23:jmt:v1";
 
 #[derive(Debug, thiserror::Error)]
@@ -45,6 +49,7 @@ pub enum ServeError {
 struct GatewayState {
     core: Arc<ApplicationCore>,
     verified_header_height: Arc<AtomicU64>,
+    checkpoints: Arc<CheckpointCatalog>,
 }
 
 /// A read-only router over the same application core used by ABCI.
@@ -55,10 +60,19 @@ pub struct PublicApi {
 
 impl PublicApi {
     pub fn new(core: Arc<ApplicationCore>, verified_header_height: u64) -> Self {
+        Self::with_checkpoint_catalog(core, verified_header_height, CheckpointCatalog::empty())
+    }
+
+    pub fn with_checkpoint_catalog(
+        core: Arc<ApplicationCore>,
+        verified_header_height: u64,
+        checkpoint_catalog: CheckpointCatalog,
+    ) -> Self {
         let verified_header_height = Arc::new(AtomicU64::new(verified_header_height));
         let state = GatewayState {
             core,
             verified_header_height: verified_header_height.clone(),
+            checkpoints: Arc::new(checkpoint_catalog),
         };
         let router = Router::new()
             .route("/health/live", get(live))
@@ -67,6 +81,7 @@ impl PublicApi {
             .route("/v1/state/proof", get(state_proof))
             .route("/v1/supply", get(supply))
             .route("/v1/compact-blocks", get(compact_blocks))
+            .route("/v1/checkpoints", get(checkpoints))
             .with_state(state);
         Self {
             router,
@@ -97,6 +112,126 @@ impl PublicApi {
             .await
             .map_err(ServeError::Serve)
     }
+}
+
+/// A bounded collection of cryptographically valid checkpoint candidates.
+/// Clients still make their own trust-expiry and manual-confirmation decision.
+#[derive(Clone, Debug, Serialize)]
+pub struct CheckpointCatalog {
+    trust_decision: &'static str,
+    policy: Option<CheckpointPolicyDto>,
+    items: Vec<CheckpointCandidateDto>,
+    #[serde(skip)]
+    binding: Option<CheckpointBinding>,
+}
+
+#[derive(Clone, Debug)]
+struct CheckpointBinding {
+    genesis_manifest_hash: [u8; 32],
+    chain_context: [u8; 32],
+}
+
+impl CheckpointCatalog {
+    pub fn empty() -> Self {
+        Self {
+            trust_decision: "manual_confirmation_required",
+            policy: None,
+            items: Vec::new(),
+            binding: None,
+        }
+    }
+
+    pub fn verified(
+        policy: &CheckpointPolicy,
+        approvals: &PolicySignaturePackage,
+        authority: &AuthorityPolicy,
+        unbonding_seconds: u64,
+        checkpoints: &[SignedCheckpoint],
+    ) -> Result<Self, bit_light_client::Error> {
+        if checkpoints.is_empty() || checkpoints.len() > MAX_CHECKPOINT_CANDIDATES {
+            return Err(bit_light_client::Error::InvalidCheckpoint(
+                "checkpoint catalog is empty or too large",
+            ));
+        }
+        policy.validate_safety(unbonding_seconds)?;
+        approvals.verify(policy, authority)?;
+        let policy_hash = policy.hash()?;
+        let policy_dto = CheckpointPolicyDto {
+            sequence: policy.sequence.to_string(),
+            policy_hash: hex::encode(policy_hash),
+            previous_policy_hash: policy.previous_policy_hash.map(hex::encode),
+            genesis_manifest_hash: hex::encode(policy.genesis_manifest_hash),
+            chain_context: hex::encode(policy.chain_context),
+            consensus_parameters_sha256: hex::encode(policy.consensus_parameters_sha256),
+            activates_at_seconds: policy.activates_at_seconds.to_string(),
+            trust_period_seconds: policy.trust_period_seconds.to_string(),
+            expiry_warning_seconds: policy.expiry_warning_seconds.to_string(),
+            publisher_threshold: policy.threshold,
+            publishers: policy.publishers.iter().map(hex::encode).collect(),
+            revoke_previous_immediately: policy.revoke_previous_immediately,
+            canonical_policy_base64: BASE64.encode(policy.encode_canonical()?),
+            policy_approvals_base64: BASE64.encode(approvals.encode_canonical()?),
+        };
+        let mut ordered: Vec<_> = checkpoints.iter().collect();
+        ordered.sort_by_key(|signed| std::cmp::Reverse(signed.checkpoint.header_height));
+        for pair in ordered.windows(2) {
+            if pair[0].checkpoint.header_height == pair[1].checkpoint.header_height {
+                return Err(bit_light_client::Error::InvalidCheckpoint(
+                    "checkpoint catalog contains duplicate heights",
+                ));
+            }
+        }
+        let mut items = Vec::with_capacity(ordered.len());
+        for signed in ordered {
+            signed.verify(policy)?;
+            let checkpoint = &signed.checkpoint;
+            items.push(CheckpointCandidateDto {
+                checkpoint_hash: hex::encode(checkpoint.hash()?),
+                header_height: checkpoint.header_height.to_string(),
+                header_hash: hex::encode(checkpoint.header_hash),
+                state_height: checkpoint.state_height.to_string(),
+                app_hash: hex::encode(checkpoint.app_hash),
+                issued_at_seconds: checkpoint.issued_at_seconds.to_string(),
+                expires_at_seconds: checkpoint.expires_at_seconds.to_string(),
+                signature_count: u16::try_from(signed.signatures.len())
+                    .expect("catalog signature count is bounded below u16"),
+                signed_checkpoint_base64: BASE64.encode(signed.encode_canonical()?),
+            });
+        }
+        Ok(Self {
+            trust_decision: "manual_confirmation_required",
+            policy: Some(policy_dto),
+            items,
+            binding: Some(CheckpointBinding {
+                genesis_manifest_hash: policy.genesis_manifest_hash,
+                chain_context: policy.chain_context,
+            }),
+        })
+    }
+}
+
+impl Default for CheckpointCatalog {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+async fn checkpoints(
+    State(state): State<GatewayState>,
+) -> Result<Json<CheckpointCatalog>, ApiError> {
+    if let Some(binding) = &state.checkpoints.binding {
+        let genesis = query_at(&state.core, "meta/genesis_manifest_hash", 0).await?;
+        let chain = query_same_state(&state.core, "meta/chain_context", &genesis).await?;
+        if required_value(&genesis, "genesis manifest hash is missing")?
+            != binding.genesis_manifest_hash
+            || required_value(&chain, "chain context is missing")? != binding.chain_context
+        {
+            return Err(ApiError::internal_message(
+                "checkpoint catalog is bound to a different network",
+            ));
+        }
+    }
+    Ok(Json((*state.checkpoints).clone()))
 }
 
 #[derive(Serialize)]
@@ -563,6 +698,37 @@ pub struct StateProofResponse {
     pub result: ProofDto,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct CheckpointPolicyDto {
+    sequence: String,
+    policy_hash: String,
+    previous_policy_hash: Option<String>,
+    genesis_manifest_hash: String,
+    chain_context: String,
+    consensus_parameters_sha256: String,
+    activates_at_seconds: String,
+    trust_period_seconds: String,
+    expiry_warning_seconds: String,
+    publisher_threshold: u16,
+    publishers: Vec<String>,
+    revoke_previous_immediately: bool,
+    canonical_policy_base64: String,
+    policy_approvals_base64: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct CheckpointCandidateDto {
+    checkpoint_hash: String,
+    header_height: String,
+    header_hash: String,
+    state_height: String,
+    app_hash: String,
+    issued_at_seconds: String,
+    expires_at_seconds: String,
+    signature_count: u16,
+    signed_checkpoint_base64: String,
+}
+
 #[derive(Serialize)]
 pub struct NetworkResponse {
     pub meta: ApiMeta,
@@ -774,9 +940,11 @@ mod tests {
     };
     use bit_app::BlockRequest;
     use bit_emission::{FeePolicy, GenesisAllocation};
+    use bit_light_client::{Checkpoint, SignatureEntry};
     use bit_staking::{StakingBook, StakingParameters};
     use bit_state::GenesisConfig;
     use bit_types::{chain_context, MonetaryPolicy};
+    use ed25519_consensus::SigningKey;
     use serde_json::Value;
     use tempfile::TempDir;
     use tower::ServiceExt;
@@ -806,6 +974,65 @@ mod tests {
         }
     }
 
+    fn checkpoint_catalog() -> CheckpointCatalog {
+        let mut authority_signers = vec![
+            SigningKey::from([5; 32]).verification_key().to_bytes(),
+            SigningKey::from([6; 32]).verification_key().to_bytes(),
+        ];
+        authority_signers.sort();
+        let authority = AuthorityPolicy {
+            threshold: 2,
+            signers: authority_signers,
+        };
+        let mut publishers = vec![
+            SigningKey::from([7; 32]).verification_key().to_bytes(),
+            SigningKey::from([8; 32]).verification_key().to_bytes(),
+            SigningKey::from([9; 32]).verification_key().to_bytes(),
+        ];
+        publishers.sort();
+        let policy = CheckpointPolicy {
+            genesis_manifest_hash: [1; 32],
+            chain_context: chain_context([1; 32]),
+            consensus_parameters_sha256: [0x33; 32],
+            sequence: 1,
+            previous_policy_hash: None,
+            activates_at_seconds: 1_900_000_000,
+            trust_period_seconds: 259_200,
+            expiry_warning_seconds: 43_200,
+            threshold: 2,
+            publishers,
+            revoke_previous_immediately: false,
+        };
+        let mut approvals = PolicySignaturePackage {
+            genesis_manifest_hash: policy.genesis_manifest_hash,
+            policy_hash: policy.hash().unwrap(),
+            approvals: Vec::new(),
+        };
+        approvals
+            .add_signature(&policy, &authority, [5; 32])
+            .unwrap();
+        approvals
+            .add_signature(&policy, &authority, [6; 32])
+            .unwrap();
+        let mut signed = SignedCheckpoint {
+            checkpoint: Checkpoint {
+                policy_hash: policy.hash().unwrap(),
+                genesis_manifest_hash: policy.genesis_manifest_hash,
+                chain_context: policy.chain_context,
+                header_height: 2,
+                header_hash: [0x44; 32],
+                state_height: 1,
+                app_hash: [0x55; 32],
+                issued_at_seconds: 1_900_000_100,
+                expires_at_seconds: 1_900_259_300,
+            },
+            signatures: Vec::<SignatureEntry>::new(),
+        };
+        signed.add_signature(&policy, [7; 32]).unwrap();
+        signed.add_signature(&policy, [8; 32]).unwrap();
+        CheckpointCatalog::verified(&policy, &approvals, &authority, 1_814_400, &[signed]).unwrap()
+    }
+
     async fn json(router: Router, uri: &str) -> (StatusCode, Value) {
         let response = router
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
@@ -826,7 +1053,7 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let api = PublicApi::new(core.clone(), 0);
+        let api = PublicApi::with_checkpoint_catalog(core.clone(), 0, checkpoint_catalog());
         let router = api.router();
 
         let (status, supply) = json(router.clone(), "/v1/supply").await;
@@ -883,6 +1110,23 @@ mod tests {
         assert_eq!(
             network["proofs"]["chain_context"]["app_hash"],
             network["proofs"]["supply"]["app_hash"]
+        );
+
+        let (status, checkpoints) = json(router.clone(), "/v1/checkpoints").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            checkpoints["trust_decision"],
+            "manual_confirmation_required"
+        );
+        assert_eq!(checkpoints["policy"]["publisher_threshold"], 2);
+        assert_eq!(checkpoints["items"][0]["header_height"], "2");
+        assert_eq!(checkpoints["items"][0]["state_height"], "1");
+        assert_eq!(
+            checkpoints["items"][0]["checkpoint_hash"]
+                .as_str()
+                .unwrap()
+                .len(),
+            64
         );
 
         let (status, manifest_hash) = json(

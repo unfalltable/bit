@@ -1,24 +1,14 @@
-py.exe : test_all_emission_points (test_protocol_oracle.ProtocolOracleTests.test_all_emission_points) ... ok
-At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
-+     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (test_all_emissi..._points) ... ok:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
-
-test_empty_block_artifact_encoding_and_domain_hashes (test_protocol_oracle.ProtocolOracleTests.test_empty_block_artifac
-t_encoding_and_domain_hashes) ... ok
-test_genesis_derived_manifest_hash_domains (test_protocol_oracle.ProtocolOracleTests.test_genesis_derived_manifest_hash
-_domains) ... ok
+test_all_emission_points (test_protocol_oracle.ProtocolOracleTests.test_all_emission_points) ... ok
+test_checkpoint_policy_and_checkpoint_encoding (test_protocol_oracle.ProtocolOracleTests.test_checkpoint_policy_and_checkpoint_encoding) ... ok
+test_empty_block_artifact_encoding_and_domain_hashes (test_protocol_oracle.ProtocolOracleTests.test_empty_block_artifact_encoding_and_domain_hashes) ... ok
+test_genesis_derived_manifest_hash_domains (test_protocol_oracle.ProtocolOracleTests.test_genesis_derived_manifest_hash_domains) ... ok
 test_genesis_identity_hash_domains (test_protocol_oracle.ProtocolOracleTests.test_genesis_identity_hash_domains) ... ok
 test_policy_bytes_and_hash (test_protocol_oracle.ProtocolOracleTests.test_policy_bytes_and_hash) ... ok
-test_reference_config_keeps_mainnet_unapproved (test_protocol_oracle.ProtocolOracleTests.test_reference_config_keeps_ma
-innet_unapproved) ... ok
-test_supply_audit_snapshot_encoding (test_protocol_oracle.ProtocolOracleTests.test_supply_audit_snapshot_encoding) ...
-ok
-test_transaction_body_effect_and_envelope (test_protocol_oracle.ProtocolOracleTests.test_transaction_body_effect_and_en
-velope) ... ok
+test_reference_config_keeps_mainnet_unapproved (test_protocol_oracle.ProtocolOracleTests.test_reference_config_keeps_mainnet_unapproved) ... ok
+test_supply_audit_snapshot_encoding (test_protocol_oracle.ProtocolOracleTests.test_supply_audit_snapshot_encoding) ... ok
+test_transaction_body_effect_and_envelope (test_protocol_oracle.ProtocolOracleTests.test_transaction_body_effect_and_envelope) ... ok
 
 ----------------------------------------------------------------------
-Ran 8 tests in 0.003s
+Ran 9 tests in 0.003s
 
 OK

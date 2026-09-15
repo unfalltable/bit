@@ -1,10 +1,4 @@
-cargo.exe : warning: hiding a lifetime that's elided elsewhere is confusing
-At D:\others\BIT\scripts\run-baseline-checks.ps1:31 char:5
-+     & $Program @Arguments 2>&1 | Tee-Object -FilePath $bitLog
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (warning: hiding...re is confusing:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
-
+warning: hiding a lifetime that's elided elsewhere is confusing
    --> feasibility\upstream\penumbra\crates\crypto\tct\src\tree.rs:753:22
     |
 753 |     pub fn structure(&self) -> structure::Node {
@@ -47,22 +41,14 @@ help: use `'_` for type paths
 117 |     pub fn elems_mut(&mut self) -> ElemsMut<'_, T> {
     |                                             +++
 
-warning: `penumbra-sdk-tct` (lib) generated 3 warnings (run `cargo fix --lib -p penumbra-sdk-tct` to apply 3 suggestion
-s)
-warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/output_pk.bin enable 'download-provi
-ng-keys' feature to obtain key files
-warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/spend_pk.bin enable 'download-provin
-g-keys' feature to obtain key files
-warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/swap_pk.bin enable 'download-proving
--keys' feature to obtain key files
-warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/swapclaim_pk.bin enable 'download-pr
-oving-keys' feature to obtain key files
-warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/convert_pk.bin enable 'download-prov
-ing-keys' feature to obtain key files
-warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/delegator_vote_pk.bin enable 'downlo
-ad-proving-keys' feature to obtain key files
-warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/nullifier_derivation_pk.bin enable '
-download-proving-keys' feature to obtain key files
+warning: `penumbra-sdk-tct` (lib) generated 3 warnings (run `cargo fix --lib -p penumbra-sdk-tct` to apply 3 suggestions)
+warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/output_pk.bin enable 'download-proving-keys' feature to obtain key files
+warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/spend_pk.bin enable 'download-proving-keys' feature to obtain key files
+warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/swap_pk.bin enable 'download-proving-keys' feature to obtain key files
+warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/swapclaim_pk.bin enable 'download-proving-keys' feature to obtain key files
+warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/convert_pk.bin enable 'download-proving-keys' feature to obtain key files
+warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/delegator_vote_pk.bin enable 'download-proving-keys' feature to obtain key files
+warning: penumbra-sdk-proof-params@2.1.1: proving key file is lfs pointer: src/gen/nullifier_derivation_pk.bin enable 'download-proving-keys' feature to obtain key files
 warning: function `pick_connection_version` is never used
  --> feasibility\upstream\penumbra\crates\core\component\ibc\src\version.rs:4:8
   |
@@ -100,6 +86,7 @@ warning: function `previous` is never used
 22 |     pub fn previous() -> &'static str {
    |            ^^^^^^^^
 
-warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo fix --lib -p penumbra-sdk-shielded-pool` t
-o apply 1 suggestion)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.45s
+warning: `penumbra-sdk-shielded-pool` (lib) generated 4 warnings (run `cargo fix --lib -p penumbra-sdk-shielded-pool` to apply 1 suggestion)
+   Compiling bit-app v0.1.0 (D:\others\BIT\crates\bit-app)
+   Compiling bit-genesis v0.1.0 (D:\others\BIT\crates\bit-genesis)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 32.48s

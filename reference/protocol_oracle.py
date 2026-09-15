@@ -111,6 +111,80 @@ def block_artifact_hash(domain: bytes, artifact: bytes) -> bytes:
     return hashlib.sha256(domain + len(artifact).to_bytes(8, "big") + artifact).digest()
 
 
+def checkpoint_policy(values: dict) -> bytes:
+    publishers = [bytes.fromhex(value) for value in values["publisher_pubkeys_hex"]]
+    if publishers != sorted(set(publishers)) or not publishers:
+        raise ValueError("checkpoint publishers must be sorted and unique")
+    threshold = int(values["publisher_threshold"])
+    trust_period = int(values["trust_period_seconds"])
+    warning_period = int(values["expiry_warning_seconds"])
+    if not 0 < threshold <= len(publishers):
+        raise ValueError("invalid checkpoint threshold")
+    if not 0 < warning_period < trust_period:
+        raise ValueError("invalid checkpoint trust periods")
+    sequence = int(values["sequence"])
+    previous = values["previous_policy_hash_hex"]
+    if (sequence == 1) != (previous is None):
+        raise ValueError("invalid checkpoint policy chain")
+    return cbor_array(
+        cbor_text("BIT-CHECKPOINT-POLICY"),
+        cbor_uint(1),
+        cbor_bytes(bytes.fromhex(values["genesis_manifest_hash_hex"])),
+        cbor_bytes(bytes.fromhex(values["chain_context_hex"])),
+        cbor_bytes(bytes.fromhex(values["consensus_parameters_sha256_hex"])),
+        cbor_uint(sequence),
+        b"\xf6" if previous is None else cbor_bytes(bytes.fromhex(previous)),
+        cbor_uint(int(values["activates_at_seconds"])),
+        cbor_uint(trust_period),
+        cbor_uint(warning_period),
+        cbor_uint(threshold),
+        cbor_array(*(cbor_bytes(value) for value in publishers)),
+        b"\xf5" if values["revoke_previous_immediately"] else b"\xf4",
+    )
+
+
+def checkpoint_policy_hash(encoded: bytes) -> bytes:
+    return hashlib.sha256(
+        b"BIT-CHECKPOINT-POLICY-HASH-V1"
+        + len(encoded).to_bytes(8, "big")
+        + encoded
+    ).digest()
+
+
+def signed_checkpoint_body(policy: dict, checkpoint: dict, policy_hash: bytes) -> bytes:
+    header_height = int(checkpoint["header_height"])
+    state_height = int(checkpoint["state_height"])
+    issued = int(checkpoint["issued_at_seconds"])
+    expires = int(checkpoint["expires_at_seconds"])
+    if header_height <= 0 or state_height != header_height - 1:
+        raise ValueError("checkpoint header/state height mismatch")
+    if issued < int(policy["activates_at_seconds"]) or not issued < expires:
+        raise ValueError("invalid checkpoint validity interval")
+    if expires - issued > int(policy["trust_period_seconds"]):
+        raise ValueError("checkpoint exceeds trust period")
+    return cbor_array(
+        cbor_text("BIT-CHECKPOINT"),
+        cbor_uint(1),
+        cbor_bytes(policy_hash),
+        cbor_bytes(bytes.fromhex(policy["genesis_manifest_hash_hex"])),
+        cbor_bytes(bytes.fromhex(policy["chain_context_hex"])),
+        cbor_uint(header_height),
+        cbor_bytes(bytes.fromhex(checkpoint["header_hash_hex"])),
+        cbor_uint(state_height),
+        cbor_bytes(bytes.fromhex(checkpoint["app_hash_hex"])),
+        cbor_uint(issued),
+        cbor_uint(expires),
+    )
+
+
+def checkpoint_hash(encoded: bytes) -> bytes:
+    return hashlib.sha256(
+        b"BIT-CHECKPOINT-HASH-V1"
+        + len(encoded).to_bytes(8, "big")
+        + encoded
+    ).digest()
+
+
 SUPPLY_AMOUNT_FIELDS = (
     "max_supply", "genesis_supply", "cumulative_minted", "burned",
     "issued_total", "current_supply", "scheduled_to_date",

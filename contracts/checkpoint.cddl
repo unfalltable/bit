@@ -1,0 +1,62 @@
+; BIT weak-subjectivity checkpoint artifacts, version 1.
+; Implementations additionally require shortest-form deterministic CBOR,
+; strict sorting/uniqueness, Ed25519 key validity, bounded collections, and
+; the semantic checks documented in BIT D-010.
+
+hash32 = bytes .size 32
+signature64 = bytes .size 64
+signature-entry = [signer-pubkey: hash32, signature: signature64]
+
+checkpoint-policy-v1 = [
+  "BIT-CHECKPOINT-POLICY",
+  1,
+  genesis-manifest-hash: hash32,
+  chain-context: hash32,
+  consensus-parameters-sha256: hash32,
+  sequence: uint,
+  previous-policy-hash: nil / hash32,
+  activates-at-seconds: uint,
+  trust-period-seconds: uint,
+  expiry-warning-seconds: uint,
+  publisher-threshold: uint,
+  publishers: [* hash32],
+  revoke-previous-immediately: bool,
+]
+
+checkpoint-policy-approvals-v1 = [
+  "BIT-CHECKPOINT-POLICY-APPROVALS",
+  1,
+  genesis-manifest-hash: hash32,
+  checkpoint-policy-hash: hash32,
+  approvals: [* signature-entry],
+]
+
+checkpoint-v1 = [
+  "BIT-CHECKPOINT",
+  1,
+  checkpoint-policy-hash: hash32,
+  genesis-manifest-hash: hash32,
+  chain-context: hash32,
+  header-height: uint,
+  header-hash: hash32,
+  state-height: uint,
+  app-hash: hash32,
+  issued-at-seconds: uint,
+  expires-at-seconds: uint,
+]
+
+signed-checkpoint-v1 = [
+  "BIT-SIGNED-CHECKPOINT",
+  1,
+  checkpoint-cbor: bytes,
+  publisher-signatures: [* signature-entry],
+]
+
+; policy-hash = SHA-256(
+;   "BIT-CHECKPOINT-POLICY-HASH-V1" || uint64_be(len(policy-cbor)) || policy-cbor)
+; checkpoint-hash = SHA-256(
+;   "BIT-CHECKPOINT-HASH-V1" || uint64_be(len(checkpoint-cbor)) || checkpoint-cbor)
+; genesis authorities sign:
+;   "BIT-CHECKPOINT-POLICY-APPROVAL-V1" || genesis-manifest-hash || policy-hash
+; publishers sign:
+;   "BIT-CHECKPOINT-PUBLISHER-SIGNATURE-V1" || policy-hash || checkpoint-hash
